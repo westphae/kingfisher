@@ -59,6 +59,9 @@ type Config struct {
 	DBDir        string            `json:"db_dir"`
 	GPSDAddr     string            `json:"gpsd_addr"`
 	HTTPAddr     string            `json:"http_addr"`
+	// PodUDPAddr is the UDP address kingfisher binds to for wing-pod
+	// telemetry. Empty string disables the pod ingest path entirely.
+	PodUDPAddr string `json:"pod_udp_addr,omitempty"`
 	GPSFields    []string          `json:"gps_fields,omitempty"`
 	Devices      map[string]Device `json:"devices,omitempty"`
 	GPS          GPS               `json:"gps"`
@@ -73,6 +76,7 @@ func Defaults() *Config {
 		DBDir:        DefaultDBDir(),
 		GPSDAddr:     "localhost:2947",
 		HTTPAddr:     ":8080",
+		PodUDPAddr:   ":47808",
 		GPSFields:    []string{"lat", "lon", "alt_msl", "alt_hae", "gs", "track", "vs", "h_acc", "fix", "sats"},
 		Devices:      map[string]Device{},
 		GPS:          GPS{RateHz: 5},
