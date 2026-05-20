@@ -1,0 +1,191 @@
+package config
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+)
+
+// DefaultPath resolves to $XDG_CONFIG_HOME/kingfisher/config.json (typically
+// $HOME/.config/kingfisher/config.json on Linux). Falls back to a relative
+// path under the cwd if the home directory cannot be determined.
+func DefaultPath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "kingfisher.json"
+	}
+	return filepath.Join(dir, "kingfisher", "config.json")
+}
+
+// DefaultDBDir resolves to $HOME/kingfisher/flights. We deliberately put the
+// flight DBs in a visible directory under $HOME (not $XDG_DATA_HOME) because
+// the pilot copies them off the Pi for post-flight analysis.
+func DefaultDBDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "flights"
+	}
+	return filepath.Join(home, "kingfisher", "flights")
+}
+
+type Channel struct {
+	Column string `json:"column,omitempty"`
+}
+
+type Device struct {
+	Enabled   bool               `json:"enabled"`
+	SampleHz  float64            `json:"sample_hz"`
+	UseBuffer bool               `json:"use_buffer,omitempty"`
+	Channels  map[string]Channel `json:"channels,omitempty"`
+	Attrs     map[string]string  `json:"attrs,omitempty"`
+}
+
+type GPS struct {
+	RateHz float64 `json:"rate_hz"`
+}
+
+type AHRS struct {
+	Enabled bool    `json:"enabled"`
+	RateHz  float64 `json:"rate_hz"`
+}
+
+type Config struct {
+	Aircraft     string            `json:"aircraft"`
+	AircraftName string            `json:"aircraft_name,omitempty"`
+	Notes        string            `json:"notes,omitempty"`
+	FlushSeconds int               `json:"flush_seconds"`
+	DBDir        string            `json:"db_dir"`
+	GPSDAddr     string            `json:"gpsd_addr"`
+	HTTPAddr     string            `json:"http_addr"`
+	GPSFields    []string          `json:"gps_fields,omitempty"`
+	Devices      map[string]Device `json:"devices,omitempty"`
+	GPS          GPS               `json:"gps"`
+	AHRS         AHRS              `json:"ahrs"`
+}
+
+func Defaults() *Config {
+	return &Config{
+		Aircraft:     "N12345",
+		AircraftName: "Bonanza V35B",
+		FlushSeconds: 5,
+		DBDir:        DefaultDBDir(),
+		GPSDAddr:     "localhost:2947",
+		HTTPAddr:     ":8080",
+		GPSFields:    []string{"lat", "lon", "alt_msl", "alt_hae", "gs", "track", "vs", "h_acc", "fix", "sats"},
+		Devices:      map[string]Device{},
+		GPS:          GPS{RateHz: 5},
+		AHRS:         AHRS{Enabled: true, RateHz: 20},
+	}
+}
+
+// DeviceOrDefault returns the configured Device entry for `name`, or a
+// default-enabled entry with the supplied default rate if absent.
+func (c *Config) DeviceOrDefault(name string, defaultHz float64) Device {
+	if d, ok := c.Devices[name]; ok {
+		return d
+	}
+	return Device{Enabled: true, SampleHz: defaultHz}
+}
+
+// Load reads JSON from path; if the file is missing, returns Defaults().
+func Load(path string) (*Config, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Defaults(), nil
+		}
+		return nil, fmt.Errorf("config read %s: %w", path, err)
+	}
+	c := Defaults()
+	if err := json.Unmarshal(b, c); err != nil {
+		return nil, fmt.Errorf("config parse %s: %w", path, err)
+	}
+	if c.Devices == nil {
+		c.Devices = map[string]Device{}
+	}
+	return c, nil
+}
+
+// Save atomically writes JSON to path.
+func Save(path string, c *Config) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// Holder is a thread-safe wrapper around the current config plus a one-shot
+// reload-signal channel that subscribers can re-read after a config update.
+// The IIO device-name list is held here too so the web layer can list real
+// hardware (vs. derived virtual devices like "ahrs" or "press_alt") without
+// re-running discovery.
+type Holder struct {
+	mu        sync.RWMutex
+	cfg       *Config
+	path      string
+	reloads   []chan struct{}
+	iioNames  []string
+}
+
+func NewHolder(path string, c *Config) *Holder {
+	return &Holder{cfg: c, path: path}
+}
+
+func (h *Holder) Path() string { return h.path }
+
+func (h *Holder) Get() *Config {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.cfg
+}
+
+// Set replaces the live config and signals all subscribers. It does not write
+// to disk; callers should Save separately when persistence is desired.
+func (h *Holder) Set(c *Config) {
+	h.mu.Lock()
+	subs := h.reloads
+	h.cfg = c
+	h.mu.Unlock()
+	for _, ch := range subs {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// Subscribe returns a channel that receives a struct{} every time Set is
+// called. The channel has a buffer of 1, so missed signals coalesce.
+func (h *Holder) Subscribe() <-chan struct{} {
+	ch := make(chan struct{}, 1)
+	h.mu.Lock()
+	h.reloads = append(h.reloads, ch)
+	h.mu.Unlock()
+	return ch
+}
+
+// SetIIODeviceNames records the list of discovered IIO device names so the
+// web layer can build a per-device UI without re-walking sysfs. The list is
+// kept in discovery order.
+func (h *Holder) SetIIODeviceNames(names []string) {
+	h.mu.Lock()
+	h.iioNames = append([]string(nil), names...)
+	h.mu.Unlock()
+}
+
+// IIODeviceNames returns the registered IIO device names.
+func (h *Holder) IIODeviceNames() []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return append([]string(nil), h.iioNames...)
+}
