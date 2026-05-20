@@ -17,6 +17,7 @@ import (
 	"github.com/westphae/kingfisher/internal/derive"
 	"github.com/westphae/kingfisher/internal/gps"
 	"github.com/westphae/kingfisher/internal/live"
+	"github.com/westphae/kingfisher/internal/pod"
 	"github.com/westphae/kingfisher/internal/sensors"
 	"github.com/westphae/kingfisher/internal/store"
 	"github.com/westphae/kingfisher/internal/web"
@@ -62,6 +63,17 @@ func main() {
 
 	gpsClient := gps.New(cfg.GPSDAddr, hub, buf)
 
+	var podClient *pod.Client
+	if cfg.PodUDPAddr != "" {
+		t, err := pod.ListenUDP(cfg.PodUDPAddr)
+		if err != nil {
+			log.Printf("pod: %v (continuing without pod)", err)
+		} else {
+			podClient = pod.New(cfg.PodUDPAddr, t, hub, buf, registry)
+			log.Printf("pod: listening on %s", cfg.PodUDPAddr)
+		}
+	}
+
 	srv, err := web.New(holder, hub, st, buf, gpsClient, registry)
 	if err != nil {
 		log.Fatalf("web: %v", err)
@@ -85,6 +97,10 @@ func main() {
 	go func() { defer wg.Done(); buf.Run(stop) }()
 	wg.Add(1)
 	go func() { defer wg.Done(); gpsClient.Run(stop) }()
+	if podClient != nil {
+		wg.Add(1)
+		go func() { defer wg.Done(); podClient.Run(stop) }()
+	}
 	wg.Add(1)
 	go func() { defer wg.Done(); derive.AltitudeFromHub(ctx, hub, buf) }()
 	wg.Add(1)
