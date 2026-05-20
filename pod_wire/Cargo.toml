@@ -1,0 +1,23 @@
+[package]
+name = "pod_wire"
+version = "0.1.0"
+edition = "2021"
+description = "Shared wire format for the kingfisher wing pod"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "pod_wire"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", default-features = false, features = ["derive"] }
+postcard = { version = "1", default-features = false }
+heapless = { version = "0.8", features = ["serde"] }
+crc32fast = { version = "1.4", default-features = false }
+
+[dev-dependencies]
+hex = "0.4"
+
+[[example]]
+name = "pod_wire_dump"
+path = "examples/pod_wire_dump.rs"
