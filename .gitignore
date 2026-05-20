@@ -1,0 +1,13 @@
+# Local working files — kept out of the repo.
+datasheets/
+
+# Build artefacts.
+/kingfisher
+/podprobe
+target/
+*.test
+
+# Editor / OS.
+*.swp
+.DS_Store
+.idea/
