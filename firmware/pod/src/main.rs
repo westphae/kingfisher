@@ -25,7 +25,8 @@ use esp_hal::{
 };
 use esp_println::println;
 use esp_radio::wifi::{
-    sta::StationConfig, Config, ControllerConfig, Interface, WifiController,
+    sta::StationConfig, AuthenticationMethod, Config, ControllerConfig, Interface,
+    WifiController,
 };
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -51,11 +52,18 @@ async fn main(spawner: Spawner) -> ! {
     let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
 
-    let station = Config::Station(
+    // Pi AP is open (wifi_password ""). StationConfig defaults to WPA2, which
+    // yields NoAccessPointFoundInAuthmodeThreshold against an open beacon.
+    let station_cfg = if cfg::PASSWORD.is_empty() {
         StationConfig::default()
             .with_ssid(cfg::SSID)
-            .with_password(cfg::PASSWORD.into()),
-    );
+            .with_auth_method(AuthenticationMethod::None)
+    } else {
+        StationConfig::default()
+            .with_ssid(cfg::SSID)
+            .with_password(cfg::PASSWORD.into())
+    };
+    let station = Config::Station(station_cfg);
 
     println!("pod: starting wifi (ssid={})", cfg::SSID);
     let (controller, interfaces) = esp_radio::wifi::new(
