@@ -4,10 +4,9 @@ Rust no_std firmware for the wing-pod `ESP32-C3-Mini-1` (variant
 `ESP32-C3FH4`). The pod associates to the cabin Pi's WiFi AP and
 transmits postcard-encoded `Frame`s (defined in `pod_wire/`) over UDP.
 
-**Status: Phase 3a — BMP581 static pressure on I²C.** Mag (MMC5983MA)
-and airspeed (MS4525DO) are next. Firmware polls the BMP581 at 10 Hz
-and uplinks real `static_p` / `static_temp` readings; other channels
-are absent until those sensors are enabled.
+**Status: Phase 3b — BMP581 static + MMC5983MA magnetometer on I²C.**
+Firmware polls both at 10 Hz and uplinks `static_p` / `static_temp` and
+`mag_x` / `mag_y` / `mag_z`. Airspeed (MS4525DO) is Phase 3c.
 
 ## Bill of materials
 
@@ -49,7 +48,7 @@ Planned wing pod PCB may move the bus to **IO4/IO5**; update `main.rs` when that
 | `IO18`/`IO19`| USB D-/+| USB-C connector for flashing          |
 | `EN`         | `EN`    | 10 kΩ pull-up to 3V3, optional button |
 
-**Pull-ups:** Pro Micro and SparkFun BMP581 Qwiic each enable 2.2 kΩ on SDA/SCL. With one sensor on the Qwiic cable that is usually fine; if the bus acts up, cut the **I2C** jumper on one board (see both hookup guides).
+**Pull-ups:** Pro Micro, BMP581, and MMC5983 Qwiic boards each enable 2.2 kΩ on SDA/SCL. Daisy-chain all three on one cable; if the bus NACKs, cut the **I2C** jumper on **one** board (SparkFun guidance). Bench order: Pro Micro → BMP581 (0x47) → [MMC5983MA Qwiic](https://www.sparkfun.com/products/19921) (0x30).
 
 The native USB peripheral on `IO18`/`IO19` lets `espflash` talk
 directly to the chip — no external USB-UART bridge needed. A single
@@ -137,19 +136,19 @@ Cross-machine builds: `KINGFISHER_CONFIG=/path/to/config.json cargo build --rele
 ## Verification
 
 Pre-condition: Pi WiFi AP running; `~/.config/kingfisher/config.json`
-`pod` block matches the AP; BMP581 on Qwiic (Pro Micro **IO5/IO6**) or PTH at 3.3 V.
+`pod` block matches the AP; BMP581 + MMC5983 on Qwiic (Pro Micro **IO5/IO6**).
 
 1. **Flash**: `cargo build --release` then
    `espflash flash --monitor target/.../release/pod`. Monitor should show:
-   - `pod: i2c scan: 0x46` (or `0x47` depending on SDO strap)
-   - `pod: bmp581 found …` / `bmp581 init ok`
+   - `pod: i2c scan: 0x47(id=0x50) … 0x30(id=0x30)` (addresses may vary for BMP581 SDO)
+   - `pod: bmp581 init ok` / `pod: mmc5983 init ok` / `sensor board ready …`
    - WiFi + `sent Hello` + `uplink ok, … pkts`
 2. **Kingfisher**: `go run ./cmd/kingfisher` — `pod` device shows
-   `static_p` (~85–105 kPa) and `static_temp` (not sinusoids).
-3. **BMP581 bench**: values track ambient pressure; optional breath
-   near the sensor port for a small `static_p` blip.
+   `static_p`, `static_temp`, `mag_x`, `mag_y`, `mag_z` at ~10 Hz.
+3. **Mag bench**: rotate the board; components change; |B| is roughly
+   25–65 µT depending on location/inclination (not sinusoids).
 
-Next: MMC5983MA (mag), then MS4525DO (airspeed).
+Next: MS4525DO (airspeed).
 
 ## Troubleshooting
 

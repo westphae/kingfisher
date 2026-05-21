@@ -5,23 +5,29 @@ use esp_println::{print, println};
 
 pub type Bus = I2c<'static, esp_hal::Blocking>;
 
-/// Log responding 7-bit addresses (register read at BMP581 addresses, then
-/// full-range write probe for anything else).
+fn probe_reg(bus: &mut Bus, addr: u8, reg: u8, seen: &mut [bool; 128]) -> u8 {
+    let mut buf = [0u8];
+    match bus.write_read(addr, &[reg], &mut buf) {
+        Ok(()) => {
+            print!(" 0x{addr:02x}(id=0x{:02x})", buf[0]);
+            seen[addr as usize] = true;
+            1
+        }
+        Err(e) => {
+            print!(" 0x{addr:02x}(err={e:?})");
+            0
+        }
+    }
+}
+
+/// Log responding 7-bit addresses (targeted register reads, then full-range write probe).
 pub fn scan(bus: &mut Bus) {
     print!("pod: i2c scan:");
     let mut found = 0u8;
     let mut seen = [false; 128];
-    for addr in [0x47u8, 0x46] {
-        let mut buf = [0u8];
-        match bus.write_read(addr, &[0x01], &mut buf) {
-            Ok(()) => {
-                print!(" 0x{addr:02x}(id=0x{:02x})", buf[0]);
-                seen[addr as usize] = true;
-                found += 1;
-            }
-            Err(e) => print!(" 0x{addr:02x}(err={e:?})"),
-        }
-    }
+    found += probe_reg(bus, 0x47, 0x01, &mut seen);
+    found += probe_reg(bus, 0x46, 0x01, &mut seen);
+    found += probe_reg(bus, 0x30, 0x2f, &mut seen);
     for addr in 0x08u8..=0x77 {
         if seen[addr as usize] {
             continue;

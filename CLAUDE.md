@@ -17,7 +17,7 @@ The Pi this repo lives on is also the *deployment target*. Tests can hit real sy
 - `internal/pod/` — wing-pod ingest over UDP. Mirrors the `gps` shape but adds a `podReader` registered with `sensors.Registry` so the existing attr UI works. Data path bypasses `sensors.runOne` — Reader is a façade for the UI only.
 - `internal/derive/{altitude,declination,ahrs}.go` — virtual devices computed from hub snapshots. Each reads `hub.SnapshotNow()` and republishes a synthesized sample.
 - `pod_wire/` — shared Rust no_std crate defining the pod ↔ Pi wire format (`postcard` + CRC32 framing). The Go side mirrors it in `internal/pod/wire/`.
-- `firmware/pod/` — ESP32-C3 firmware (Phase 3a: BMP581 static on I²C; mag/airspeed pending).
+- `firmware/pod/` — ESP32-C3 firmware (Phase 3b: BMP581 + MMC5983MA on I²C; airspeed pending).
 - `datasheets/` — gitignored local working files. Don't expect them in CI.
 
 ## go.mod has local replace directives
