@@ -1,14 +1,14 @@
 //! Compile-time pod configuration.
 //!
-//! SSID, password, and Pi UDP target come from build-time env vars (see
-//! `.cargo/config.toml` or `SSID=… PASSWORD=… PI_ADDR=… cargo build`).
-//! v2 will move all of this to NVS with a provisioning flow.
+//! SSID, password, and Pi UDP target are injected at build time by
+//! `build.rs` from `~/.config/kingfisher/config.json` (see `pod` section).
+//! Override the config path with `KINGFISHER_CONFIG`. v2 will use NVS.
 
 pub const SSID: &str = env!("SSID");
 pub const PASSWORD: &str = env!("PASSWORD");
 
-/// Pi-side UDP listen address (`host:port`). Must match kingfisher's
-/// `pod_udp_addr` (host part = AP gateway, port usually `47808`).
+/// Pi-side UDP listen address (`host:port`). Must match `pod.udp_addr` in
+/// kingfisher config (AP gateway + listen port, usually `47808`).
 pub const PI_ADDR: &str = env!("PI_ADDR");
 
 const PI_EP: ([u8; 4], u16) = parse_pi_addr(PI_ADDR.as_bytes());

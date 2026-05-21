@@ -64,13 +64,14 @@ func main() {
 	gpsClient := gps.New(cfg.GPSDAddr, hub, buf)
 
 	var podClient *pod.Client
-	if cfg.PodUDPAddr != "" {
-		t, err := pod.ListenUDP(cfg.PodUDPAddr)
+	podAddr := cfg.PodListenAddr()
+	if podAddr != "" {
+		t, err := pod.ListenUDP(podAddr)
 		if err != nil {
 			log.Printf("pod: %v (continuing without pod)", err)
 		} else {
-			podClient = pod.New(cfg.PodUDPAddr, t, hub, buf, registry)
-			log.Printf("pod: listening on %s", cfg.PodUDPAddr)
+			podClient = pod.New(podAddr, t, hub, buf, registry)
+			log.Printf("pod: listening on %s", podAddr)
 		}
 	}
 

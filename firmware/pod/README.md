@@ -117,18 +117,22 @@ log lines from the running firmware over the same USB connection.
 
 ### Pre-shared configuration
 
-Until provisioning lands (v2), SSID, password, and Pi UDP target are
-build-time env vars. Defaults live in `.cargo/config.toml`; override on
-the command line when needed:
+Until provisioning lands (v2), pod WiFi and UDP settings live in the
+same kingfisher JSON config as the Pi runtime (`~/.config/kingfisher/config.json`).
+See [`config.example.json`](../../config.example.json) for the `pod` block shape.
 
-```bash
-SSID=kingfisher PASSWORD= PI_ADDR=192.168.10.1:47808 cargo build --release
+```json
+"pod": {
+  "wifi_ssid": "kingfisher",
+  "wifi_password": "",
+  "udp_addr": "192.168.10.1:47808"
+}
 ```
 
-`PI_ADDR` must be the AP gateway (`ipv4.addresses` on the Pi AP
-connection) and the port kingfisher listens on (`pod_udp_addr`, default
-`:47808`). `src/cfg.rs` reads all three via `env!` and parses
-`PI_ADDR` into `PI_IP` / `PI_PORT` at compile time.
+`pod.udp_addr` must be the AP gateway (`ipv4.addresses` on the Pi AP
+connection) and the port kingfisher listens on. `build.rs` reads the
+file at compile time and injects values into `src/cfg.rs` via `env!`.
+Cross-machine builds: `KINGFISHER_CONFIG=/path/to/config.json cargo build --release`.
 
 ## Verification (Phase 1)
 
@@ -144,7 +148,8 @@ match what the firmware was built with.
    - `pod: sent Hello -> <PI_ADDR from your build>`
    - periodic `pod: uplink ok, 50 pkts in last 5s`
 2. **Listen** on the Pi: stop any running `kingfisher`, then
-   `go run ./cmd/podprobe`. Expect Hello once, then ≥ 9 SampleBatch
+   `go run ./cmd/podprobe` (reads `pod.udp_addr` from the same config).
+   Expect Hello once, then ≥ 9 SampleBatch
    packets per second with `gap=0` after the first packet.
 3. **10-minute soak**: packet loss < 0.5 %, inter-arrival p99 < 200 ms.
 

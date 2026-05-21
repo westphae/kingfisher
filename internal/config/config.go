@@ -51,21 +51,32 @@ type AHRS struct {
 	RateHz  float64 `json:"rate_hz"`
 }
 
+// Pod holds wing-pod WiFi credentials and the Pi UDP endpoint the pod
+// sends to (also where kingfisher/podprobe listen). Firmware build reads
+// the same fields from config.json via build.rs.
+type Pod struct {
+	WiFiSSID     string `json:"wifi_ssid,omitempty"`
+	WiFiPassword string `json:"wifi_password,omitempty"`
+	UDPAddr      string `json:"udp_addr,omitempty"` // host:port, e.g. 192.168.10.1:47808
+}
+
+const defaultPodUDPAddr = "192.168.10.1:47808"
+
 type Config struct {
-	Aircraft     string            `json:"aircraft"`
-	AircraftName string            `json:"aircraft_name,omitempty"`
-	Notes        string            `json:"notes,omitempty"`
-	FlushSeconds int               `json:"flush_seconds"`
-	DBDir        string            `json:"db_dir"`
-	GPSDAddr     string            `json:"gpsd_addr"`
-	HTTPAddr     string            `json:"http_addr"`
-	// PodUDPAddr is the UDP address kingfisher binds to for wing-pod
-	// telemetry. Empty string disables the pod ingest path entirely.
-	PodUDPAddr string `json:"pod_udp_addr,omitempty"`
-	GPSFields    []string          `json:"gps_fields,omitempty"`
-	Devices      map[string]Device `json:"devices,omitempty"`
-	GPS          GPS               `json:"gps"`
-	AHRS         AHRS              `json:"ahrs"`
+	Aircraft     string `json:"aircraft"`
+	AircraftName string `json:"aircraft_name,omitempty"`
+	Notes        string `json:"notes,omitempty"`
+	FlushSeconds int    `json:"flush_seconds"`
+	DBDir        string `json:"db_dir"`
+	GPSDAddr     string `json:"gpsd_addr"`
+	HTTPAddr     string `json:"http_addr"`
+	Pod          Pod    `json:"pod,omitempty"`
+	// PodUDPAddr is deprecated; use pod.udp_addr. Kept for migration.
+	PodUDPAddr string            `json:"pod_udp_addr,omitempty"`
+	GPSFields  []string          `json:"gps_fields,omitempty"`
+	Devices    map[string]Device `json:"devices,omitempty"`
+	GPS        GPS               `json:"gps"`
+	AHRS       AHRS              `json:"ahrs"`
 }
 
 func Defaults() *Config {
@@ -76,11 +87,14 @@ func Defaults() *Config {
 		DBDir:        DefaultDBDir(),
 		GPSDAddr:     "localhost:2947",
 		HTTPAddr:     ":8080",
-		PodUDPAddr:   ":47808",
-		GPSFields:    []string{"lat", "lon", "alt_msl", "alt_hae", "gs", "track", "vs", "h_acc", "fix", "sats"},
-		Devices:      map[string]Device{},
-		GPS:          GPS{RateHz: 5},
-		AHRS:         AHRS{Enabled: true, RateHz: 20},
+		Pod: Pod{
+			WiFiSSID:     "kingfisher",
+			WiFiPassword: "",
+		},
+		GPSFields: []string{"lat", "lon", "alt_msl", "alt_hae", "gs", "track", "vs", "h_acc", "fix", "sats"},
+		Devices:   map[string]Device{},
+		GPS:       GPS{RateHz: 5},
+		AHRS:      AHRS{Enabled: true, RateHz: 20},
 	}
 }
 
@@ -91,6 +105,25 @@ func (c *Config) DeviceOrDefault(name string, defaultHz float64) Device {
 		return d
 	}
 	return Device{Enabled: true, SampleHz: defaultHz}
+}
+
+// PodListenAddr returns the UDP bind/send address for wing-pod telemetry.
+// Empty string disables pod ingest (kingfisher) or listening (podprobe).
+// Precedence: pod.udp_addr, legacy pod_udp_addr, defaultPodUDPAddr.
+func (c *Config) PodListenAddr() string {
+	if c.Pod.UDPAddr != "" {
+		return c.Pod.UDPAddr
+	}
+	if c.PodUDPAddr != "" {
+		return c.PodUDPAddr
+	}
+	return defaultPodUDPAddr
+}
+
+func migratePod(c *Config) {
+	if c.Pod.UDPAddr == "" && c.PodUDPAddr != "" {
+		c.Pod.UDPAddr = c.PodUDPAddr
+	}
 }
 
 // Load reads JSON from path; if the file is missing, returns Defaults().
@@ -109,6 +142,7 @@ func Load(path string) (*Config, error) {
 	if c.Devices == nil {
 		c.Devices = map[string]Device{}
 	}
+	migratePod(c)
 	return c, nil
 }
 
@@ -134,11 +168,11 @@ func Save(path string, c *Config) error {
 // hardware (vs. derived virtual devices like "ahrs" or "press_alt") without
 // re-running discovery.
 type Holder struct {
-	mu        sync.RWMutex
-	cfg       *Config
-	path      string
-	reloads   []chan struct{}
-	iioNames  []string
+	mu       sync.RWMutex
+	cfg      *Config
+	path     string
+	reloads  []chan struct{}
+	iioNames []string
 }
 
 func NewHolder(path string, c *Config) *Holder {

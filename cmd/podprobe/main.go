@@ -22,17 +22,28 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/pod/wire"
 )
 
 func main() {
-	addr := flag.String("addr", ":47808", "UDP address to listen on")
+	cfgPath := flag.String("config", config.DefaultPath(), "path to kingfisher JSON config")
+	addr := flag.String("addr", "", "UDP listen address (overrides config pod.udp_addr)")
 	quiet := flag.Bool("quiet", false, "suppress per-packet output; only print stats")
 	flag.Parse()
 
-	pc, err := net.ListenPacket("udp", *addr)
+	listenAddr := *addr
+	if listenAddr == "" {
+		cfg, err := config.Load(*cfgPath)
+		if err != nil {
+			log.Fatalf("config: %v", err)
+		}
+		listenAddr = cfg.PodListenAddr()
+	}
+
+	pc, err := net.ListenPacket("udp", listenAddr)
 	if err != nil {
-		log.Fatalf("listen %s: %v", *addr, err)
+		log.Fatalf("listen %s: %v", listenAddr, err)
 	}
 	defer pc.Close()
 	log.Printf("podprobe: listening on %s", pc.LocalAddr())
@@ -92,10 +103,10 @@ func main() {
 // --- stats ---------------------------------------------------------------
 
 type peerState struct {
-	lastSeq        uint32
-	lastSeqValid   bool
-	lastRecv       time.Time
-	lost           uint64
+	lastSeq      uint32
+	lastSeqValid bool
+	lastRecv     time.Time
+	lost         uint64
 }
 
 type stats struct {

@@ -10,8 +10,3 @@ rustflags = [
 
 [env]
 ESP_LOG = "info"
-# Override on the command line, or edit [env] here (read by src/cfg.rs via env!).
-#   SSID=kingfisher PASSWORD= PI_ADDR=192.168.10.1:47808 cargo build --release
-SSID = "kingfisher"
-PASSWORD = ""
-PI_ADDR = "192.168.10.1:47808"

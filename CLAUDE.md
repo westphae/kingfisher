@@ -44,6 +44,9 @@ source ~/.cargo/env
 cd pod_wire && cargo test                                    # unit tests
 cargo run --example pod_wire_dump > ../internal/pod/wire/testdata/fixtures.txt
                                                              # regenerate cross-language fixtures
+
+# Pod firmware (reads ~/.config/kingfisher/config.json pod section at build time)
+cd firmware/pod && cargo build --release
 ```
 
 After any change to types in `pod_wire/src/lib.rs`, regenerate `fixtures.txt` and re-run `go test ./internal/pod/wire/`. The Go test loads those fixtures and decodes them — if they diverge, the wire contract is broken.
