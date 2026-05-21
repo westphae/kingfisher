@@ -1,0 +1,44 @@
+[package]
+name = "pod"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Kingfisher wing-pod firmware (ESP32-C3)"
+
+[dependencies]
+# embassy async runtime + network stack
+embassy-executor = "0.10"
+embassy-net = { version = "0.9", default-features = false, features = [
+    "dhcpv4",
+    "medium-ethernet",
+    "proto-ipv4",
+    "udp",
+] }
+embassy-time = "0.5"
+
+# esp toolchain
+esp-alloc = "0.10"
+esp-backtrace = { version = "0.19", features = ["esp32c3", "panic-handler", "println"] }
+esp-bootloader-esp-idf = { version = "0.5", features = ["esp32c3"] }
+esp-hal = { version = "1.1", features = ["esp32c3", "unstable"] }
+esp-println = { version = "0.17", default-features = false, features = ["esp32c3", "jtag-serial", "log-04"] }
+esp-radio = { version = "0.18", features = ["esp32c3", "wifi"] }
+esp-rtos = { version = "0.3", features = ["esp32c3", "esp-radio", "embassy"] }
+
+static_cell = "2"
+log = "0.4"
+libm = "0.2"
+heapless = "0.8"
+
+# shared wire format with the Pi (Go decoder + Rust no_std encoder)
+pod_wire = { path = "../../pod_wire" }
+
+[profile.release]
+debug            = true
+debug-assertions = false
+opt-level        = 3
+lto              = "fat"
+codegen-units    = 1
+
+[profile.dev]
+opt-level = 2

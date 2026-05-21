@@ -1,0 +1,17 @@
+[build]
+target = "riscv32imc-unknown-none-elf"
+
+[target.'cfg(target_arch = "riscv32")']
+runner    = "espflash flash --monitor"
+rustflags = [
+    "-C", "link-arg=-Tlinkall.x",
+    "-C", "force-frame-pointers",
+]
+
+[env]
+ESP_LOG = "info"
+# Override these at build time:
+#   SSID=kingfisher-ap PASSWORD=change-me PI_ADDR=192.168.4.1:47808 cargo build --release
+SSID = "kingfisher"
+PASSWORD = ""
+PI_ADDR = "192.168.10.1:47808"
