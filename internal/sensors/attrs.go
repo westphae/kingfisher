@@ -1,6 +1,7 @@
 package sensors
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/westphae/kingfisher/internal/store"
@@ -80,10 +81,9 @@ func AttrOptions(r Reader, channel, attr string) []string {
 	if raw == "" {
 		return nil
 	}
-	// Range form "[low step high]" is not enumerable; return nil so the UI
-	// falls back to a free-text input.
+	// Range form "[low step high]" — common on pod caps and some IIO drivers.
 	if strings.HasPrefix(raw, "[") {
-		return nil
+		return optionsFromBracketRange(raw)
 	}
 	fields := strings.Fields(raw)
 	out := make([]string, 0, len(fields))
@@ -94,6 +94,45 @@ func AttrOptions(r Reader, channel, attr string) []string {
 		}
 	}
 	return out
+}
+
+// optionsFromBracketRange parses "[min step max]" (e.g. pod sampling_frequency_available)
+// into a small dropdown list.
+func optionsFromBracketRange(raw string) []string {
+	inner := strings.Trim(raw, "[]")
+	parts := strings.Fields(inner)
+	if len(parts) != 3 {
+		return nil
+	}
+	min, err1 := strconv.ParseFloat(parts[0], 64)
+	step, err2 := strconv.ParseFloat(parts[1], 64)
+	max, err3 := strconv.ParseFloat(parts[2], 64)
+	if err1 != nil || err2 != nil || err3 != nil || step <= 0 || max < min {
+		return nil
+	}
+	span := max - min
+	if span/step > 30 {
+		// Wide range (e.g. pod mag 1–200 Hz): use sensible presets, not every integer.
+		presets := []float64{1, 2, 5, 10, 20, 25, 50, 100, 200}
+		var out []string
+		for _, v := range presets {
+			if v >= min-1e-9 && v <= max+1e-9 {
+				out = append(out, strconv.FormatFloat(v, 'f', -1, 64))
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	const limit = 24
+	var out []string
+	for v := min; v <= max+1e-9 && len(out) < limit; v += step {
+		out = append(out, strconv.FormatFloat(v, 'f', -1, 64))
+	}
+	if len(out) > 0 {
+		return out
+	}
+	return nil
 }
 
 // DiffAttrs returns the subset of `curr` whose values differ from `prev`

@@ -7,7 +7,7 @@ const state = {
   activeTab: null,
   tabs: new Set(),
   attrs: new Map(),            // name -> [{channel, attr, value, writable}]
-  iioDevices: new Set(),       // names of real IIO devices (have settings)
+  iioDevices: new Set(),       // names from /api/devices (config sample_hz UI)
 };
 
 const tabsEl = document.getElementById('tabs');
@@ -31,7 +31,7 @@ function selectTab(name) {
   for (const b of tabsEl.querySelectorAll('button')) {
     b.classList.toggle('active', b.dataset.tab === name);
   }
-  if (state.iioDevices.has(name) && !state.attrs.has(name)) {
+  if (!state.attrs.has(name)) {
     loadAttrs(name);
   }
   renderActiveTab();
@@ -65,7 +65,7 @@ function renderLiveValues() {
 
 function renderAttrs() {
   const name = state.activeTab;
-  if (!name || !state.iioDevices.has(name)) {
+  if (!name) {
     panelRegions.attrs.innerHTML = '';
     return;
   }
@@ -187,6 +187,9 @@ function connect() {
     for (const [name, sample] of Object.entries(snap.devices)) {
       state.devices.set(name, sample);
       ensureTab(name);
+      if (state.activeTab === name && !state.attrs.has(name)) {
+        loadAttrs(name);
+      }
     }
     renderLiveValues();
   };

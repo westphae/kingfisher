@@ -224,7 +224,7 @@ func applyConfiguredAttrs(r Reader, dev config.Device) error {
 		// channel/attr split: "<channel>_<attr>" — the IIO sysfs name is
 		// already the full "in_<ch>_<attr>" form; pass through as-is by
 		// finding the channel name embedded in the key.
-		ch, attr := splitIIOAttr(k)
+		ch, attr := SplitIIOAttr(k)
 		if err := r.SetChannelAttr(ch, attr, v); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("setattr %s=%s: %w", k, v, err)
 		}
@@ -235,10 +235,10 @@ func applyConfiguredAttrs(r Reader, dev config.Device) error {
 	return firstErr
 }
 
-// splitIIOAttr turns "in_anglvel_filter_low_pass_3db_frequency" into
+// SplitIIOAttr turns "in_anglvel_filter_low_pass_3db_frequency" into
 // (channel="anglvel", attr="filter_low_pass_3db_frequency"). Keys that
 // don't start with "in_" are treated as device-level attrs (channel="").
-func splitIIOAttr(full string) (channel, attr string) {
+func SplitIIOAttr(full string) (channel, attr string) {
 	if !strings.HasPrefix(full, "in_") {
 		return "", full
 	}

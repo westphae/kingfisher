@@ -145,6 +145,17 @@ func (rg *Registry) WriteAttr(device, channel, attr, value string) error {
 		_ = e.reader.ReloadScale()
 	}
 	// Refresh the cached snapshot so the UI sees the new value immediately.
-	rg.Update(device, SnapshotAttrs(e.reader))
+	rg.Update(device, attrRecordsFor(e.reader))
 	return nil
+}
+
+// attrRecordsFor uses SettingsAttrRecords when implemented (pod device).
+func attrRecordsFor(r Reader) []store.AttrRecord {
+	type snapshotter interface {
+		SettingsAttrRecords() []store.AttrRecord
+	}
+	if s, ok := r.(snapshotter); ok {
+		return s.SettingsAttrRecords()
+	}
+	return SnapshotAttrs(r)
 }
