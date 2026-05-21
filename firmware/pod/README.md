@@ -1,12 +1,14 @@
 # Pod firmware
 
-This directory will hold the Rust no_std firmware for the wing-pod
-`ESP32-C3-Mini-1` (variant `ESP32-C3FH4`). The pod reads three I²C
-sensors and transmits batched readings to the cabin Pi over WiFi UDP.
+Rust no_std firmware for the wing-pod `ESP32-C3-Mini-1` (variant
+`ESP32-C3FH4`). The pod associates to the cabin Pi's WiFi AP and
+transmits postcard-encoded `Frame`s (defined in `pod_wire/`) over UDP.
 
-The source tree is added in Phase 3 of the rollout (see the plan in
-`/home/eric/.claude/plans/`). This README describes the hardware build
-and the toolchain so the firmware drop-in is fast when the time comes.
+**Status: Phase 1 — hardcoded fake data.** Sensors land in Phase 3.
+Current firmware does no I²C and sends a slowly-varying sinusoidal
+stream of `Airspeed` + `Static` + `Mag` readings at 10 Hz so the
+Pi-side ingest and cockpit UI can be exercised before real hardware
+exists.
 
 ## Bill of materials
 
@@ -115,30 +117,38 @@ log lines from the running firmware over the same USB connection.
 
 ### Pre-shared configuration
 
-Until proper provisioning is added (v2 of the plan), WiFi SSID / PSK
-and the Pi's IP:port are compile-time constants. Edit
-`firmware/pod/src/cfg.rs` (in Phase 3) before flashing:
+Until provisioning lands (v2), WiFi SSID / PSK come from build-time
+env vars and the Pi IP/port are compile-time constants in
+`src/cfg.rs`:
 
-```rust
-// Edit these for your aircraft.
-pub const WIFI_SSID: &str = "kingfisher-ap";
-pub const WIFI_PSK:  &str = "change-me";
-pub const PI_ADDR:   &str = "192.168.4.1:47808";   // matches Pi's pod_udp_addr
+```bash
+SSID=kingfisher-ap PASSWORD=change-me cargo build --release
 ```
 
-The Pi side defaults to listening on `:47808` (configurable via
-`pod_udp_addr` in `~/.config/kingfisher/config.json`).
+The Pi IP/port live in `src/cfg.rs` (`PI_IP`, `PI_PORT`) — edit and
+rebuild if they change. Defaults are `192.168.4.1:47808` to match
+kingfisher's `pod_udp_addr` default.
 
-## Verification
+## Verification (Phase 1)
 
-1. **Flash a blink-only build first.** Confirms the chip is alive and
-   USB flashing works end-to-end without any radio or I²C dependencies.
-2. **Hello over UDP**, no sensors. With the Pi's `kingfisher` running,
-   the pod should appear in the registry (`pod` device, three
-   sampling_frequency rows) within ~5 s of power-up.
-3. **One sensor at a time** (BMP581 → MMC5983MA → MS4525DO). Compare
-   readings against a reference (METAR for static, compass app for
-   mag, syringe + manometer for airspeed) before integrating the next.
+Pre-condition: the Pi's WiFi AP is already running and the SSID/PSK
+match what the firmware was built with.
+
+1. **Flash**: `cargo run --release` (or
+   `espflash flash --monitor target/.../release/pod`). Monitor output
+   should show:
+   - `pod: starting wifi (ssid=…)`
+   - `pod: wifi connected: …`
+   - `pod: got ip …`
+   - `pod: sent Hello -> 192.168.4.1:47808`
+   - periodic `pod: uplink ok, 50 pkts in last 5s`
+2. **Listen** on the Pi: stop any running `kingfisher`, then
+   `go run ./cmd/podprobe`. Expect Hello once, then ≥ 9 SampleBatch
+   packets per second with `gap=0` after the first packet.
+3. **10-minute soak**: packet loss < 0.5 %, inter-arrival p99 < 200 ms.
+
+Phase 3 will add sensor-by-sensor verification (BMP581 → MMC5983MA →
+MS4525DO) against bench references.
 
 ## Troubleshooting
 
