@@ -3,6 +3,7 @@ package pod
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 
 	"github.com/westphae/kingfisher/internal/pod/wire"
@@ -83,8 +84,7 @@ func (u *UDP) Recv(ctx context.Context) (wire.Frame, string, error) {
 		}
 		frame, derr := wire.Decode(buf[:n])
 		if derr != nil {
-			// Corrupted or unknown frame — log via the caller's path is
-			// awkward; just continue. Caller never sees garbage.
+			log.Printf("pod: decode from %s (%d bytes): %v", peer, n, derr)
 			continue
 		}
 		u.lastPeer = peer

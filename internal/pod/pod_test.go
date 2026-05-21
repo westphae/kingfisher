@@ -111,6 +111,21 @@ func TestSetSamplingFrequencyEnqueuesCmd(t *testing.T) {
 	}
 }
 
+func TestHelloPublishesToHub(t *testing.T) {
+	hub := live.NewHub()
+	c := New("", nil, hub, nil, nil)
+	c.dispatch(wire.Hello{
+		FwVersion:    0x0003_0000,
+		ProtoVersion: wire.ProtoVersion,
+		Caps: wire.Capabilities{Sensors: []wire.SensorCap{
+			{ID: wire.SensorStatic, MinHz: 1, MaxHz: 50, DefaultHz: 10},
+		}},
+	}, "192.168.10.94:4711")
+	if _, ok := hub.SnapshotNow().Devices[DeviceName]; !ok {
+		t.Fatal("hub missing pod after Hello")
+	}
+}
+
 func TestRegistrySnapshotAfterHello(t *testing.T) {
 	hub := live.NewHub()
 	reg := sensors.NewRegistry()

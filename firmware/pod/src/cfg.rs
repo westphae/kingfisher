@@ -19,10 +19,9 @@ pub const PI_IP: [u8; 4] = PI_EP.0;
 /// Parsed UDP port from [`PI_ADDR`].
 pub const PI_PORT: u16 = PI_EP.1;
 
-pub const FW_VERSION: u32 = 0x0001_0000;
+pub const FW_VERSION: u32 = 0x0003_0000;
 
-/// Phase 1 cadence — single 10 Hz tick covers every Reading. Per-sensor
-/// rates land in Phase 3 along with the real sensors.
+/// Sensor poll / uplink cadence (Hz). Mag 50 Hz is a later stretch goal.
 pub const TICK_MS: u64 = 100;
 
 /// Parse `a.b.c.d:port` at compile time (same source as `env!("PI_ADDR")`).

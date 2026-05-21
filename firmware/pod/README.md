@@ -4,11 +4,10 @@ Rust no_std firmware for the wing-pod `ESP32-C3-Mini-1` (variant
 `ESP32-C3FH4`). The pod associates to the cabin Pi's WiFi AP and
 transmits postcard-encoded `Frame`s (defined in `pod_wire/`) over UDP.
 
-**Status: Phase 1 — hardcoded fake data.** Sensors land in Phase 3.
-Current firmware does no I²C and sends a slowly-varying sinusoidal
-stream of `Airspeed` + `Static` + `Mag` readings at 10 Hz so the
-Pi-side ingest and cockpit UI can be exercised before real hardware
-exists.
+**Status: Phase 3a — BMP581 static pressure on I²C.** Mag (MMC5983MA)
+and airspeed (MS4525DO) are next. Firmware polls the BMP581 at 10 Hz
+and uplinks real `static_p` / `static_temp` readings; other channels
+are absent until those sensors are enabled.
 
 ## Bill of materials
 
@@ -37,8 +36,12 @@ has pull-ups; check before stacking.
 
 | ESP32-C3 pin | Net     | To                                    |
 | ------------ | ------- | ------------------------------------- |
-| `IO4`        | `SDA`   | MS4525DO, BMP581, MMC5983MA — SDA     |
-| `IO5`        | `SCL`   | MS4525DO, BMP581, MMC5983MA — SCL     |
+| `IO5`        | `SDA`   | Qwiic / MS4525DO, BMP581, MMC5983MA  |
+| `IO6`        | `SCL`   | Qwiic / MS4525DO, BMP581, MMC5983MA  |
+
+Desk bench with [SparkFun Pro Micro ESP32-C3](https://docs.sparkfun.com/SparkFun_Pro_Micro-ESP32C3/hardware_overview/) + Qwiic cable: firmware uses **IO5/IO6** (matches SparkFun `pins_arduino.h`). A plug-in Qwiic BMP581 (SEN-20170, default **0x47**) needs no extra wiring.
+
+Planned wing pod PCB may move the bus to **IO4/IO5**; update `main.rs` when that layout is fixed.
 | `IO8`        | `LED`   | Status LED (active-low, with 1 kΩ)    |
 | `IO3` (ADC)  | `VBATT` | LiPo cell + ÷2 voltage divider        |
 | `3V3`        | `3V3`   | LDO output to all sensors             |
@@ -46,10 +49,7 @@ has pull-ups; check before stacking.
 | `IO18`/`IO19`| USB D-/+| USB-C connector for flashing          |
 | `EN`         | `EN`    | 10 kΩ pull-up to 3V3, optional button |
 
-Pin choices are firmware-defined; revise them here if the firmware
-moves them. `IO4`/`IO5` are the convention used by the Arduino board
-support package and most C3 demo boards, so dev-kit jumpers wire up
-without surprises.
+**Pull-ups:** Pro Micro and SparkFun BMP581 Qwiic each enable 2.2 kΩ on SDA/SCL. With one sensor on the Qwiic cable that is usually fine; if the bus acts up, cut the **I2C** jumper on one board (see both hookup guides).
 
 The native USB peripheral on `IO18`/`IO19` lets `espflash` talk
 directly to the chip — no external USB-UART bridge needed. A single
@@ -134,27 +134,22 @@ connection) and the port kingfisher listens on. `build.rs` reads the
 file at compile time and injects values into `src/cfg.rs` via `env!`.
 Cross-machine builds: `KINGFISHER_CONFIG=/path/to/config.json cargo build --release`.
 
-## Verification (Phase 1)
+## Verification
 
-Pre-condition: the Pi's WiFi AP is already running and the SSID/PSK
-match what the firmware was built with.
+Pre-condition: Pi WiFi AP running; `~/.config/kingfisher/config.json`
+`pod` block matches the AP; BMP581 on Qwiic (Pro Micro **IO5/IO6**) or PTH at 3.3 V.
 
-1. **Flash**: `cargo run --release` (or
-   `espflash flash --monitor target/.../release/pod`). Monitor output
-   should show:
-   - `pod: starting wifi (ssid=…)`
-   - `pod: wifi connected: …`
-   - `pod: got ip …`
-   - `pod: sent Hello -> <PI_ADDR from your build>`
-   - periodic `pod: uplink ok, 50 pkts in last 5s`
-2. **Listen** on the Pi: stop any running `kingfisher`, then
-   `go run ./cmd/podprobe` (reads `pod.udp_addr` from the same config).
-   Expect Hello once, then ≥ 9 SampleBatch
-   packets per second with `gap=0` after the first packet.
-3. **10-minute soak**: packet loss < 0.5 %, inter-arrival p99 < 200 ms.
+1. **Flash**: `cargo build --release` then
+   `espflash flash --monitor target/.../release/pod`. Monitor should show:
+   - `pod: i2c scan: 0x46` (or `0x47` depending on SDO strap)
+   - `pod: bmp581 found …` / `bmp581 init ok`
+   - WiFi + `sent Hello` + `uplink ok, … pkts`
+2. **Kingfisher**: `go run ./cmd/kingfisher` — `pod` device shows
+   `static_p` (~85–105 kPa) and `static_temp` (not sinusoids).
+3. **BMP581 bench**: values track ambient pressure; optional breath
+   near the sensor port for a small `static_p` blip.
 
-Phase 3 will add sensor-by-sensor verification (BMP581 → MMC5983MA →
-MS4525DO) against bench references.
+Next: MMC5983MA (mag), then MS4525DO (airspeed).
 
 ## Troubleshooting
 

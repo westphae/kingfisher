@@ -13,8 +13,8 @@ func TestPodListenAddr_precedence(t *testing.T) {
 		},
 		PodUDPAddr: ":9999",
 	}
-	if got := c.PodListenAddr(); got != "192.168.10.1:47808" {
-		t.Fatalf("pod.udp_addr: got %q", got)
+	if got := c.PodListenAddr(); got != ":47808" {
+		t.Fatalf("pod.udp_addr: got %q want :47808", got)
 	}
 
 	c = &Config{PodUDPAddr: ":47808"}
@@ -24,12 +24,12 @@ func TestPodListenAddr_precedence(t *testing.T) {
 	}
 
 	c = &Config{}
-	if got := c.PodListenAddr(); got != defaultPodUDPAddr {
-		t.Fatalf("default: got %q", got)
+	if got := c.PodListenAddr(); got != ":47808" {
+		t.Fatalf("default: got %q want :47808", got)
 	}
 
 	c = &Config{Pod: Pod{UDPAddr: ""}, PodUDPAddr: ""}
-	if got := c.PodListenAddr(); got != defaultPodUDPAddr {
+	if got := c.PodListenAddr(); got != ":47808" {
 		t.Fatalf("empty fields should fall through to default: got %q", got)
 	}
 }
@@ -57,7 +57,7 @@ func TestDefaults_pod(t *testing.T) {
 	if c.Pod.WiFiSSID != "kingfisher" {
 		t.Fatalf("WiFiSSID=%q", c.Pod.WiFiSSID)
 	}
-	if got := c.PodListenAddr(); got != defaultPodUDPAddr {
+	if got := c.PodListenAddr(); got != ":47808" {
 		t.Fatalf("PodListenAddr=%q", got)
 	}
 }

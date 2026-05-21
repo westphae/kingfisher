@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
@@ -57,7 +58,7 @@ type AHRS struct {
 type Pod struct {
 	WiFiSSID     string `json:"wifi_ssid,omitempty"`
 	WiFiPassword string `json:"wifi_password,omitempty"`
-	UDPAddr      string `json:"udp_addr,omitempty"` // host:port, e.g. 192.168.10.1:47808
+	UDPAddr      string `json:"udp_addr,omitempty"` // Pi host:port pod sends to; kingfisher binds :port on all ifaces
 }
 
 const defaultPodUDPAddr = "192.168.10.1:47808"
@@ -107,10 +108,8 @@ func (c *Config) DeviceOrDefault(name string, defaultHz float64) Device {
 	return Device{Enabled: true, SampleHz: defaultHz}
 }
 
-// PodListenAddr returns the UDP bind/send address for wing-pod telemetry.
-// Empty string disables pod ingest (kingfisher) or listening (podprobe).
-// Precedence: pod.udp_addr, legacy pod_udp_addr, defaultPodUDPAddr.
-func (c *Config) PodListenAddr() string {
+// podUDPConfigAddr returns the configured pod.udp_addr (or legacy/default).
+func (c *Config) podUDPConfigAddr() string {
 	if c.Pod.UDPAddr != "" {
 		return c.Pod.UDPAddr
 	}
@@ -118,6 +117,18 @@ func (c *Config) PodListenAddr() string {
 		return c.PodUDPAddr
 	}
 	return defaultPodUDPAddr
+}
+
+// PodListenAddr returns the UDP bind address for kingfisher/podprobe.
+// We listen on all interfaces (":port") so datagrams to the AP address
+// (192.168.10.1) are received reliably; pod.udp_addr still carries the
+// full host:port the firmware sends to. Empty string disables pod ingest.
+func (c *Config) PodListenAddr() string {
+	_, port, err := net.SplitHostPort(c.podUDPConfigAddr())
+	if err != nil || port == "" {
+		return ":47808"
+	}
+	return ":" + port
 }
 
 func migratePod(c *Config) {

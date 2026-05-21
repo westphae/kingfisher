@@ -160,6 +160,12 @@ func (c *Client) dispatch(frame wire.Frame, peer string) {
 		log.Printf("pod: hello from %s fw=%#x sensors=%d", peer, f.FwVersion, len(f.Caps.Sensors))
 		c.reader.applyHello(f)
 		c.refreshRegistryViews()
+		// Publish so the cockpit tab appears before the first SampleBatch.
+		c.hub.Publish(live.Sample{
+			Device: DeviceName,
+			TsNs:   time.Now().UnixNano(),
+			Values: c.reader.snapshotValues(),
+		})
 	case wire.Status:
 		log.Printf("pod: status uptime=%dus batt=%.2fV rssi=%ddBm tx=%d", f.PodUptimeUs, f.BatteryV, f.RssiDBm, f.TxSeq)
 	case wire.SampleBatch:

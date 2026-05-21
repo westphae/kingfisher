@@ -26,6 +26,7 @@ esp-radio = { version = "0.18", features = ["esp32c3", "wifi"] }
 esp-rtos = { version = "0.3", features = ["esp32c3", "esp-radio", "embassy"] }
 
 static_cell = "2"
+critical-section = "1.2"
 log = "0.4"
 libm = "0.2"
 heapless = "0.8"

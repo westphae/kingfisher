@@ -1,13 +1,11 @@
-//! Phase 1 wing-pod firmware: associate to the Pi's WiFi AP, open a
-//! UDP socket, send one Hello frame followed by SampleBatch frames at
-//! 10 Hz with hardcoded fake data. No sensors, no control plane, no
-//! ping/pong this phase — those land in Phase 3 / Phase 4.
+//! Phase 3a wing-pod firmware: WiFi + real BMP581 static pressure over I²C.
+//! Mag and airspeed land in later Phase 3 milestones.
 
 #![no_std]
 #![no_main]
 
 mod cfg;
-mod fake;
+mod sensors;
 
 use embassy_executor::Spawner;
 use embassy_net::{
@@ -19,8 +17,10 @@ use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::{
     clock::CpuClock,
+    i2c::master::{Config as I2cConfig, I2c},
     interrupt::software::SoftwareInterruptControl,
     rng::Rng,
+    time::Rate,
     timer::timg::TimerGroup,
 };
 use esp_println::println;
@@ -31,8 +31,6 @@ use esp_radio::wifi::{
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-// static_cell + macro pattern from the esp-hal wifi examples; lets us
-// hand long-lived borrowed state to embassy tasks under stable Rust.
 macro_rules! mk_static {
     ($t:ty, $val:expr) => {{
         static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
@@ -48,12 +46,24 @@ async fn main(spawner: Spawner) -> ! {
 
     esp_alloc::heap_allocator!(size: 72 * 1024);
 
+    let i2c = I2c::new(
+        peripherals.I2C0,
+        I2cConfig::default().with_frequency(Rate::from_khz(100)),
+    )
+    .unwrap()
+    // SparkFun Pro Micro ESP32-C3 Qwiic: SDA=GPIO5, SCL=GPIO6 (pins_arduino.h).
+    // Wing pod PCB target uses GPIO4/GPIO5 — change when that board exists.
+    .with_sda(peripherals.GPIO5)
+    .with_scl(peripherals.GPIO6);
+    esp_hal::delay::Delay::new().delay_millis(50);
+    // SAFETY: unique ownership of I2C/pin peripherals for the life of the firmware.
+    let i2c = mk_static!(sensors::bus::Bus, unsafe { core::mem::transmute(i2c) });
+    spawner.spawn(sensor_bringup_task(i2c).unwrap());
+
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
 
-    // Pi AP is open (wifi_password ""). StationConfig defaults to WPA2, which
-    // yields NoAccessPointFoundInAuthmodeThreshold against an open beacon.
     let station_cfg = if cfg::PASSWORD.is_empty() {
         StationConfig::default()
             .with_ssid(cfg::SSID)
@@ -98,6 +108,19 @@ async fn main(spawner: Spawner) -> ! {
     loop {
         Timer::after(Duration::from_secs(60)).await;
     }
+}
+
+/// Probe BMP581 on the shared bus; retry every 2s until init succeeds, then poll forever.
+#[embassy_executor::task]
+async fn sensor_bringup_task(bus: &'static mut sensors::bus::Bus) {
+    let bmp581 = loop {
+        if let Some(bmp) = sensors::bringup_bmp581(bus) {
+            break bmp;
+        }
+        println!("pod: sensor board init failed; retry in 2s");
+        embassy_time::Timer::after(embassy_time::Duration::from_secs(2)).await;
+    };
+    sensors::run_bmp581_poll(bus, bmp581).await;
 }
 
 #[embassy_executor::task]
@@ -147,31 +170,31 @@ async fn uplink_task(stack: Stack<'static>) {
 
     let mut frame_buf = [0u8; 512];
 
-    // Hello once, retrying until the first send succeeds.
     let hello = build_hello();
-    loop {
-        match pod_wire::encode_to_slice(&hello, &mut frame_buf) {
-            Ok(bytes) => match socket.send_to(bytes, dest).await {
-                Ok(()) => {
-                    println!("pod: sent Hello -> {}", dest);
-                    break;
-                }
-                Err(e) => println!("pod: hello send: {:?}", e),
-            },
-            Err(_) => println!("pod: hello encode failed"),
-        }
-        Timer::after(Duration::from_millis(500)).await;
-    }
-
-    // Steady-state 10 Hz fake-data stream.
-    let mut gen = fake::Generator::new();
+    let mut next_hello = Instant::now();
     let mut ticker = Ticker::every(Duration::from_millis(cfg::TICK_MS));
     let mut next_log = Instant::now() + Duration::from_secs(5);
     let mut sent_since_log: u32 = 0;
+    let mut seq: u32 = 0;
     loop {
         ticker.next().await;
+        let now = Instant::now();
+        if now >= next_hello {
+            next_hello = now + Duration::from_secs(5);
+            match pod_wire::encode_to_slice(&hello, &mut frame_buf) {
+                Ok(bytes) => match socket.send_to(bytes, dest).await {
+                    Ok(()) => println!("pod: sent Hello -> {}", dest),
+                    Err(e) => println!("pod: hello send: {:?}", e),
+                },
+                Err(_) => println!("pod: hello encode failed"),
+            }
+        }
         let uptime_us = Instant::now().as_micros();
-        let batch = gen.next(uptime_us);
+        seq = seq.wrapping_add(1);
+        let batch = sensors::with_samples(|s| s.build_batch(uptime_us, seq));
+        if batch.samples.is_empty() {
+            continue;
+        }
         let frame = pod_wire::Frame::Sample(batch);
         let bytes = match pod_wire::encode_to_slice(&frame, &mut frame_buf) {
             Ok(b) => b,
@@ -185,7 +208,6 @@ async fn uplink_task(stack: Stack<'static>) {
             continue;
         }
         sent_since_log += 1;
-        let now = Instant::now();
         if now >= next_log {
             println!("pod: uplink ok, {} pkts in last 5s", sent_since_log);
             sent_since_log = 0;
