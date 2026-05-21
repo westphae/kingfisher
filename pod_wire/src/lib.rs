@@ -25,10 +25,17 @@ pub enum Frame {
     Hello(Hello),
     Status(Status),
     Sample(SampleBatch),
-    Cmd(Cmd),
+    Cmd(CmdEnvelope),
     Ack(Ack),
     Ping(Ping),
     Pong(Pong),
+}
+
+/// Pi-assigned sequence number for a [`Cmd`]; echoed in [`Ack::for_seq`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CmdEnvelope {
+    pub seq: u32,
+    pub cmd: Cmd,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -251,16 +258,25 @@ mod tests {
 
     #[test]
     fn roundtrip_cmd() {
-        rt(&Frame::Cmd(Cmd::SetRate {
-            sensor: SensorId::Mag,
-            hz: 50,
+        rt(&Frame::Cmd(CmdEnvelope {
+            seq: 1,
+            cmd: Cmd::SetRate {
+                sensor: SensorId::Mag,
+                hz: 50,
+            },
         }));
-        rt(&Frame::Cmd(Cmd::SetAttr {
-            sensor: SensorId::Static,
-            key: AttrKey::Oversampling,
-            value: 16.0,
+        rt(&Frame::Cmd(CmdEnvelope {
+            seq: 2,
+            cmd: Cmd::SetAttr {
+                sensor: SensorId::Static,
+                key: AttrKey::Oversampling,
+                value: 16.0,
+            },
         }));
-        rt(&Frame::Cmd(Cmd::Reboot));
+        rt(&Frame::Cmd(CmdEnvelope {
+            seq: 3,
+            cmd: Cmd::Reboot,
+        }));
     }
 
     #[test]
@@ -290,7 +306,15 @@ mod tests {
     #[test]
     fn crc_mismatch_rejected() {
         let mut buf = [0u8; 64];
-        let n = encode_to_slice(&Frame::Cmd(Cmd::Ping), &mut buf).unwrap().len();
+        let n = encode_to_slice(
+            &Frame::Cmd(CmdEnvelope {
+                seq: 4,
+                cmd: Cmd::Ping,
+            }),
+            &mut buf,
+        )
+        .unwrap()
+        .len();
         // Flip a bit in the body.
         buf[HEADER_LEN] ^= 0x01;
         assert!(matches!(decode_from_slice(&buf[..n]), Err(Error::Crc)));

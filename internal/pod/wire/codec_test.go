@@ -33,12 +33,12 @@ func TestRustFixtures(t *testing.T) {
 				MagReading{XUt: 21.3, YUt: -4.1, ZUt: 42.8, AgeUs: 0},
 			},
 		},
-		"cmd_set_rate": CmdFrame{Cmd: CmdSetRate{Sensor: SensorMag, Hz: 50}},
-		"cmd_set_attr": CmdFrame{Cmd: CmdSetAttr{
+		"cmd_set_rate": CmdFrame{Seq: 1, Cmd: CmdSetRate{Sensor: SensorMag, Hz: 50}},
+		"cmd_set_attr": CmdFrame{Seq: 2, Cmd: CmdSetAttr{
 			Sensor: SensorStatic, Key: AttrOversampling, Value: 16.0,
 		}},
-		"cmd_ping":   CmdFrame{Cmd: CmdPing{}},
-		"cmd_reboot": CmdFrame{Cmd: CmdReboot{}},
+		"cmd_ping":   CmdFrame{Seq: 3, Cmd: CmdPing{}},
+		"cmd_reboot": CmdFrame{Seq: 4, Cmd: CmdReboot{}},
 		"status": Status{
 			PodUptimeUs: 5_000_000,
 			BatteryV:    3.78,
@@ -113,8 +113,8 @@ func TestRoundTrip(t *testing.T) {
 		SampleBatch{PodUptimeUs: 12345, Seq: 1, Samples: []Reading{
 			MagReading{XUt: 1, YUt: 2, ZUt: 3, AgeUs: 10},
 		}},
-		CmdFrame{Cmd: CmdSetRate{Sensor: SensorMag, Hz: 100}},
-		CmdFrame{Cmd: CmdReboot{}},
+		CmdFrame{Seq: 10, Cmd: CmdSetRate{Sensor: SensorMag, Hz: 100}},
+		CmdFrame{Seq: 11, Cmd: CmdReboot{}},
 		Ack{ForSeq: 5, OK: true},
 		Ping{Seq: 1, SenderUptimeUs: 100},
 		Pong{Seq: 1, SenderUptimeUs: 200, EchoUptimeUs: 100},

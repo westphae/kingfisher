@@ -149,6 +149,7 @@ type Cmd interface {
 }
 
 type CmdFrame struct {
+	Seq uint32 // Pi-assigned; echoed in Ack.for_seq
 	Cmd Cmd
 }
 

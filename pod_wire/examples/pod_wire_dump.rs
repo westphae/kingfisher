@@ -74,21 +74,39 @@ fn main() {
 
     dump(
         "cmd_set_rate",
-        &Frame::Cmd(Cmd::SetRate {
-            sensor: SensorId::Mag,
-            hz: 50,
+        &Frame::Cmd(CmdEnvelope {
+            seq: 1,
+            cmd: Cmd::SetRate {
+                sensor: SensorId::Mag,
+                hz: 50,
+            },
         }),
     );
     dump(
         "cmd_set_attr",
-        &Frame::Cmd(Cmd::SetAttr {
-            sensor: SensorId::Static,
-            key: AttrKey::Oversampling,
-            value: 16.0,
+        &Frame::Cmd(CmdEnvelope {
+            seq: 2,
+            cmd: Cmd::SetAttr {
+                sensor: SensorId::Static,
+                key: AttrKey::Oversampling,
+                value: 16.0,
+            },
         }),
     );
-    dump("cmd_ping", &Frame::Cmd(Cmd::Ping));
-    dump("cmd_reboot", &Frame::Cmd(Cmd::Reboot));
+    dump(
+        "cmd_ping",
+        &Frame::Cmd(CmdEnvelope {
+            seq: 3,
+            cmd: Cmd::Ping,
+        }),
+    );
+    dump(
+        "cmd_reboot",
+        &Frame::Cmd(CmdEnvelope {
+            seq: 4,
+            cmd: Cmd::Reboot,
+        }),
+    );
 
     dump(
         "status",

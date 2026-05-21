@@ -140,11 +140,15 @@ func (d *decoder) decodeFrame() (Frame, error) {
 	case frameSample:
 		return d.decodeSample()
 	case frameCmd:
+		seq, err := d.uvarint()
+		if err != nil {
+			return nil, err
+		}
 		c, err := d.decodeCmd()
 		if err != nil {
 			return nil, err
 		}
-		return CmdFrame{Cmd: c}, nil
+		return CmdFrame{Seq: uint32(seq), Cmd: c}, nil
 	case frameAck:
 		return d.decodeAck()
 	case framePing:
@@ -462,6 +466,9 @@ func (e *encoder) encodeFrame(f Frame) error {
 		return e.encodeSample(v)
 	case CmdFrame:
 		if err := e.uvarint(uint64(frameCmd)); err != nil {
+			return err
+		}
+		if err := e.uvarint(uint64(v.Seq)); err != nil {
 			return err
 		}
 		return e.encodeCmd(v.Cmd)
