@@ -265,32 +265,61 @@ func (s *Server) handleDeviceSub(w http.ResponseWriter, r *http.Request) {
 // no-op at the sysfs level and produces no spurious sensor_attrs row.
 func (s *Server) persistAttrChange(device, channel, attr, value string) error {
 	cur := s.cfg.Get()
-	// Deep-copy what we need to mutate so we don't race with concurrent
-	// readers of the live config.
 	cp := *cur
+	key := sensors.JoinIIOAttr(channel, attr)
+
+	if device == config.PodDeviceName {
+		cp.Pod = copyPod(cur.Pod)
+		if cp.Pod.Attrs == nil {
+			cp.Pod.Attrs = make(map[string]string)
+		}
+		cp.Pod.Attrs[key] = value
+	}
+
 	cp.Devices = make(map[string]config.Device, len(cur.Devices))
 	for k, v := range cur.Devices {
-		cp.Devices[k] = v
+		cp.Devices[k] = copyDevice(v)
 	}
 	d := cp.Devices[device]
-	newAttrs := make(map[string]string, len(d.Attrs)+1)
-	for k, v := range d.Attrs {
-		newAttrs[k] = v
+	if _, exists := cp.Devices[device]; !exists {
+		d = cur.DeviceOrDefault(device, 10)
 	}
-	newAttrs[sensors.JoinIIOAttr(channel, attr)] = value
-	d.Attrs = newAttrs
-	// If the device entry was absent, fill in sensible defaults so the
-	// reapply pass sees enabled=true and a non-zero rate.
-	if _, exists := cur.Devices[device]; !exists {
-		def := cur.DeviceOrDefault(device, 10)
-		d.Enabled = def.Enabled
-		if d.SampleHz == 0 {
-			d.SampleHz = def.SampleHz
-		}
+	if d.Attrs == nil {
+		d.Attrs = make(map[string]string)
 	}
+	d.Attrs[key] = value
 	cp.Devices[device] = d
+
 	s.cfg.Set(&cp)
 	return config.Save(s.cfg.Path(), &cp)
+}
+
+func copyPod(p config.Pod) config.Pod {
+	out := p
+	if len(p.Attrs) > 0 {
+		out.Attrs = make(map[string]string, len(p.Attrs))
+		for k, v := range p.Attrs {
+			out.Attrs[k] = v
+		}
+	}
+	return out
+}
+
+func copyDevice(d config.Device) config.Device {
+	out := d
+	if len(d.Attrs) > 0 {
+		out.Attrs = make(map[string]string, len(d.Attrs))
+		for k, v := range d.Attrs {
+			out.Attrs[k] = v
+		}
+	}
+	if len(d.Channels) > 0 {
+		out.Channels = make(map[string]config.Channel, len(d.Channels))
+		for k, v := range d.Channels {
+			out.Channels[k] = v
+		}
+	}
+	return out
 }
 
 // handleRecording reports or sets the paused state of the store buffer.

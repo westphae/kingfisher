@@ -52,16 +52,41 @@ type AHRS struct {
 	RateHz  float64 `json:"rate_hz"`
 }
 
-// Pod holds wing-pod WiFi credentials and the Pi UDP endpoint the pod
-// sends to (also where kingfisher/podprobe listen). Firmware build reads
-// the same fields from config.json via build.rs.
+// Pod holds wing-pod WiFi/UDP settings and persisted sensor attrs in
+// config.json. Firmware build.rs reads wifi_ssid/password/udp_addr.
+// Attrs are written on each UI change (config.Save) and survive power-off.
 type Pod struct {
-	WiFiSSID     string `json:"wifi_ssid,omitempty"`
-	WiFiPassword string `json:"wifi_password,omitempty"`
-	UDPAddr      string `json:"udp_addr,omitempty"` // Pi host:port pod sends to; kingfisher binds :port on all ifaces
+	WiFiSSID     string            `json:"wifi_ssid,omitempty"`
+	WiFiPassword string            `json:"wifi_password,omitempty"`
+	UDPAddr      string            `json:"udp_addr,omitempty"` // Pi host:port pod sends to; kingfisher binds :port on all ifaces
+	Attrs        map[string]string `json:"attrs,omitempty"`    // e.g. in_mag_sampling_frequency
 }
 
 const defaultPodUDPAddr = "192.168.10.1:47808"
+
+// PodDeviceName is the registry / UI device id for the wing pod.
+const PodDeviceName = "pod"
+
+// PodSettingsDevice returns persisted pod sensor settings for ApplyDeviceConfig.
+// pod.attrs is canonical; devices.pod.attrs is merged for older configs.
+func (c *Config) PodSettingsDevice() Device {
+	attrs := make(map[string]string)
+	for k, v := range c.Pod.Attrs {
+		attrs[k] = v
+	}
+	if d, ok := c.Devices[PodDeviceName]; ok {
+		for k, v := range d.Attrs {
+			if _, have := attrs[k]; !have {
+				attrs[k] = v
+			}
+		}
+	}
+	enabled := true
+	if d, ok := c.Devices[PodDeviceName]; ok {
+		enabled = d.Enabled
+	}
+	return Device{Enabled: enabled, Attrs: attrs}
+}
 
 type Config struct {
 	Aircraft     string `json:"aircraft"`
@@ -134,6 +159,24 @@ func (c *Config) PodListenAddr() string {
 func migratePod(c *Config) {
 	if c.Pod.UDPAddr == "" && c.PodUDPAddr != "" {
 		c.Pod.UDPAddr = c.PodUDPAddr
+	}
+	migratePodAttrs(c)
+}
+
+func migratePodAttrs(c *Config) {
+	if len(c.Pod.Attrs) > 0 {
+		return
+	}
+	if c.Devices == nil {
+		return
+	}
+	d, ok := c.Devices[PodDeviceName]
+	if !ok || len(d.Attrs) == 0 {
+		return
+	}
+	c.Pod.Attrs = make(map[string]string, len(d.Attrs))
+	for k, v := range d.Attrs {
+		c.Pod.Attrs[k] = v
 	}
 }
 
