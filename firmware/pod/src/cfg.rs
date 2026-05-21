@@ -1,26 +1,93 @@
 //! Compile-time pod configuration.
 //!
-//! WiFi credentials come from build-time env vars (so they don't sit in
-//! version control). The Pi IP/port is hardcoded here — edit before
-//! flashing if it changes. v2 will move all of this to NVS with a
-//! provisioning flow.
-//!
-//! Build with:
-//!   SSID=kingfisher-ap PASSWORD=change-me cargo build --release
-//!
-//! Defaults in `.cargo/config.toml` are placeholders so the build
-//! succeeds even when the env vars aren't explicitly set.
+//! SSID, password, and Pi UDP target come from build-time env vars (see
+//! `.cargo/config.toml` or `SSID=… PASSWORD=… PI_ADDR=… cargo build`).
+//! v2 will move all of this to NVS with a provisioning flow.
 
 pub const SSID: &str = env!("SSID");
 pub const PASSWORD: &str = env!("PASSWORD");
 
-/// Pi-side UDP listen address. Must match `pod_udp_addr` in kingfisher
-/// config (default `:47808`).
-pub const PI_IP: [u8; 4] = [192, 168, 4, 1];
-pub const PI_PORT: u16 = 47808;
+/// Pi-side UDP listen address (`host:port`). Must match kingfisher's
+/// `pod_udp_addr` (host part = AP gateway, port usually `47808`).
+pub const PI_ADDR: &str = env!("PI_ADDR");
+
+const PI_EP: ([u8; 4], u16) = parse_pi_addr(PI_ADDR.as_bytes());
+
+/// Parsed IPv4 octets from [`PI_ADDR`].
+pub const PI_IP: [u8; 4] = PI_EP.0;
+
+/// Parsed UDP port from [`PI_ADDR`].
+pub const PI_PORT: u16 = PI_EP.1;
 
 pub const FW_VERSION: u32 = 0x0001_0000;
 
 /// Phase 1 cadence — single 10 Hz tick covers every Reading. Per-sensor
 /// rates land in Phase 3 along with the real sensors.
 pub const TICK_MS: u64 = 100;
+
+/// Parse `a.b.c.d:port` at compile time (same source as `env!("PI_ADDR")`).
+const fn parse_pi_addr(s: &[u8]) -> ([u8; 4], u16) {
+    let mut colon = s.len();
+    let mut i = 0;
+    while i < s.len() {
+        if s[i] == b':' {
+            colon = i;
+            break;
+        }
+        i += 1;
+    }
+    if colon == 0 || colon >= s.len() - 1 {
+        panic!("PI_ADDR must look like a.b.c.d:port");
+    }
+    let ip = parse_ipv4(s, 0, colon);
+    let port = parse_u16(s, colon + 1, s.len());
+    (ip, port)
+}
+
+const fn parse_ipv4(s: &[u8], start: usize, end: usize) -> [u8; 4] {
+    let mut out = [0u8; 4];
+    let mut octet = 0u16;
+    let mut idx = 0usize;
+    let mut i = start;
+    while i < end {
+        let b = s[i];
+        if b == b'.' {
+            if idx >= 3 || octet > 255 {
+                panic!("PI_ADDR: invalid IPv4");
+            }
+            out[idx] = octet as u8;
+            idx += 1;
+            octet = 0;
+        } else if b >= b'0' && b <= b'9' {
+            octet = octet * 10 + (b - b'0') as u16;
+            if octet > 255 {
+                panic!("PI_ADDR: invalid IPv4 octet");
+            }
+        } else {
+            panic!("PI_ADDR: invalid IPv4");
+        }
+        i += 1;
+    }
+    if idx != 3 || octet > 255 {
+        panic!("PI_ADDR: invalid IPv4");
+    }
+    out[3] = octet as u8;
+    out
+}
+
+const fn parse_u16(s: &[u8], start: usize, end: usize) -> u16 {
+    if start >= end {
+        panic!("PI_ADDR: missing port");
+    }
+    let mut n = 0u16;
+    let mut i = start;
+    while i < end {
+        let b = s[i];
+        if b < b'0' || b > b'9' {
+            panic!("PI_ADDR: invalid port");
+        }
+        n = n * 10 + (b - b'0') as u16;
+        i += 1;
+    }
+    n
+}

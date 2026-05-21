@@ -117,17 +117,18 @@ log lines from the running firmware over the same USB connection.
 
 ### Pre-shared configuration
 
-Until provisioning lands (v2), WiFi SSID / PSK come from build-time
-env vars and the Pi IP/port are compile-time constants in
-`src/cfg.rs`:
+Until provisioning lands (v2), SSID, password, and Pi UDP target are
+build-time env vars. Defaults live in `.cargo/config.toml`; override on
+the command line when needed:
 
 ```bash
-SSID=kingfisher-ap PASSWORD=change-me cargo build --release
+SSID=kingfisher PASSWORD= PI_ADDR=192.168.10.1:47808 cargo build --release
 ```
 
-The Pi IP/port live in `src/cfg.rs` (`PI_IP`, `PI_PORT`) — edit and
-rebuild if they change. Defaults are `192.168.4.1:47808` to match
-kingfisher's `pod_udp_addr` default.
+`PI_ADDR` must be the AP gateway (`ipv4.addresses` on the Pi AP
+connection) and the port kingfisher listens on (`pod_udp_addr`, default
+`:47808`). `src/cfg.rs` reads all three via `env!` and parses
+`PI_ADDR` into `PI_IP` / `PI_PORT` at compile time.
 
 ## Verification (Phase 1)
 
@@ -140,7 +141,7 @@ match what the firmware was built with.
    - `pod: starting wifi (ssid=…)`
    - `pod: wifi connected: …`
    - `pod: got ip …`
-   - `pod: sent Hello -> 192.168.4.1:47808`
+   - `pod: sent Hello -> <PI_ADDR from your build>`
    - periodic `pod: uplink ok, 50 pkts in last 5s`
 2. **Listen** on the Pi: stop any running `kingfisher`, then
    `go run ./cmd/podprobe`. Expect Hello once, then ≥ 9 SampleBatch
