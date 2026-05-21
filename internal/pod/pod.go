@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/live"
 	"github.com/westphae/kingfisher/internal/pod/wire"
 	"github.com/westphae/kingfisher/internal/sensors"
@@ -37,9 +38,16 @@ type Client struct {
 	hub       *live.Hub
 	buf       *store.Buffer
 	registry  *sensors.Registry
+	cfg       *config.Holder
 
 	reader *reader
-	cmdOut chan wire.Cmd
+	cmdOut chan outboundCmd
+
+	cmdSeq   atomic.Uint32
+	pending  map[uint32]pendingEntry
+	pendingMu sync.Mutex
+
+	lastPongNs atomic.Int64
 
 	// offsetNs is (pi_wall_ns at receive) - (pod_uptime_ns of that batch),
 	// EMA-smoothed. Set the first time a SampleBatch lands; updated on
@@ -59,19 +67,24 @@ type Client struct {
 //
 // transport is the link to the pod. Pass nil to skip wiring (useful for
 // tests that drive the reader directly).
-func New(addr string, transport Transport, hub *live.Hub, buf *store.Buffer, reg *sensors.Registry) *Client {
-	cmdOut := make(chan wire.Cmd, cmdQueueSize)
+func New(addr string, transport Transport, hub *live.Hub, buf *store.Buffer, reg *sensors.Registry, cfg *config.Holder) *Client {
+	cmdOut := make(chan outboundCmd, cmdQueueSize)
 	c := &Client{
 		addr:      addr,
 		transport: transport,
 		hub:       hub,
 		buf:       buf,
 		registry:  reg,
+		cfg:       cfg,
 		reader:    newReader(cmdOut),
 		cmdOut:    cmdOut,
 	}
 	if reg != nil {
 		reg.Register(c.reader, DeviceName)
+	}
+	if cfg != nil {
+		c.applySavedSettings(false)
+		c.refreshRegistryViews()
 	}
 	return c
 }
@@ -99,6 +112,12 @@ func (c *Client) Run(stop <-chan struct{}) {
 	go func() { defer wg.Done(); c.runSend(ctx) }()
 	wg.Add(1)
 	go func() { defer wg.Done(); c.runPinger(ctx) }()
+	wg.Add(1)
+	go func() { defer wg.Done(); c.runPendingExpiry(ctx) }()
+	if c.cfg != nil {
+		wg.Add(1)
+		go func() { defer wg.Done(); c.runConfigReload(ctx) }()
+	}
 
 	<-stop
 	cancel()
@@ -125,10 +144,32 @@ func (c *Client) runSend(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case cmd := <-c.cmdOut:
-			if err := c.transport.Send(wire.CmdFrame{Cmd: cmd}); err != nil {
-				log.Printf("pod: send cmd: %v", err)
+		case out := <-c.cmdOut:
+			seq := c.cmdSeq.Add(1)
+			if out.HasPrev {
+				if set, ok := out.Cmd.(wire.CmdSetRate); ok {
+					c.trackPending(seq, set.Sensor, out.PrevHz)
+				}
 			}
+			if err := c.transport.Send(wire.CmdFrame{Seq: seq, Cmd: out.Cmd}); err != nil {
+				log.Printf("pod: send cmd seq=%d: %v", seq, err)
+				if e, ok := c.clearPending(seq); ok {
+					c.reader.setRateHz(e.rollbackSensor, e.rollbackHz)
+				}
+			}
+		}
+	}
+}
+
+func (c *Client) runPendingExpiry(ctx context.Context) {
+	t := time.NewTicker(500 * time.Millisecond)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			c.expirePending()
 		}
 	}
 }
@@ -159,6 +200,7 @@ func (c *Client) dispatch(frame wire.Frame, peer string) {
 	case wire.Hello:
 		log.Printf("pod: hello from %s fw=%#x sensors=%d", peer, f.FwVersion, len(f.Caps.Sensors))
 		c.reader.applyHello(f)
+		c.applySavedSettings(true)
 		c.refreshRegistryViews()
 		// Publish so the cockpit tab appears before the first SampleBatch.
 		c.hub.Publish(live.Sample{
@@ -171,7 +213,14 @@ func (c *Client) dispatch(frame wire.Frame, peer string) {
 	case wire.SampleBatch:
 		c.onBatch(f)
 	case wire.Ack:
-		log.Printf("pod: ack for_seq=%d ok=%v", f.ForSeq, f.OK)
+		if e, ok := c.clearPending(f.ForSeq); ok {
+			if !f.OK {
+				c.reader.setRateHz(e.rollbackSensor, e.rollbackHz)
+				log.Printf("pod: ack for_seq=%d rejected; reverted %s to %d Hz", f.ForSeq, e.rollbackSensor, e.rollbackHz)
+			}
+		} else {
+			log.Printf("pod: ack for_seq=%d ok=%v (no pending)", f.ForSeq, f.OK)
+		}
 	case wire.Ping:
 		// Echo back as a Pong. We don't pong-stamp our own uptime
 		// because the pod side does the offset math.
@@ -184,8 +233,7 @@ func (c *Client) dispatch(frame wire.Frame, peer string) {
 			log.Printf("pod: pong send: %v", err)
 		}
 	case wire.Pong:
-		// Pi-initiated ping returning. v1 doesn't act on RTT — Phase 4
-		// will wire this into a tighter offset estimator.
+		c.lastPongNs.Store(time.Now().UnixNano())
 	case wire.CmdFrame:
 		// We should never receive Cmd from the pod.
 		log.Printf("pod: unexpected Cmd frame from %s", peer)
@@ -231,12 +279,47 @@ func (c *Client) onBatch(b wire.SampleBatch) {
 	}
 }
 
+func (c *Client) runConfigReload(ctx context.Context) {
+	reload := c.cfg.Subscribe()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-reload:
+			c.applySavedSettings(true)
+			c.refreshRegistryViews()
+		}
+	}
+}
+
+// applySavedSettings merges pod.attrs from config.json into the reader.
+// When sendCmd is true, enqueues SetRate for each entry (after Hello or reload).
+func (c *Client) applySavedSettings(sendCmd bool) {
+	if c.cfg == nil {
+		return
+	}
+	dev := c.cfg.Get().PodSettingsDevice()
+	outs := c.reader.ApplyDeviceConfig(dev)
+	if sendCmd {
+		for _, o := range outs {
+			c.enqueueOutbound(o)
+		}
+	}
+}
+
+func (c *Client) enqueueOutbound(o outboundCmd) {
+	select {
+	case c.cmdOut <- o:
+	default:
+		log.Printf("pod: outbound queue full; dropped %T", o.Cmd)
+	}
+}
+
 // refreshRegistryViews resnaps the reader's attrs into the registry so
 // the web UI sees the latest caps/rates. Called after Hello.
 func (c *Client) refreshRegistryViews() {
 	if c.registry == nil {
 		return
 	}
-	recs := sensors.SnapshotAttrs(c.reader)
-	c.registry.Update(DeviceName, recs)
+	c.registry.Update(DeviceName, c.reader.SettingsAttrRecords())
 }

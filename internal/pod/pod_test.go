@@ -11,7 +11,7 @@ import (
 func TestOnBatchPublishesAllChannels(t *testing.T) {
 	hub := live.NewHub()
 	reg := sensors.NewRegistry()
-	c := New("", nil, hub, nil, reg)
+	c := New("", nil, hub, nil, reg, nil)
 
 	// Seed caps so the reader knows the legal Hz ranges for each sensor.
 	c.reader.applyHello(wire.Hello{
@@ -75,7 +75,7 @@ func TestOnBatchPublishesAllChannels(t *testing.T) {
 func TestSetSamplingFrequencyEnqueuesCmd(t *testing.T) {
 	hub := live.NewHub()
 	reg := sensors.NewRegistry()
-	c := New("", nil, hub, nil, reg)
+	c := New("", nil, hub, nil, reg, nil)
 
 	c.reader.applyHello(wire.Hello{
 		FwVersion:    1,
@@ -85,35 +85,38 @@ func TestSetSamplingFrequencyEnqueuesCmd(t *testing.T) {
 		}},
 	})
 
-	if err := c.reader.SetChannelAttr(ChMagX, "sampling_frequency", "100"); err != nil {
+	if err := c.reader.SetChannelAttr("mag", "sampling_frequency", "100"); err != nil {
 		t.Fatalf("SetChannelAttr: %v", err)
 	}
 	select {
-	case cmd := <-c.cmdOut:
-		set, ok := cmd.(wire.CmdSetRate)
+	case out := <-c.cmdOut:
+		set, ok := out.Cmd.(wire.CmdSetRate)
 		if !ok {
-			t.Fatalf("got %T, want CmdSetRate", cmd)
+			t.Fatalf("got %T, want CmdSetRate", out.Cmd)
 		}
 		if set.Sensor != wire.SensorMag || set.Hz != 100 {
 			t.Errorf("got %+v", set)
+		}
+		if !out.HasPrev {
+			t.Error("expected HasPrev for rollback")
 		}
 	default:
 		t.Fatal("no Cmd enqueued")
 	}
 
 	// Out-of-range rejected.
-	if err := c.reader.SetChannelAttr(ChMagX, "sampling_frequency", "9999"); err == nil {
+	if err := c.reader.SetChannelAttr("mag", "sampling_frequency", "9999"); err == nil {
 		t.Fatal("expected out-of-range error")
 	}
-	// Non-primary channel rejected.
+	// Per-channel rates are not supported (one rate for the whole mag sensor).
 	if err := c.reader.SetChannelAttr(ChMagY, "sampling_frequency", "100"); err == nil {
-		t.Fatal("expected non-primary channel error")
+		t.Fatal("expected non-settings channel error")
 	}
 }
 
 func TestHelloPublishesToHub(t *testing.T) {
 	hub := live.NewHub()
-	c := New("", nil, hub, nil, nil)
+	c := New("", nil, hub, nil, nil, nil)
 	c.dispatch(wire.Hello{
 		FwVersion:    0x0003_0000,
 		ProtoVersion: wire.ProtoVersion,
@@ -129,7 +132,7 @@ func TestHelloPublishesToHub(t *testing.T) {
 func TestRegistrySnapshotAfterHello(t *testing.T) {
 	hub := live.NewHub()
 	reg := sensors.NewRegistry()
-	c := New("", nil, hub, nil, reg)
+	c := New("", nil, hub, nil, reg, nil)
 
 	c.reader.applyHello(wire.Hello{
 		FwVersion:    1,
@@ -146,14 +149,27 @@ func TestRegistrySnapshotAfterHello(t *testing.T) {
 	if len(views) == 0 {
 		t.Fatal("registry has no views for pod")
 	}
-	// Expect exactly three writable sampling_frequency rows (one per sensor).
 	var writable int
+	var channels []string
 	for _, v := range views {
 		if v.Attr == "sampling_frequency" && v.Writable {
 			writable++
+			channels = append(channels, v.Channel)
 		}
 	}
 	if writable != 3 {
 		t.Errorf("got %d writable sampling_frequency rows, want 3 (views=%+v)", writable, views)
+	}
+	for _, want := range []string{"static", "mag", "airspeed"} {
+		found := false
+		for _, ch := range channels {
+			if ch == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing settings channel %q (got %v)", want, channels)
+		}
 	}
 }

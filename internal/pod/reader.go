@@ -3,9 +3,13 @@ package pod
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 
+	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/pod/wire"
+	"github.com/westphae/kingfisher/internal/sensors"
+	"github.com/westphae/kingfisher/internal/store"
 )
 
 // DeviceName is the live.Sample.Device value the pod publishes under. It
@@ -31,15 +35,31 @@ var podChannels = []string{
 	ChMagX, ChMagY, ChMagZ,
 }
 
-// sensorPrimaryChannel selects, per sensor, the channel that hosts the
-// writable `sampling_frequency` attribute in the UI. The pod side reads
-// one rate per sensor; we surface that rate on a single channel rather
-// than every channel that sensor produces, to avoid duplicating the
-// control surface.
-var sensorPrimaryChannel = map[wire.SensorID]string{
-	wire.SensorAirspeed: ChAirspeedDP,
-	wire.SensorStatic:   ChStaticP,
-	wire.SensorMag:      ChMagX,
+// sensorSettingsChannel is the UI label for per-sensor rate control. The pod
+// firmware sets one Hz per physical sensor (MMC5983, BMP581, MS4525), not per
+// data channel — mag_x/y/z and static_p/temp share the same rate.
+var sensorSettingsChannel = map[wire.SensorID]string{
+	wire.SensorAirspeed: "airspeed",
+	wire.SensorStatic:   "static",
+	wire.SensorMag:      "mag",
+}
+
+// channelToSensor resolves settings labels (and legacy primary data channels).
+var channelToSensor = map[string]wire.SensorID{
+	"airspeed":     wire.SensorAirspeed,
+	"static":       wire.SensorStatic,
+	"mag":          wire.SensorMag,
+	ChAirspeedDP:   wire.SensorAirspeed,
+	ChStaticP:      wire.SensorStatic,
+	ChMagX:         wire.SensorMag,
+}
+
+// outboundCmd is queued for the send loop; PrevHz supports Ack rollback.
+type outboundCmd struct {
+	Cmd      wire.Cmd
+	Sensor   wire.SensorID
+	PrevHz   uint16
+	HasPrev  bool
 }
 
 // reader implements sensors.Reader for the pod virtual device. It is
@@ -55,10 +75,10 @@ type reader struct {
 	values map[string]float64       // channel -> latest sample value
 	rates  map[wire.SensorID]uint16 // sensor -> last known sampling Hz
 	caps   map[wire.SensorID]wire.SensorCap
-	out    chan<- wire.Cmd
+	out    chan<- outboundCmd
 }
 
-func newReader(out chan<- wire.Cmd) *reader {
+func newReader(out chan<- outboundCmd) *reader {
 	r := &reader{
 		values: make(map[string]float64, len(podChannels)),
 		rates:  make(map[wire.SensorID]uint16, 3),
@@ -125,10 +145,34 @@ func (r *reader) ReadFloat(ch string) (float64, error) {
 	return v, nil
 }
 
-// ChannelAttr exposes only the attrs the UI is meant to render. Everything
-// else returns an error so SnapshotAttrs prunes it silently.
+// SettingsAttrRecords is the attr snapshot for the registry / web UI: one
+// sampling_frequency row per sensor advertised in the last Hello.
+func (r *reader) SettingsAttrRecords() []store.AttrRecord {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	order := []wire.SensorID{wire.SensorStatic, wire.SensorMag, wire.SensorAirspeed}
+	out := make([]store.AttrRecord, 0, len(order))
+	for _, sid := range order {
+		cap, ok := r.caps[sid]
+		if !ok {
+			continue
+		}
+		hz := r.rates[sid]
+		if hz == 0 {
+			hz = cap.DefaultHz
+		}
+		out = append(out, store.AttrRecord{
+			Channel: sensorSettingsChannel[sid],
+			Attr:    "sampling_frequency",
+			Value:   strconv.FormatUint(uint64(hz), 10),
+		})
+	}
+	return out
+}
+
+// ChannelAttr exposes per-sensor settings (not on mag_y, static_temp, etc.).
 func (r *reader) ChannelAttr(ch, attr string) (string, error) {
-	sid, ok := sensorForPrimaryChannel(ch)
+	sid, ok := channelToSensor[ch]
 	if !ok {
 		return "", fmt.Errorf("pod: channel %q has no attrs", ch)
 	}
@@ -159,7 +203,7 @@ func (r *reader) Attr(name string) (string, error) {
 }
 
 func (r *reader) SetChannelAttr(ch, attr, value string) error {
-	sid, ok := sensorForPrimaryChannel(ch)
+	sid, ok := channelToSensor[ch]
 	if !ok {
 		return fmt.Errorf("pod: channel %q is not writable", ch)
 	}
@@ -177,33 +221,81 @@ func (r *reader) SetChannelAttr(ch, attr, value string) error {
 			return fmt.Errorf("pod: %s rate %d out of range [%d, %d]", sid, hz, c.MinHz, c.MaxHz)
 		}
 	}
+	prevHz := r.rates[sid]
 	r.rates[sid] = uint16(hz)
 	r.mu.Unlock()
-	// Fire-and-forget. If the outbound queue is full, drop — the next
-	// retry will catch up.
 	select {
-	case r.out <- wire.CmdSetRate{Sensor: sid, Hz: uint16(hz)}:
+	case r.out <- outboundCmd{
+		Cmd:     wire.CmdSetRate{Sensor: sid, Hz: uint16(hz)},
+		Sensor:  sid,
+		PrevHz:  prevHz,
+		HasPrev: true,
+	}:
 	default:
+		r.mu.Lock()
+		r.rates[sid] = prevHz
+		r.mu.Unlock()
 		return fmt.Errorf("pod: outbound queue full; dropped SetRate")
 	}
 	return nil
 }
 
+// ApplyDeviceConfig loads pod.attrs from config into the rate
+// cache and returns SetRate commands to push to the pod (when the link is up).
+func (r *reader) ApplyDeviceConfig(dev config.Device) []outboundCmd {
+	var outs []outboundCmd
+	for k, v := range dev.Attrs {
+		ch, attr := sensors.SplitIIOAttr(k)
+		if attr != "sampling_frequency" {
+			continue
+		}
+		sid, ok := channelToSensor[ch]
+		if !ok {
+			continue
+		}
+		hz64, err := strconv.ParseUint(strings.TrimSpace(v), 10, 16)
+		if err != nil {
+			continue
+		}
+		hz := uint16(hz64)
+		r.mu.Lock()
+		if c, ok := r.caps[sid]; ok {
+			if hz < c.MinHz || hz > c.MaxHz {
+				r.mu.Unlock()
+				continue
+			}
+		}
+		prev := r.rates[sid]
+		r.rates[sid] = hz
+		r.mu.Unlock()
+		outs = append(outs, outboundCmd{
+			Cmd:     wire.CmdSetRate{Sensor: sid, Hz: hz},
+			Sensor:  sid,
+			PrevHz:  prev,
+			HasPrev: true,
+		})
+	}
+	return outs
+}
+
+// setRateHz updates the cached rate (Ack success or timeout revert).
+func (r *reader) setRateHz(sid wire.SensorID, hz uint16) {
+	r.mu.Lock()
+	r.rates[sid] = hz
+	r.mu.Unlock()
+}
+
 func (r *reader) ReloadScale() error { return nil }
 
 func (r *reader) WritableAttr(ch, attr string) bool {
-	_, ok := sensorForPrimaryChannel(ch)
-	return ok && attr == "sampling_frequency"
+	if attr != "sampling_frequency" {
+		return false
+	}
+	sid, ok := channelToSensor[ch]
+	if !ok {
+		return false
+	}
+	return sensorSettingsChannel[sid] == ch
 }
 
 func (r *reader) Close() error { return nil }
-
-// sensorForPrimaryChannel reverses sensorPrimaryChannel.
-func sensorForPrimaryChannel(ch string) (wire.SensorID, bool) {
-	for sid, primary := range sensorPrimaryChannel {
-		if primary == ch {
-			return sid, true
-		}
-	}
-	return 0, false
-}

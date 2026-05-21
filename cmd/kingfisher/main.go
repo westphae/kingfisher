@@ -70,7 +70,7 @@ func main() {
 		if err != nil {
 			log.Printf("pod: %v (continuing without pod)", err)
 		} else {
-			podClient = pod.New(podAddr, t, hub, buf, registry)
+			podClient = pod.New(podAddr, t, hub, buf, registry, holder)
 			log.Printf("pod: listening on %s", podAddr)
 		}
 	}

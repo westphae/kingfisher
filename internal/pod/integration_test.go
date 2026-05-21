@@ -22,7 +22,7 @@ func TestUDPIntegration(t *testing.T) {
 
 	hub := live.NewHub()
 	reg := sensors.NewRegistry()
-	c := New(listenAddr.String(), transport, hub, nil, reg)
+	c := New(listenAddr.String(), transport, hub, nil, reg, nil)
 
 	stop := make(chan struct{})
 	done := make(chan struct{})
