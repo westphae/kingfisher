@@ -80,3 +80,5 @@ Plan files live under `~/.claude/plans/` outside the repo.
 ## Git / release etiquette
 
 There is a global rule (in `~/.claude/CLAUDE.md`) that no `git push`, no `git tag`, no GitHub release creation, and no version-string bumps happen without explicit per-action approval. CI being green is not authorization. Local commits, branches, and tests are fine. Show a proposed commit message before committing unless explicitly told to commit.
+
+**Atomic commits:** When committing, split work into logical units (e.g. a new driver, then optional bring-up, then docs/plan notes)—not one large commit for everything. Stage and commit each chunk with its own message; dependencies first.

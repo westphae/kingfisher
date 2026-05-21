@@ -1,0 +1,25 @@
+---
+description: Split git commits into logical units before committing
+alwaysApply: true
+---
+
+# Atomic commits (kingfisher)
+
+When the user asks you to commit, **do not** squash unrelated work into one commit.
+
+Before committing:
+
+1. Run `git status` and `git diff` and **partition** changes into logical chunks (one concern per commit).
+2. Stage and commit each chunk separately with its own message.
+3. Show the proposed commit list/messages before committing unless the user said to commit immediately.
+
+**Examples of separate commits:**
+
+- New driver or module (e.g. `ms4525.rs`) vs orchestration that uses it
+- Behavioral change (e.g. optional sensor bring-up) vs docs-only (README, CLAUDE.md)
+- Future-plan / Phase N documentation vs implementation
+- Pi-side vs firmware vs `pod_wire` when changes are independent
+
+**Order:** dependencies first (wire types → driver → integration → docs).
+
+Push only when the user explicitly requests it, and after all intended commits are done.
