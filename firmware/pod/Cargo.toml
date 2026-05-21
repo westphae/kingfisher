@@ -8,6 +8,7 @@ description = "Kingfisher wing-pod firmware (ESP32-C3)"
 [dependencies]
 # embassy async runtime + network stack
 embassy-executor = "0.10"
+embassy-futures = { version = "0.1", default-features = false }
 embassy-net = { version = "0.9", default-features = false, features = [
     "dhcpv4",
     "medium-ethernet",

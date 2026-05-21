@@ -19,10 +19,13 @@ pub const PI_IP: [u8; 4] = PI_EP.0;
 /// Parsed UDP port from [`PI_ADDR`].
 pub const PI_PORT: u16 = PI_EP.1;
 
-pub const FW_VERSION: u32 = 0x0003_0002;
+pub const FW_VERSION: u32 = 0x0004_0001;
 
 /// Sensor poll / uplink cadence (Hz). Mag 50 Hz is a later stretch goal.
 pub const TICK_MS: u64 = 100;
+
+/// Scheduler rate derived from [`TICK_MS`] (100 ms → 10 Hz).
+pub const BASE_HZ: u16 = (1000 / TICK_MS) as u16;
 
 /// Parse `a.b.c.d:port` at compile time (same source as `env!("PI_ADDR")`).
 const fn parse_pi_addr(s: &[u8]) -> ([u8; 4], u16) {

@@ -1,13 +1,18 @@
-//! Phase 3c wing-pod firmware: WiFi + optional BMP581, MMC5983MA, MS4525DO on I²C.
-//! Missing sensors are re-probed every 5 s (hot-plug / power-up without reflash).
+//! Phase 4 wing-pod firmware: optional I²C sensors, Ping/Pong, gated Hello,
+//! Cmd/Ack (SetRate), dynamic caps, and periodic Status.
 
 #![no_std]
 #![no_main]
 
 mod cfg;
+mod cmd;
+mod hello;
+mod link;
+mod rates;
 mod sensors;
 
 use embassy_executor::Spawner;
+use embassy_futures::select::{select, Either};
 use embassy_net::{
     udp::{PacketMetadata, UdpSocket},
     IpAddress, IpEndpoint, Runner, Stack, StackResources,
@@ -28,6 +33,7 @@ use esp_radio::wifi::{
     sta::StationConfig, AuthenticationMethod, Config, ControllerConfig, Interface,
     WifiController,
 };
+use pod_wire::{Frame, Status};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -51,12 +57,9 @@ async fn main(spawner: Spawner) -> ! {
         I2cConfig::default().with_frequency(Rate::from_khz(100)),
     )
     .unwrap()
-    // SparkFun Pro Micro ESP32-C3 Qwiic: SDA=GPIO5, SCL=GPIO6 (pins_arduino.h).
-    // Wing pod PCB target uses GPIO4/GPIO5 — change when that board exists.
     .with_sda(peripherals.GPIO5)
     .with_scl(peripherals.GPIO6);
     esp_hal::delay::Delay::new().delay_millis(50);
-    // SAFETY: unique ownership of I2C/pin peripherals for the life of the firmware.
     let i2c = mk_static!(sensors::bus::Bus, unsafe { core::mem::transmute(i2c) });
     spawner.spawn(sensor_bringup_task(i2c).unwrap());
 
@@ -110,7 +113,6 @@ async fn main(spawner: Spawner) -> ! {
     }
 }
 
-/// Probe sensors on the shared bus (none required), then poll forever.
 #[embassy_executor::task]
 async fn sensor_bringup_task(bus: &'static mut sensors::bus::Bus) {
     let board = sensors::bringup_board(bus);
@@ -163,78 +165,91 @@ async fn uplink_task(stack: Stack<'static>) {
     );
 
     let mut frame_buf = [0u8; 512];
-
-    let hello = build_hello();
-    let mut next_hello = Instant::now();
+    let mut udp_rx = [0u8; 512];
     let mut ticker = Ticker::every(Duration::from_millis(cfg::TICK_MS));
     let mut next_log = Instant::now() + Duration::from_secs(5);
+    let mut next_status = Instant::now() + Duration::from_secs(5);
     let mut sent_since_log: u32 = 0;
     let mut seq: u32 = 0;
+    let mut pi_peer: Option<IpEndpoint> = None;
+
     loop {
-        ticker.next().await;
-        let now = Instant::now();
-        if now >= next_hello {
-            next_hello = now + Duration::from_secs(5);
-            match pod_wire::encode_to_slice(&hello, &mut frame_buf) {
-                Ok(bytes) => match socket.send_to(bytes, dest).await {
-                    Ok(()) => println!("pod: sent Hello -> {}", dest),
-                    Err(e) => println!("pod: hello send: {:?}", e),
-                },
-                Err(_) => println!("pod: hello encode failed"),
+        match select(ticker.next(), socket.recv_from(&mut udp_rx)).await {
+            Either::First(()) => {
+                let now = Instant::now();
+                let uptime_us = now.as_micros();
+
+                if link::should_send_hello(uptime_us) {
+                    let mask = sensors::attached_mask();
+                    let hello = hello::build(mask);
+                    match pod_wire::encode_to_slice(&hello, &mut frame_buf) {
+                        Ok(bytes) => {
+                            if socket.send_to(bytes, dest).await.is_ok() {
+                                link::mark_hello_sent(uptime_us);
+                                println!("pod: sent Hello (caps={})", mask);
+                            }
+                        }
+                        Err(_) => println!("pod: hello encode failed"),
+                    }
+                }
+
+                seq = seq.wrapping_add(1);
+                let batch = sensors::with_samples(|s| s.build_batch(uptime_us, seq));
+                if !batch.samples.is_empty() {
+                    let frame = Frame::Sample(batch);
+                    if let Ok(bytes) = pod_wire::encode_to_slice(&frame, &mut frame_buf) {
+                        let peer = pi_peer.unwrap_or(dest);
+                        if socket.send_to(bytes, peer).await.is_ok() {
+                            sent_since_log += 1;
+                        }
+                    }
+                }
+
+                if now >= next_status {
+                    next_status = now + Duration::from_secs(5);
+                    let status = Frame::Status(Status {
+                        pod_uptime_us: uptime_us,
+                        battery_v: 0.0,
+                        rssi_dbm: 0,
+                        tx_seq: seq,
+                        rx_seq_last: cmd::last_rx_cmd_seq(),
+                    });
+                    if let Ok(bytes) = pod_wire::encode_to_slice(&status, &mut frame_buf) {
+                        let peer = pi_peer.unwrap_or(dest);
+                        let _ = socket.send_to(bytes, peer).await;
+                    }
+                }
+
+                if now >= next_log {
+                    println!("pod: uplink ok, {} pkts in last 5s", sent_since_log);
+                    sent_since_log = 0;
+                    next_log = now + Duration::from_secs(5);
+                }
             }
-        }
-        let uptime_us = Instant::now().as_micros();
-        seq = seq.wrapping_add(1);
-        let batch = sensors::with_samples(|s| s.build_batch(uptime_us, seq));
-        if batch.samples.is_empty() {
-            continue;
-        }
-        let frame = pod_wire::Frame::Sample(batch);
-        let bytes = match pod_wire::encode_to_slice(&frame, &mut frame_buf) {
-            Ok(b) => b,
-            Err(_) => {
-                println!("pod: encode failed");
-                continue;
+            Either::Second(Ok((n, meta))) => {
+                if n == 0 {
+                    continue;
+                }
+                let peer = meta.endpoint;
+                pi_peer = Some(peer);
+                let now_us = Instant::now().as_micros();
+                let uptime_us = now_us;
+                let replies = cmd::handle_datagram(&udp_rx[..n], now_us, uptime_us);
+                for reply in replies {
+                    match &reply {
+                        Frame::Ack(a) => {
+                            println!("pod: ack for_seq={} ok={}", a.for_seq, a.ok);
+                        }
+                        _ => {}
+                    }
+                    if let Ok(bytes) = pod_wire::encode_to_slice(&reply, &mut frame_buf) {
+                        let _ = socket.send_to(bytes, peer).await;
+                    }
+                }
             }
-        };
-        if let Err(e) = socket.send_to(bytes, dest).await {
-            println!("pod: send: {:?}", e);
-            continue;
-        }
-        sent_since_log += 1;
-        if now >= next_log {
-            println!("pod: uplink ok, {} pkts in last 5s", sent_since_log);
-            sent_since_log = 0;
-            next_log = now + Duration::from_secs(5);
+            Either::Second(Err(e)) => {
+                println!("pod: udp recv: {:?}", e);
+            }
         }
     }
-}
-
-fn build_hello() -> pod_wire::Frame {
-    use heapless::Vec;
-    use pod_wire::*;
-    let mut sensors: Vec<SensorCap, MAX_SENSORS> = Vec::new();
-    let _ = sensors.push(SensorCap {
-        id: SensorId::Airspeed,
-        min_hz: 1,
-        max_hz: 50,
-        default_hz: 10,
-    });
-    let _ = sensors.push(SensorCap {
-        id: SensorId::Static,
-        min_hz: 1,
-        max_hz: 50,
-        default_hz: 10,
-    });
-    let _ = sensors.push(SensorCap {
-        id: SensorId::Mag,
-        min_hz: 1,
-        max_hz: 200,
-        default_hz: 50,
-    });
-    Frame::Hello(Hello {
-        fw_version: cfg::FW_VERSION,
-        proto_version: PROTO_VERSION,
-        caps: Capabilities { sensors },
-    })
 }

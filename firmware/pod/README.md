@@ -134,6 +134,18 @@ connection) and the port kingfisher listens on. `build.rs` reads the
 file at compile time and injects values into `src/cfg.rs` via `env!`.
 Cross-machine builds: `KINGFISHER_CONFIG=/path/to/config.json cargo build --release`.
 
+## Deferred bench validation (Phase 3c / MS4525)
+
+Not required for Phase 4 firmware work. Run when 5 V is available for the
+MS4525DO-DS5:
+
+| Step | Action | Pass criteria |
+|------|--------|----------------|
+| Power | Apply **5 V** to MS4525 VCC (3.3 V I²C on Qwiic) | Serial: `ms4525 attached at 0x28` within 5 s hot-attach |
+| Flash | `cargo build --release` + `espflash flash` (FW `0x0003_0002` or later) | `uplink ok` with non-empty batches |
+| Pi | `go run ./cmd/kingfisher` (not podprobe on `:47808`) | `pod` device: `static_*`, `mag_*` |
+| Airspeed | Rest + light suction/blow on **+** port | `airspeed_dp` ~0 Pa at rest; moves with ΔP; `airspeed_temp` plausible |
+
 ## Verification
 
 Pre-condition: Pi WiFi AP running; `~/.config/kingfisher/config.json`
@@ -149,9 +161,28 @@ Pre-condition: Pi WiFi AP running; `~/.config/kingfisher/config.json`
 3. **MS4525 bench** (5 V applied): `airspeed_dp` near 0 Pa at rest; suction/blow on
    the `+` port moves ΔP. Without 5 V, `ms4525 not present` is expected.
 
-Phase 3 sensor coding is complete. Phase 4: control-plane (Cmd/Ack, rates),
-firmware UDP recv with Ping/Pong, gated Hello when the Pi is talking, and
-optional Status / dynamic caps.
+**Status: Phase 4 — control plane and link keepalive.** Firmware answers Pi
+`Ping` with `Pong`, gates `Hello` when the link is active (30 s rediscover),
+handles `Cmd`/`Ack` (including `SetRate`), sends dynamic caps and periodic
+`Status`. Pi assigns cmd seq, tracks pending `Ack`, and reverts failed rate changes.
+
+### Persisted settings (Pi config)
+
+Sampling rates set in the web UI are written to `~/.config/kingfisher/config.json`
+under `pod.attrs` (e.g. `in_mag_sampling_frequency`) and survive power cycles.
+Kingfisher reapplies
+them on startup and after each pod Hello; changing config and saving also re-sends
+`SetRate` to the pod. Firmware does not read this file — only the Pi pushes rates
+over UDP after restart.
+
+### Phase 4 verification
+
+1. Flash FW `0x0004_0001` (or later); start kingfisher on the Pi AP.
+2. Serial: `sent Hello` once at boot, then quiet; `uplink ok` when sensors present.
+3. Pi log: no repeated `pod: ping` errors after the pod appears; `ack for_seq=…` when
+   changing `sampling_frequency` on `mag_x` / `static_p` / `airspeed_dp` in the UI.
+4. Stop kingfisher for ~30 s: Hello resumes on the pod serial log.
+5. Hot-plug a sensor: next Hello lists only attached caps.
 
 ## Troubleshooting
 

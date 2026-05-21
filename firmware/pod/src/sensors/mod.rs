@@ -6,6 +6,7 @@ pub mod mmc5983;
 pub mod ms4525;
 
 use core::cell::RefCell;
+use core::sync::atomic::{AtomicU8, Ordering};
 
 use critical_section::Mutex;
 use embassy_time::Instant;
@@ -17,6 +18,37 @@ use bus::Bus;
 use esp_println::{print, println};
 use mmc5983::Mmc5983;
 use ms4525::Ms4525;
+
+use crate::link;
+use crate::rates;
+
+pub const BMP_BIT: u8 = 1;
+pub const MMC_BIT: u8 = 2;
+pub const MS4525_BIT: u8 = 4;
+
+static ATTACHED: AtomicU8 = AtomicU8::new(0);
+
+pub fn attached_mask() -> u8 {
+    ATTACHED.load(Ordering::Relaxed)
+}
+
+fn sync_attached(board: &SensorBoard) {
+    let mut mask = 0u8;
+    if board.bmp581.is_some() {
+        mask |= BMP_BIT;
+    }
+    if board.mmc5983.is_some() {
+        mask |= MMC_BIT;
+    }
+    if board.ms4525.is_some() {
+        mask |= MS4525_BIT;
+    }
+    let prev = ATTACHED.load(Ordering::Relaxed);
+    ATTACHED.store(mask, Ordering::Relaxed);
+    if prev != mask {
+        link::request_hello();
+    }
+}
 
 /// Timestamped reading for `age_us` in the wire batch.
 #[derive(Clone)]
@@ -205,65 +237,94 @@ pub fn bringup_board(bus: &mut Bus) -> SensorBoard {
         ms4525: try_attach_ms4525(bus),
     };
     log_board_ready(&board);
+    sync_attached(&board);
     board
 }
 
-/// 10 Hz poll loop; re-probes missing sensors every 5 s. Does not return.
+/// Base-tick poll loop; re-probes missing sensors every 5 s. Does not return.
 pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
+    use pod_wire::SensorId;
+
     let mut ticker = embassy_time::Ticker::every(embassy_time::Duration::from_millis(
         crate::cfg::TICK_MS,
     ));
     let mut attach_ticks: u32 = 0;
+    let mut poll_tick: u32 = 0;
     const ATTACH_INTERVAL: u32 = 50; // 5 s at 10 Hz
 
     loop {
         ticker.next().await;
+        poll_tick = poll_tick.wrapping_add(1);
         let captured_us = Instant::now().as_micros();
 
-        if let Some(ref bmp581) = board.bmp581 {
-            match bmp581.read(bus) {
-                Ok(s) => {
-                    update_static(
-                        Reading::Static {
-                            p_pa: s.p_pa,
-                            temp_c: s.temp_c,
-                            age_us: 0,
-                        },
-                        captured_us,
-                    );
+        if board.bmp581.is_some() {
+            let hz = rates::get(SensorId::Static);
+            if rates::should_poll(poll_tick, hz) {
+                let n = rates::reads_this_tick(hz);
+                for _ in 0..n {
+                    if let Some(ref bmp581) = board.bmp581 {
+                        match bmp581.read(bus) {
+                            Ok(s) => {
+                                update_static(
+                                    Reading::Static {
+                                        p_pa: s.p_pa,
+                                        temp_c: s.temp_c,
+                                        age_us: 0,
+                                    },
+                                    captured_us,
+                                );
+                            }
+                            Err(()) => println!("pod: bmp581 read failed"),
+                        }
+                    }
                 }
-                Err(()) => println!("pod: bmp581 read failed"),
             }
         }
-        if let Some(ref mmc5983) = board.mmc5983 {
-            match mmc5983.read(bus) {
-                Ok(s) => {
-                    update_mag(
-                        Reading::Mag {
-                            x_ut: s.x_ut,
-                            y_ut: s.y_ut,
-                            z_ut: s.z_ut,
-                            age_us: 0,
-                        },
-                        captured_us,
-                    );
+        if board.mmc5983.is_some() {
+            let hz = rates::get(SensorId::Mag);
+            if rates::should_poll(poll_tick, hz) {
+                let n = rates::reads_this_tick(hz);
+                for _ in 0..n {
+                    if let Some(ref mmc5983) = board.mmc5983 {
+                        match mmc5983.read(bus) {
+                            Ok(s) => {
+                                update_mag(
+                                    Reading::Mag {
+                                        x_ut: s.x_ut,
+                                        y_ut: s.y_ut,
+                                        z_ut: s.z_ut,
+                                        age_us: 0,
+                                    },
+                                    captured_us,
+                                );
+                            }
+                            Err(()) => println!("pod: mmc5983 read failed"),
+                        }
+                    }
                 }
-                Err(()) => println!("pod: mmc5983 read failed"),
             }
         }
-        if let Some(ref ms4525) = board.ms4525 {
-            match ms4525.read(bus) {
-                Ok(s) => {
-                    update_airspeed(
-                        Reading::Airspeed {
-                            dp_pa: s.dp_pa,
-                            temp_c: s.temp_c,
-                            age_us: 0,
-                        },
-                        captured_us,
-                    );
+        if board.ms4525.is_some() {
+            let hz = rates::get(SensorId::Airspeed);
+            if rates::should_poll(poll_tick, hz) {
+                let n = rates::reads_this_tick(hz);
+                for _ in 0..n {
+                    if let Some(ref ms4525) = board.ms4525 {
+                        match ms4525.read(bus) {
+                            Ok(s) => {
+                                update_airspeed(
+                                    Reading::Airspeed {
+                                        dp_pa: s.dp_pa,
+                                        temp_c: s.temp_c,
+                                        age_us: 0,
+                                    },
+                                    captured_us,
+                                );
+                            }
+                            Err(()) => println!("pod: ms4525 read failed"),
+                        }
+                    }
                 }
-                Err(()) => println!("pod: ms4525 read failed"),
             }
         }
 
@@ -272,6 +333,7 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
             if attach_ticks >= ATTACH_INTERVAL {
                 attach_ticks = 0;
                 try_attach_missing(bus, &mut board);
+                sync_attached(&board);
             }
         }
     }
