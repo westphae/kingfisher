@@ -17,7 +17,7 @@ The Pi this repo lives on is also the *deployment target*. Tests can hit real sy
 - `internal/pod/` — wing-pod ingest over UDP. Mirrors the `gps` shape but adds a `podReader` registered with `sensors.Registry` so the existing attr UI works. Data path bypasses `sensors.runOne` — Reader is a façade for the UI only.
 - `internal/derive/{altitude,declination,ahrs}.go` — virtual devices computed from hub snapshots. Each reads `hub.SnapshotNow()` and republishes a synthesized sample.
 - `pod_wire/` — shared Rust no_std crate defining the pod ↔ Pi wire format (`postcard` + CRC32 framing). The Go side mirrors it in `internal/pod/wire/`.
-- `firmware/pod/` — ESP32-C3 firmware (Phase 3b: BMP581 + MMC5983MA on I²C; airspeed pending).
+- `firmware/pod/` — ESP32-C3 firmware (Phase 3c: BMP581, MMC5983, MS4525 on I²C; all optional, hot-attach every 5 s).
 - `datasheets/` — gitignored local working files. Don't expect them in CI.
 
 ## go.mod has local replace directives
@@ -67,7 +67,7 @@ The pod has no sysfs. `podReader` satisfies `sensors.Reader` purely so `sensors.
 
 ## The pod plan
 
-The current pod work is rolled out in phases (Phase 0 = wire crate, Phase 2 = Pi-side ingest are done; Phase 3 = real sensors on the pod, Phase 4 = control plane, Phase 5 = AHRS mag integration are pending). Phase 5 explicitly requires surgery on `internal/derive/ahrs.go::findIMU` — it currently expects accel/gyro/mag on the *same* device sample, which won't match the pod-vs-IMU split.
+The current pod work is rolled out in phases (Phase 0 = wire crate, Phase 2 = Pi-side ingest are done; Phase 3 = real sensors on the pod, Phase 4 = control plane, Phase 5 = AHRS mag integration are pending). Phase 4 also covers bidirectional link keepalive: firmware UDP recv, Ping→Pong (gate periodic Hello on recent inbound Pi traffic; use Ack for Cmd), optional dynamic Hello caps and Status frames — v1 still sends Hello every 5 s. Phase 5 explicitly requires surgery on `internal/derive/ahrs.go::findIMU` — it currently expects accel/gyro/mag on the *same* device sample, which won't match the pod-vs-IMU split.
 
 Plan files live under `~/.claude/plans/` outside the repo.
 

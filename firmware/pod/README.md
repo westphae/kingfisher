@@ -4,9 +4,9 @@ Rust no_std firmware for the wing-pod `ESP32-C3-Mini-1` (variant
 `ESP32-C3FH4`). The pod associates to the cabin Pi's WiFi AP and
 transmits postcard-encoded `Frame`s (defined in `pod_wire/`) over UDP.
 
-**Status: Phase 3b — BMP581 static + MMC5983MA magnetometer on I²C.**
-Firmware polls both at 10 Hz and uplinks `static_p` / `static_temp` and
-`mag_x` / `mag_y` / `mag_z`. Airspeed (MS4525DO) is Phase 3c.
+**Status: Phase 3c — all three I²C sensors coded.** Firmware polls each present
+sensor at 10 Hz and uplinks `static_*`, `mag_*`, and `airspeed_*` as available.
+**No sensor is required** at boot; missing devices are re-probed every 5 s.
 
 ## Bill of materials
 
@@ -28,10 +28,11 @@ the module sits inside a (probably composite or sheet-metal) fairing.
 
 ## Wiring
 
-All three sensors run at 3.3 V and share a single I²C bus. The bus uses
-**4.7 kΩ pull-ups to 3V3** on both SDA and SCL — only fit them once for
-the whole bus, not per sensor. The MS4525DO breakout typically already
-has pull-ups; check before stacking.
+BMP581 and MMC5983 run at **3.3 V** on the Qwiic bus. The **MS4525DO-DS5**
+variant needs **5 V on VCC** (separate from the ESP 3.3 V); I²C lines still
+join the same Qwiic chain (confirm your breakout is 3.3 V I²C-tolerant).
+Use **4.7 kΩ pull-ups to 3V3** once on the bus; each Qwiic board may also
+ship 2.2 kΩ — cut **I2C** on one board if the bus misbehaves when daisy-chaining.
 
 | ESP32-C3 pin | Net     | To                                    |
 | ------------ | ------- | ------------------------------------- |
@@ -48,7 +49,7 @@ Planned wing pod PCB may move the bus to **IO4/IO5**; update `main.rs` when that
 | `IO18`/`IO19`| USB D-/+| USB-C connector for flashing          |
 | `EN`         | `EN`    | 10 kΩ pull-up to 3V3, optional button |
 
-**Pull-ups:** Pro Micro, BMP581, and MMC5983 Qwiic boards each enable 2.2 kΩ on SDA/SCL. Daisy-chain all three on one cable; if the bus NACKs, cut the **I2C** jumper on **one** board (SparkFun guidance). Bench order: Pro Micro → BMP581 (0x47) → [MMC5983MA Qwiic](https://www.sparkfun.com/products/19921) (0x30).
+**Bench Qwiic chain:** Pro Micro → BMP581 (0x47) → [MMC5983MA](https://www.sparkfun.com/products/19921) (0x30) → MS4525 (0x28) when powered. Firmware re-probes MS4525 every 5 s if it was missing at boot.
 
 The native USB peripheral on `IO18`/`IO19` lets `espflash` talk
 directly to the chip — no external USB-UART bridge needed. A single
@@ -136,19 +137,21 @@ Cross-machine builds: `KINGFISHER_CONFIG=/path/to/config.json cargo build --rele
 ## Verification
 
 Pre-condition: Pi WiFi AP running; `~/.config/kingfisher/config.json`
-`pod` block matches the AP; BMP581 + MMC5983 on Qwiic (Pro Micro **IO5/IO6**).
+`pod` block matches the AP; sensors on Qwiic (Pro Micro **IO5/IO6**).
 
 1. **Flash**: `cargo build --release` then
    `espflash flash --monitor target/.../release/pod`. Monitor should show:
-   - `pod: i2c scan: 0x47(id=0x50) … 0x30(id=0x30)` (addresses may vary for BMP581 SDO)
-   - `pod: bmp581 init ok` / `pod: mmc5983 init ok` / `sensor board ready …`
+   - `pod: i2c scan: 0x47(id=0x50) … 0x30(id=0x30)` and `0x28(st=0)` when MS4525 powered
+   - `pod: sensor board ready …` (ms4525 line optional if no 5 V)
    - WiFi + `sent Hello` + `uplink ok, … pkts`
-2. **Kingfisher**: `go run ./cmd/kingfisher` — `pod` device shows
-   `static_p`, `static_temp`, `mag_x`, `mag_y`, `mag_z` at ~10 Hz.
-3. **Mag bench**: rotate the board; components change; |B| is roughly
-   25–65 µT depending on location/inclination (not sinusoids).
+2. **Kingfisher**: `go run ./cmd/kingfisher` — `pod` shows `static_*`, `mag_*`, and
+   `airspeed_*` when MS4525 is on the bus.
+3. **MS4525 bench** (5 V applied): `airspeed_dp` near 0 Pa at rest; suction/blow on
+   the `+` port moves ΔP. Without 5 V, `ms4525 not present` is expected.
 
-Next: MS4525DO (airspeed).
+Phase 3 sensor coding is complete. Phase 4: control-plane (Cmd/Ack, rates),
+firmware UDP recv with Ping/Pong, gated Hello when the Pi is talking, and
+optional Status / dynamic caps.
 
 ## Troubleshooting
 

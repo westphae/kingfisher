@@ -1,5 +1,5 @@
-//! Phase 3b wing-pod firmware: WiFi + BMP581 static + MMC5983MA mag over I²C.
-//! Airspeed (MS4525DO) lands in Phase 3c.
+//! Phase 3c wing-pod firmware: WiFi + optional BMP581, MMC5983MA, MS4525DO on I²C.
+//! Missing sensors are re-probed every 5 s (hot-plug / power-up without reflash).
 
 #![no_std]
 #![no_main]
@@ -110,16 +110,10 @@ async fn main(spawner: Spawner) -> ! {
     }
 }
 
-/// Probe sensors on the shared bus; retry every 2s until init succeeds, then poll forever.
+/// Probe sensors on the shared bus (none required), then poll forever.
 #[embassy_executor::task]
 async fn sensor_bringup_task(bus: &'static mut sensors::bus::Bus) {
-    let board = loop {
-        if let Some(board) = sensors::bringup_board(bus) {
-            break board;
-        }
-        println!("pod: sensor board init failed; retry in 2s");
-        embassy_time::Timer::after(embassy_time::Duration::from_secs(2)).await;
-    };
+    let board = sensors::bringup_board(bus);
     sensors::run_sensor_poll(bus, board).await;
 }
 

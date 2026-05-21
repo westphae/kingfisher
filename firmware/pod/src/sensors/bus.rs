@@ -20,7 +20,7 @@ fn probe_reg(bus: &mut Bus, addr: u8, reg: u8, seen: &mut [bool; 128]) -> u8 {
     }
 }
 
-/// Log responding 7-bit addresses (targeted register reads, then full-range write probe).
+/// Log responding 7-bit addresses (targeted probes, then full-range write probe).
 pub fn scan(bus: &mut Bus) {
     print!("pod: i2c scan:");
     let mut found = 0u8;
@@ -28,6 +28,10 @@ pub fn scan(bus: &mut Bus) {
     found += probe_reg(bus, 0x47, 0x01, &mut seen);
     found += probe_reg(bus, 0x46, 0x01, &mut seen);
     found += probe_reg(bus, 0x30, 0x2f, &mut seen);
+    if !seen[super::ms4525::ADDR as usize] {
+        found += super::ms4525::Ms4525::scan_line(bus);
+        seen[super::ms4525::ADDR as usize] = true;
+    }
     for addr in 0x08u8..=0x77 {
         if seen[addr as usize] {
             continue;
