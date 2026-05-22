@@ -19,13 +19,13 @@ const DeviceName = "pod"
 // channel names exposed on the pod device. They land as columns in the
 // flight DB (sanitised) and as keys in the WS feed.
 const (
-	ChAirspeedDP   = "airspeed_dp"
-	ChAirspeedTemp = "airspeed_temp"
-	ChStaticP      = "static_p"
-	ChStaticTemp   = "static_temp"
-	ChMagX         = "mag_x"
-	ChMagY         = "mag_y"
-	ChMagZ         = "mag_z"
+	ChAirspeedDP   = "airspeed_dp_pa"
+	ChAirspeedTemp = "airspeed_temp_c"
+	ChStaticP      = "static_pressure_pa"
+	ChStaticTemp   = "static_temp_c"
+	ChMagX         = "mag_x_ut"
+	ChMagY         = "mag_y_ut"
+	ChMagZ         = "mag_z_ut"
 )
 
 var podChannels = []string{
@@ -36,7 +36,7 @@ var podChannels = []string{
 
 // sensorSettingsChannel is the UI label for per-sensor rate control. The pod
 // firmware sets one Hz per physical sensor (MMC5983, BMP581, MS4525), not per
-// data channel — mag_x/y/z and static_p/temp share the same rate.
+// data channel — mag_*_ut and static_pressure_pa/temp_c share the same rate.
 var sensorSettingsChannel = map[wire.SensorID]string{
 	wire.SensorAirspeed: "airspeed",
 	wire.SensorStatic:   "static",

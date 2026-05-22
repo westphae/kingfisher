@@ -119,16 +119,36 @@ async fn sensor_bringup_task(bus: &'static mut sensors::bus::Bus) {
     sensors::run_sensor_poll(bus, board).await;
 }
 
+fn clamp_rssi_dbm(rssi: i32) -> i8 {
+    rssi.clamp(-128, 127) as i8
+}
+
 #[embassy_executor::task]
 async fn connection_task(mut controller: WifiController<'static>) {
+    let mut rssi_tick = Ticker::every(Duration::from_secs(1));
     loop {
         match controller.connect_async().await {
             Ok(info) => {
                 println!("pod: wifi connected: {:?}", info);
-                let _ = controller.wait_for_disconnect_async().await;
-                println!("pod: wifi disconnected");
+                if let Ok(rssi) = controller.rssi() {
+                    link::set_wifi_rssi(clamp_rssi_dbm(rssi));
+                }
+                loop {
+                    match select(rssi_tick.next(), controller.wait_for_disconnect_async()).await {
+                        Either::First(()) => match controller.rssi() {
+                            Ok(rssi) => link::set_wifi_rssi(clamp_rssi_dbm(rssi)),
+                            Err(_) => link::clear_wifi_rssi(),
+                        },
+                        Either::Second(Ok(_)) | Either::Second(Err(_)) => {
+                            link::clear_wifi_rssi();
+                            println!("pod: wifi disconnected");
+                            break;
+                        }
+                    }
+                }
             }
             Err(e) => {
+                link::clear_wifi_rssi();
                 println!("pod: wifi connect error: {:?}", e);
             }
         }
@@ -210,7 +230,7 @@ async fn uplink_task(stack: Stack<'static>) {
                     let status = Frame::Status(Status {
                         pod_uptime_us: uptime_us,
                         battery_v: 0.0,
-                        rssi_dbm: 0,
+                        rssi_dbm: link::wifi_rssi_dbm(),
                         tx_seq: seq,
                         rx_seq_last: cmd::last_rx_cmd_seq(),
                     });

@@ -75,7 +75,7 @@ func main() {
 		}
 	}
 
-	srv, err := web.New(holder, hub, st, buf, gpsClient, registry)
+	srv, err := web.New(holder, hub, st, buf, gpsClient, podClient, registry)
 	if err != nil {
 		log.Fatalf("web: %v", err)
 	}

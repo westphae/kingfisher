@@ -73,7 +73,7 @@ Plan files live under `~/.claude/plans/` outside the repo.
 
 ## Project conventions worth knowing
 
-- Channel names in `Values` maps are the SQLite column names (after `store.Sanitize`). Pick them with that in mind — `airspeed_dp`, not `Airspeed.dp_pa`.
+- Channel names in `Values` maps are the SQLite column names (after `store.Sanitize`). Use SI-friendly names with unit suffixes where helpful: `pressure_pa`, `temp_c`, `airspeed_dp_pa`, `mag_x_ut`. Angles on derived devices are plain `roll`/`pitch`/`yaw` (degrees). See `internal/units`.
 - Virtual devices that synthesize data publish under a stable name (`gps`, `pod`, `ahrs`, `press_alt`, `geo`). Adding a new one only requires `hub.Publish` calls and (optionally) `Registry` registration.
 - `chips.go` holds per-chip fallback attr tables. Don't add fallback entries for the pod — its caps are advertised at runtime via `wire.Hello`.
 

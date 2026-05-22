@@ -47,7 +47,7 @@ type Client struct {
 	pending  map[uint32]pendingEntry
 	pendingMu sync.Mutex
 
-	lastPongNs atomic.Int64
+	lastRxNs atomic.Int64
 
 	// offsetNs is (pi_wall_ns at receive) - (pod_uptime_ns of that batch),
 	// EMA-smoothed. Set the first time a SampleBatch lands; updated on
@@ -57,8 +57,16 @@ type Client struct {
 	offsetInited atomic.Bool
 
 	// linkSeq tracks the highest seq we've observed; gaps indicate loss.
-	linkSeq uint32
-	mu      sync.Mutex
+	linkSeq    uint32
+	rxBatches  atomic.Uint64
+	rxDropped  atomic.Uint64
+	txPackets  atomic.Uint64
+
+	lastStatusNs  atomic.Int64
+	statusRssi    atomic.Int32
+	statusBattery atomic.Uint32
+
+	mu sync.Mutex
 }
 
 // New constructs a Client. Caller must call Run to start it. The hub and
@@ -156,6 +164,8 @@ func (c *Client) runSend(ctx context.Context) {
 				if e, ok := c.clearPending(seq); ok {
 					c.reader.setRateHz(e.rollbackSensor, e.rollbackHz)
 				}
+			} else {
+				c.noteTxOK()
 			}
 		}
 	}
@@ -189,6 +199,8 @@ func (c *Client) runPinger(ctx context.Context) {
 			if err := c.transport.Send(ping); err != nil {
 				// Most common cause is "no peer learned yet"; quiet log.
 				log.Printf("pod: ping: %v", err)
+			} else {
+				c.noteTxOK()
 			}
 		}
 	}
@@ -196,6 +208,7 @@ func (c *Client) runPinger(ctx context.Context) {
 
 // dispatch routes one decoded frame to its handler.
 func (c *Client) dispatch(frame wire.Frame, peer string) {
+	c.noteRx()
 	switch f := frame.(type) {
 	case wire.Hello:
 		log.Printf("pod: hello from %s fw=%#x sensors=%d", peer, f.FwVersion, len(f.Caps.Sensors))
@@ -209,6 +222,7 @@ func (c *Client) dispatch(frame wire.Frame, peer string) {
 			Values: c.reader.snapshotValues(),
 		})
 	case wire.Status:
+		c.noteStatus(f)
 		log.Printf("pod: status uptime=%dus batt=%.2fV rssi=%ddBm tx=%d", f.PodUptimeUs, f.BatteryV, f.RssiDBm, f.TxSeq)
 	case wire.SampleBatch:
 		c.onBatch(f)
@@ -231,9 +245,10 @@ func (c *Client) dispatch(frame wire.Frame, peer string) {
 		}
 		if err := c.transport.Send(pong); err != nil {
 			log.Printf("pod: pong send: %v", err)
+		} else {
+			c.noteTxOK()
 		}
 	case wire.Pong:
-		c.lastPongNs.Store(time.Now().UnixNano())
 		c.maybeRefreshViewsAfterTraffic()
 	case wire.CmdFrame:
 		// We should never receive Cmd from the pod.
@@ -260,10 +275,13 @@ func (c *Client) onBatch(b wire.SampleBatch) {
 
 	c.mu.Lock()
 	if b.Seq > c.linkSeq+1 && c.linkSeq != 0 {
-		log.Printf("pod: seq gap %d -> %d", c.linkSeq, b.Seq)
+		gap := uint64(b.Seq - c.linkSeq - 1)
+		c.rxDropped.Add(gap)
+		log.Printf("pod: seq gap %d -> %d (%d dropped)", c.linkSeq, b.Seq, gap)
 	}
 	c.linkSeq = b.Seq
 	c.mu.Unlock()
+	c.rxBatches.Add(1)
 
 	capsAdded := false
 	for _, rd := range b.Samples {

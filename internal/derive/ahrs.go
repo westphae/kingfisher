@@ -14,7 +14,8 @@ import (
 )
 
 // AHRSFromHub builds AHRS Measurements from the latest IMU + GPS samples at
-// rateHz and publishes roll/pitch/heading on the "ahrs" virtual device.
+// rateHz and publishes attitude on the "ahrs" virtual device. Angles are
+// degrees (roll, pitch, yaw from mag+IMU fusion — not a raw sensor channel).
 // The simple AHRS implementation is chosen because it has the smallest
 // dependency surface; the Kalman variants can be swapped in later.
 func AHRSFromHub(ctx context.Context, rateHz float64, hub *live.Hub, gpsc *gps.Client, buf *store.Buffer) {
@@ -43,12 +44,12 @@ func AHRSFromHub(ctx context.Context, rateHz float64, hub *live.Hub, gpsc *gps.C
 				Device: "ahrs",
 				TsNs:   time.Now().UnixNano(),
 				Values: map[string]float64{
-					"roll_deg":    radToDeg(roll),
-					"pitch_deg":   radToDeg(pitch),
-					"heading_deg": radToDeg(heading),
-					"slip_skid":   provider.SlipSkid(),
-					"turn_rate":   provider.RateOfTurn(),
-					"gload":       provider.GLoad(),
+					"roll":            radToDeg(roll),
+					"pitch":           radToDeg(pitch),
+					"yaw":             radToDeg(heading),
+					"slip_skid":       provider.SlipSkid(),
+					"turn_rate_deg_s": provider.RateOfTurn(),
+					"g_load":          provider.GLoad(),
 				},
 			}
 			hub.Publish(sm)

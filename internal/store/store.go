@@ -56,13 +56,24 @@ func (s *Store) Path() string { return s.path }
 
 func (s *Store) DB() *sql.DB { return s.db }
 
-// Size reports the on-disk byte count, or 0 if the file is gone.
+// Size reports total on-disk bytes for this flight DB: the main file plus
+// SQLite WAL/SHM sidecars when present.
 func (s *Store) Size() int64 {
-	fi, err := os.Stat(s.path)
-	if err != nil {
-		return 0
+	var total int64
+	for _, p := range []string{s.path, s.path + "-wal", s.path + "-shm"} {
+		fi, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		total += fi.Size()
 	}
-	return fi.Size()
+	return total
+}
+
+// VolumeFreeBytes reports space available to unprivileged users on the
+// filesystem that contains the flight DB.
+func (s *Store) VolumeFreeBytes() (int64, error) {
+	return volumeFreeBytes(s.path)
 }
 
 func (s *Store) Close() error {

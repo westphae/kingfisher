@@ -23,6 +23,7 @@ import (
 	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/gps"
 	"github.com/westphae/kingfisher/internal/live"
+	"github.com/westphae/kingfisher/internal/pod"
 	"github.com/westphae/kingfisher/internal/sensors"
 	"github.com/westphae/kingfisher/internal/store"
 )
@@ -36,6 +37,7 @@ type Server struct {
 	store *store.Store
 	buf   *store.Buffer
 	gps   *gps.Client
+	pod   *pod.Client
 	reg   *sensors.Registry
 
 	tpl     *template.Template
@@ -43,7 +45,7 @@ type Server struct {
 	up      websocket.Upgrader
 }
 
-func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, gpsc *gps.Client, reg *sensors.Registry) (*Server, error) {
+func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, gpsc *gps.Client, podc *pod.Client, reg *sensors.Registry) (*Server, error) {
 	tpl, err := template.ParseFS(assets, "templates/*.html")
 	if err != nil {
 		return nil, err
@@ -54,6 +56,7 @@ func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, 
 		store: st,
 		buf:   buf,
 		gps:   gpsc,
+		pod:   podc,
 		reg:   reg,
 		tpl:   tpl,
 		up:    websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
@@ -185,6 +188,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"buffered_rows":    s.buf.BufferedRows(),
 		"recording_paused": s.buf.Paused(),
 	}
+	if free, err := s.store.VolumeFreeBytes(); err == nil {
+		st["db_volume_free_bytes"] = free
+	}
 	if s.gps != nil {
 		fix := s.gps.LastFix()
 		st["gps"] = map[string]any{
@@ -195,6 +201,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"lon":     fix.Lon,
 			"alt_msl": fix.AltMSL,
 		}
+	}
+	if s.pod != nil {
+		st["pod"] = s.pod.LinkStats()
+	} else {
+		st["pod"] = pod.LinkStats{Enabled: false}
 	}
 	writeJSON(w, st)
 }

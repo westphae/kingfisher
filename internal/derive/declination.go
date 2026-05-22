@@ -42,10 +42,10 @@ func DeclinationFromGPS(ctx context.Context, gpsc *gps.Client, hub *live.Hub, bu
 				Device: "geo",
 				TsNs:   time.Now().UnixNano(),
 				Values: map[string]float64{
-					"declination_deg": f.D(),
-					"inclination_deg": f.I(),
-					"field_h_nt":      f.H(),
-					"field_f_nt":      f.F(),
+					"declination": f.D(),
+					"inclination": f.I(),
+					"field_h_nt":  f.H(),
+					"field_f_nt":  f.F(),
 				},
 			}
 			hub.Publish(sm)

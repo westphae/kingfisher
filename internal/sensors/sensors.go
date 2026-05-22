@@ -18,6 +18,7 @@ import (
 	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/live"
 	"github.com/westphae/kingfisher/internal/store"
+	"github.com/westphae/kingfisher/internal/units"
 )
 
 // Reader abstracts the bits of *iio.Device the readers use so tests can
@@ -312,7 +313,12 @@ func runOne(ctx context.Context, r Reader, name string, holder *config.Holder, h
 				if err != nil {
 					continue
 				}
-				values[colMap[ch]] = v
+				v = units.NormalizeIIO(ch, v)
+				col := colMap[ch]
+				if canon := units.ColumnForIIO(ch); canon != "" {
+					col = canon
+				}
+				values[col] = v
 			}
 			if len(values) == 0 {
 				continue

@@ -54,7 +54,7 @@ func TestOnBatchPublishesAllChannels(t *testing.T) {
 	}
 
 	// Second batch contains only a mag reading; sticky cache must still
-	// expose airspeed_dp and static_p in the published sample.
+	// expose airspeed_dp_pa and static_pressure_pa in the published sample.
 	c.onBatch(wire.SampleBatch{
 		PodUptimeUs: 1_020_000,
 		Seq:         2,
@@ -65,10 +65,10 @@ func TestOnBatchPublishesAllChannels(t *testing.T) {
 	snap = hub.SnapshotNow()
 	sample = snap.Devices[DeviceName]
 	if sample.Values[ChAirspeedDP] != 100.0 {
-		t.Errorf("airspeed_dp lost after mag-only batch: %v", sample.Values[ChAirspeedDP])
+		t.Errorf("airspeed_dp_pa lost after mag-only batch: %v", sample.Values[ChAirspeedDP])
 	}
 	if sample.Values[ChMagX] != 23.0 {
-		t.Errorf("mag_x not updated: %v", sample.Values[ChMagX])
+		t.Errorf("mag_x_ut not updated: %v", sample.Values[ChMagX])
 	}
 }
 

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -93,6 +94,36 @@ func TestStoreEnsureTableAddsMissingColumns(t *testing.T) {
 		if !cols[want] {
 			t.Fatalf("missing column %q in dev", want)
 		}
+	}
+}
+
+func TestStoreSizeIncludesWalShm(t *testing.T) {
+	s := openTemp(t)
+	defer s.Close()
+
+	for name, size := range map[string]int64{
+		s.Path() + "-wal": 5000,
+		s.Path() + "-shm": 32_768,
+	} {
+		if err := os.WriteFile(name, make([]byte, size), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	got := s.Size()
+	if got < 5000+32_768 {
+		t.Fatalf("Size()=%d want at least wal+shm", got)
+	}
+}
+
+func TestStoreVolumeFreeBytes(t *testing.T) {
+	s := openTemp(t)
+	defer s.Close()
+	free, err := s.VolumeFreeBytes()
+	if err != nil {
+		t.Skipf("volume free: %v", err)
+	}
+	if free <= 0 {
+		t.Fatalf("VolumeFreeBytes=%d, want > 0", free)
 	}
 }
 

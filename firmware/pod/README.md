@@ -144,7 +144,7 @@ MS4525DO-DS5:
 | Power | Apply **5 V** to MS4525 VCC (3.3 V I²C on Qwiic) | Serial: `ms4525 attached at 0x28` within 5 s hot-attach |
 | Flash | `cargo build --release` + `espflash flash` (FW `0x0003_0002` or later) | `uplink ok` with non-empty batches |
 | Pi | `go run ./cmd/kingfisher` (not podprobe on `:47808`) | `pod` device: `static_*`, `mag_*` |
-| Airspeed | Rest + light suction/blow on **+** port | `airspeed_dp` ~0 Pa at rest; moves with ΔP; `airspeed_temp` plausible |
+| Airspeed | Rest + light suction/blow on **+** port | `airspeed_dp_pa` ~0 at rest; moves with ΔP; `airspeed_temp_c` plausible |
 
 ## Verification
 
@@ -158,7 +158,7 @@ Pre-condition: Pi WiFi AP running; `~/.config/kingfisher/config.json`
    - WiFi + `sent Hello` + `uplink ok, … pkts`
 2. **Kingfisher**: `go run ./cmd/kingfisher` — `pod` shows `static_*`, `mag_*`, and
    `airspeed_*` when MS4525 is on the bus.
-3. **MS4525 bench** (5 V applied): `airspeed_dp` near 0 Pa at rest; suction/blow on
+3. **MS4525 bench** (5 V applied): `airspeed_dp_pa` near 0 at rest; suction/blow on
    the `+` port moves ΔP. Without 5 V, `ms4525 not present` is expected.
 
 **Status: Phase 4 — control plane and link keepalive.** Firmware answers Pi
@@ -193,7 +193,7 @@ one tick, the pod **backs off** the last changed rate (or halves it) and runs
 1. Flash FW `0x0004_0002` (or later); start kingfisher on the Pi AP.
 2. Serial: `sent Hello` once at boot, then quiet; `uplink ok` when sensors present.
 3. Pi log: no repeated `pod: ping` errors after the pod appears; `ack for_seq=…` when
-   changing `sampling_frequency` on `mag_x` / `static_p` / `airspeed_dp` in the UI.
+   changing `sampling_frequency` on the pod settings channels (`mag`, `static`, `airspeed`) in the UI.
 4. Stop kingfisher for ~30 s: Hello resumes on the pod serial log.
 5. Hot-plug a sensor: next Hello lists only attached caps.
 

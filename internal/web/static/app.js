@@ -8,12 +8,41 @@ const state = {
   tabs: new Set(),
   attrs: new Map(),            // name -> [{channel, attr, value, writable}]
   iioDevices: new Set(),       // names from /api/devices (config sample_hz UI)
+  podLink: null,               // latest /api/status pod object
 };
 
 const tabsEl = document.getElementById('tabs');
 const panelEl = document.getElementById('panel');
 const bufEl   = document.getElementById('bufStat');
 const dbEl    = document.getElementById('dbSize');
+
+const POD_DEVICE = 'pod';
+const DERIVED_DEVICES = ['ahrs', 'press_alt'];
+
+function tabRank(name) {
+  if (state.iioDevices.has(name)) return 0;
+  if (name === POD_DEVICE) return 1;
+  if (DERIVED_DEVICES.includes(name)) return 2;
+  return 3; // gps, geo, other virtual
+}
+
+function compareTabNames(a, b) {
+  const ra = tabRank(a);
+  const rb = tabRank(b);
+  if (ra !== rb) return ra - rb;
+  return a.localeCompare(b);
+}
+
+function sortedTabNames() {
+  return [...state.tabs].sort(compareTabNames);
+}
+
+function reorderTabs() {
+  for (const name of sortedTabNames()) {
+    const btn = tabsEl.querySelector(`button[data-tab="${name}"]`);
+    if (btn) tabsEl.appendChild(btn);
+  }
+}
 
 function ensureTab(name) {
   if (state.tabs.has(name)) return;
@@ -23,7 +52,8 @@ function ensureTab(name) {
   btn.dataset.tab = name;
   btn.addEventListener('click', () => selectTab(name));
   tabsEl.appendChild(btn);
-  if (!state.activeTab) selectTab(name);
+  reorderTabs();
+  if (!state.activeTab) selectTab(sortedTabNames()[0]);
 }
 
 function selectTab(name) {
@@ -42,23 +72,41 @@ function selectTab(name) {
 // attrs untouched on snapshot updates preserves focus while the user is
 // typing into an editable attribute.
 function rebuildPanel() {
-  panelEl.innerHTML = `<div id="liveKV"></div><div id="attrsBox"></div>`;
+  panelEl.innerHTML =
+    `<div id="podBanner" class="podBanner" hidden></div>` +
+    `<div id="liveKV"></div><div id="attrsBox"></div>`;
   return {
-    kv:    document.getElementById('liveKV'),
-    attrs: document.getElementById('attrsBox'),
+    banner: document.getElementById('podBanner'),
+    kv:     document.getElementById('liveKV'),
+    attrs:  document.getElementById('attrsBox'),
   };
 }
 let panelRegions = rebuildPanel();
+
+// Matches derive.PressureSource* on press_alt.pressure_source.
+const PRESSURE_SOURCE_LABEL = {
+  1: 'pod (wing static_pressure_pa, BMP581)',
+  2: 'cabin IIO baro (pressure_pa, e.g. bmp280)',
+};
+
+function pressAltSourceLabel(code) {
+  const n = Number(code);
+  return PRESSURE_SOURCE_LABEL[n] || `unknown (${fmt(n)})`;
+}
 
 function renderLiveValues() {
   const name = state.activeTab;
   if (!name) { panelRegions.kv.innerHTML = ''; return; }
   const sm = state.devices.get(name);
   if (!sm) { panelRegions.kv.innerHTML = ''; return; }
-  const keys = Object.keys(sm.values || {}).sort();
+  const vals = sm.values || {};
   let html = '';
+  const keys = Object.keys(vals).sort();
   for (const k of keys) {
-    html += `<div class="kv"><div class="k">${k}</div><div class="v">${fmt(sm.values[k])}</div></div>`;
+    const v = k === 'pressure_source'
+      ? pressAltSourceLabel(vals[k])
+      : fmt(vals[k]);
+    html += `<div class="kv"><div class="k">${k}</div><div class="v">${escapeHtml(String(v))}</div></div>`;
   }
   panelRegions.kv.innerHTML = html;
 }
@@ -118,7 +166,58 @@ function nearlyEqual(opt, val) {
   return Math.abs(a - b) < 1e-12 * Math.max(1, Math.abs(a));
 }
 
+function podLinkLabel(pod) {
+  if (!pod || !pod.enabled) return 'Pod ingest off';
+  if (!pod.connected) return 'No recent pod traffic';
+  if ((pod.rx_dropped || 0) > 0) return 'Link up (batch gaps)';
+  return 'Link OK';
+}
+
+function formatRssi(dbm) {
+  if (dbm == null || !Number.isFinite(dbm)) return '—';
+  return `${dbm} dBm`;
+}
+
+function rssiClass(dbm) {
+  if (!Number.isFinite(dbm)) return '';
+  if (dbm >= -65) return 'rssi-good';
+  if (dbm >= -78) return 'rssi-warn';
+  return 'rssi-bad';
+}
+
+function renderPodBanner() {
+  const el = panelRegions.banner;
+  if (!el) return;
+  if (state.activeTab !== POD_DEVICE) {
+    el.hidden = true;
+    el.innerHTML = '';
+    return;
+  }
+  const p = state.podLink;
+  el.hidden = false;
+  const linkCls = !p || !p.enabled || !p.connected
+    ? 'off'
+    : ((p.rx_dropped || 0) > 0 ? 'warn' : 'ok');
+  let rssiText = '—';
+  let rssiCls = '';
+  if (p && p.has_rssi) {
+    rssiText = formatRssi(p.rssi_dbm);
+    rssiCls = rssiClass(p.rssi_dbm);
+  }
+  let battText = '—';
+  if (p && p.has_battery) {
+    battText = `${Number(p.battery_v).toFixed(2)} V`;
+  }
+  el.innerHTML =
+    `<div class="podBannerInner podBanner-${linkCls}">` +
+    `<span class="podBannerItem"><span class="lbl">Link</span> ${escapeHtml(podLinkLabel(p))}</span>` +
+    `<span class="podBannerItem ${rssiCls}"><span class="lbl">RSSI</span> ${escapeHtml(rssiText)}</span>` +
+    `<span class="podBannerItem"><span class="lbl">Battery</span> ${escapeHtml(battText)}</span>` +
+    `</div>`;
+}
+
 function renderActiveTab() {
+  renderPodBanner();
   renderLiveValues();
   renderAttrs();
 }
@@ -191,6 +290,7 @@ function connect() {
         loadAttrs(name);
       }
     }
+    reorderTabs();
     renderLiveValues();
   };
   ws.onclose = () => setTimeout(connect, 1000);
@@ -200,6 +300,7 @@ const tailEl     = document.querySelector('#hdr .tail');
 const recDotEl   = document.getElementById('recDot');
 const recLabelEl = document.getElementById('recLabel');
 const pauseBtn   = document.getElementById('pauseBtn');
+const podTagEl   = document.getElementById('podTag');
 
 function setPausedUI(paused) {
   state.paused = paused;
@@ -226,18 +327,61 @@ pauseBtn.addEventListener('click', async () => {
   } catch {}
 });
 
+function setPodUI(pod) {
+  if (!podTagEl) return;
+  podTagEl.textContent = 'POD';
+  if (!pod || !pod.enabled) {
+    podTagEl.className = 'podTag pod-off';
+    podTagEl.title = 'Pod ingest not running';
+    return;
+  }
+  if (!pod.connected) {
+    podTagEl.className = 'podTag pod-off';
+    podTagEl.title = 'No recent traffic from wing pod';
+    return;
+  }
+  if ((pod.rx_dropped || 0) > 0) {
+    podTagEl.className = 'podTag pod-warn';
+    podTagEl.title = `Pod link up; ${pod.rx_dropped} batch gap(s) this session`;
+    return;
+  }
+  podTagEl.className = 'podTag pod-ok';
+  podTagEl.title = 'Pod link OK (no dropped batches)';
+}
+
+function formatPodFooter(pod) {
+  if (!pod || !pod.enabled) return '';
+  const dropped = pod.rx_dropped || 0;
+  const rx = pod.rx_packets || 0;
+  const sent = rx + dropped; // pod SampleBatch seq span (received + gaps)
+  return ` · Pod: ${dropped} dropped / ${sent} sent`;
+}
+
 async function refreshStatus() {
   try {
     const r = await fetch('/api/status');
     if (!r.ok) return;
     const s = await r.json();
-    if (s.db_size_bytes != null) dbEl.textContent = formatBytes(s.db_size_bytes);
+    if (s.db_size_bytes != null && dbEl) {
+      let dbText = formatBytes(s.db_size_bytes);
+      if (s.db_volume_free_bytes != null) {
+        dbText += ` · ${formatBytes(s.db_volume_free_bytes)} free`;
+      }
+      dbEl.textContent = dbText;
+      dbEl.title = s.db_path ? `Flight DB: ${s.db_path}` : '';
+    }
+    let bufText = 'Buffered: — rows';
     if (s.buffered_rows) {
       const total = Object.values(s.buffered_rows).reduce((a, b) => a + b, 0);
-      bufEl.textContent = `Buffered: ${total} rows`;
+      bufText = `Buffered: ${total} rows`;
     }
+    bufText += formatPodFooter(s.pod);
+    if (bufEl) bufEl.textContent = bufText;
     if (s.aircraft && tailEl) tailEl.textContent = s.aircraft;
     if (typeof s.recording_paused === 'boolean') setPausedUI(s.recording_paused);
+    state.podLink = s.pod || null;
+    setPodUI(s.pod);
+    if (state.activeTab === POD_DEVICE) renderPodBanner();
   } catch {}
 }
 
@@ -246,9 +390,10 @@ async function loadIIODevices() {
     const r = await fetch('/api/devices');
     if (!r.ok) return;
     const devices = await r.json();
-    state.iioDevices = new Set((devices || []).map(d => d.name));
-    // Ensure tabs exist even before WS samples arrive.
-    for (const name of state.iioDevices) ensureTab(name);
+    const iio = (devices || []).map(d => d.name).sort();
+    state.iioDevices = new Set(iio);
+    for (const name of iio) ensureTab(name);
+    reorderTabs();
     // Eager-load attrs for the active tab (IIO + virtual devices like pod).
     if (state.activeTab && !state.attrs.has(state.activeTab)) {
       loadAttrs(state.activeTab);
