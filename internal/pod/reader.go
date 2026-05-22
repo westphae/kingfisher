@@ -8,7 +8,6 @@ import (
 
 	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/pod/wire"
-	"github.com/westphae/kingfisher/internal/sensors"
 	"github.com/westphae/kingfisher/internal/store"
 )
 
@@ -42,6 +41,21 @@ var sensorSettingsChannel = map[wire.SensorID]string{
 	wire.SensorAirspeed: "airspeed",
 	wire.SensorStatic:   "static",
 	wire.SensorMag:      "mag",
+}
+
+// defaultSensorCap matches firmware hello.rs limits when Hello has not
+// arrived yet; used so saved pod.attrs still appear in the web UI.
+func defaultSensorCap(sid wire.SensorID) (wire.SensorCap, bool) {
+	switch sid {
+	case wire.SensorStatic:
+		return wire.SensorCap{ID: sid, MinHz: 1, MaxHz: 50, DefaultHz: 10}, true
+	case wire.SensorMag:
+		return wire.SensorCap{ID: sid, MinHz: 1, MaxHz: 50, DefaultHz: 10}, true
+	case wire.SensorAirspeed:
+		return wire.SensorCap{ID: sid, MinHz: 1, MaxHz: 50, DefaultHz: 10}, true
+	default:
+		return wire.SensorCap{}, false
+	}
 }
 
 // channelToSensor resolves settings labels (and legacy primary data channels).
@@ -130,6 +144,35 @@ func (r *reader) applyHello(h wire.Hello) {
 	}
 }
 
+// ensureCapsFromReading seeds default caps when SampleBatch arrives before
+// a Hello (pod started before kingfisher; boot Hello was missed).
+func (r *reader) ensureCapsFromReading(rd wire.Reading) bool {
+	var sid wire.SensorID
+	switch rd.(type) {
+	case wire.MagReading:
+		sid = wire.SensorMag
+	case wire.StaticReading:
+		sid = wire.SensorStatic
+	case wire.AirspeedReading:
+		sid = wire.SensorAirspeed
+	default:
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.caps[sid]; ok {
+		return false
+	}
+	if c, ok := defaultSensorCap(sid); ok {
+		r.caps[sid] = c
+		if _, ok := r.rates[sid]; !ok {
+			r.rates[sid] = c.DefaultHz
+		}
+		return true
+	}
+	return false
+}
+
 // ---- sensors.Reader interface ----
 
 func (r *reader) Name() string       { return DeviceName }
@@ -145,15 +188,27 @@ func (r *reader) ReadFloat(ch string) (float64, error) {
 	return v, nil
 }
 
+// capForSettings returns Hello caps when present, else firmware defaults
+// when a rate was loaded from config.json (pod offline / before Hello).
+func (r *reader) capForSettings(sid wire.SensorID) (wire.SensorCap, bool) {
+	if c, ok := r.caps[sid]; ok {
+		return c, true
+	}
+	if _, ok := r.rates[sid]; ok {
+		return defaultSensorCap(sid)
+	}
+	return wire.SensorCap{}, false
+}
+
 // SettingsAttrRecords is the attr snapshot for the registry / web UI: one
-// sampling_frequency row per sensor advertised in the last Hello.
+// sampling_frequency row per sensor from Hello or from saved pod.attrs.
 func (r *reader) SettingsAttrRecords() []store.AttrRecord {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	order := []wire.SensorID{wire.SensorStatic, wire.SensorMag, wire.SensorAirspeed}
 	out := make([]store.AttrRecord, 0, len(order))
 	for _, sid := range order {
-		cap, ok := r.caps[sid]
+		cap, ok := r.capForSettings(sid)
 		if !ok {
 			continue
 		}
@@ -187,7 +242,7 @@ func (r *reader) ChannelAttr(ch, attr string) (string, error) {
 		return strconv.FormatUint(uint64(hz), 10), nil
 	case "sampling_frequency_available":
 		r.mu.RLock()
-		c, ok := r.caps[sid]
+		c, ok := r.capForSettings(sid)
 		r.mu.RUnlock()
 		if !ok {
 			return "", fmt.Errorf("pod: no caps cached yet for %s", sid)
@@ -222,7 +277,13 @@ func (r *reader) SetChannelAttr(ch, attr, value string) error {
 		}
 	}
 	prevHz := r.rates[sid]
-	r.rates[sid] = uint16(hz)
+	newHz := uint16(hz)
+	sHz, mHz, aHz := RatesAfterChange(r.rates, sid, newHz)
+	if !SustainableRates(sHz, mHz, aHz) {
+		r.mu.Unlock()
+		return fmt.Errorf("pod: combined rates (static=%d mag=%d airspeed=%d Hz) exceed wing I²C budget — e.g. 50+50 static+mag is not supported; try 25+50 or lower", sHz, mHz, aHz)
+	}
+	r.rates[sid] = newHz
 	r.mu.Unlock()
 	select {
 	case r.out <- outboundCmd{
@@ -245,8 +306,8 @@ func (r *reader) SetChannelAttr(ch, attr, value string) error {
 func (r *reader) ApplyDeviceConfig(dev config.Device) []outboundCmd {
 	var outs []outboundCmd
 	for k, v := range dev.Attrs {
-		ch, attr := sensors.SplitIIOAttr(k)
-		if attr != "sampling_frequency" {
+		ch, _, ok := parsePodAttrKey(k)
+		if !ok {
 			continue
 		}
 		sid, ok := channelToSensor[ch]
