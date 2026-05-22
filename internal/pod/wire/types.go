@@ -5,12 +5,12 @@
 package wire
 
 const (
-	ProtoVersion     = 1
-	MaxReadings      = 8
-	MaxSensors       = 4
-	HeaderLen        = 2
-	CRCLen           = 4
-	FramingOverhead  = HeaderLen + CRCLen
+	ProtoVersion    = 1
+	MaxReadings     = 8
+	MaxSensors      = 4
+	HeaderLen       = 2
+	CRCLen          = 4
+	FramingOverhead = HeaderLen + CRCLen
 )
 
 // Frame discriminants (postcard varint enum tag).
@@ -120,7 +120,7 @@ type AirspeedReading struct {
 	AgeUs uint32
 }
 
-func (AirspeedReading) isReading()         {}
+func (AirspeedReading) isReading()          {}
 func (r AirspeedReading) AgeMicros() uint32 { return r.AgeUs }
 
 type StaticReading struct {
@@ -129,7 +129,7 @@ type StaticReading struct {
 	AgeUs uint32
 }
 
-func (StaticReading) isReading()         {}
+func (StaticReading) isReading()          {}
 func (r StaticReading) AgeMicros() uint32 { return r.AgeUs }
 
 type MagReading struct {
@@ -139,7 +139,7 @@ type MagReading struct {
 	AgeUs uint32
 }
 
-func (MagReading) isReading()         {}
+func (MagReading) isReading()          {}
 func (r MagReading) AgeMicros() uint32 { return r.AgeUs }
 
 // Cmd is the Pi -> pod control message. It is wrapped in CmdFrame for

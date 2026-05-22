@@ -1,10 +1,11 @@
 // Package web serves the cockpit status UI and the JSON config API.
 // Routes:
-//   GET  /            — server-rendered index.html with the device list.
-//   GET  /ws          — WebSocket; pushes live.Hub snapshots every 100ms.
-//   GET  /api/config  — current config JSON.
-//   POST /api/config  — replace config; persists to disk + signals reload.
-//   GET  /api/status  — DB path, size, buffered rows, GPS fix state.
+//
+//	GET  /            — server-rendered index.html with the device list.
+//	GET  /ws          — WebSocket; pushes live.Hub snapshots every 100ms.
+//	GET  /api/config  — current config JSON.
+//	POST /api/config  — replace config; persists to disk + signals reload.
+//	GET  /api/status  — DB path, size, buffered rows, GPS fix state.
 package web
 
 import (

@@ -46,8 +46,8 @@ func TestRustFixtures(t *testing.T) {
 			TxSeq:       100,
 			RxSeqLast:   12,
 		},
-		"ping": Ping{Seq: 7, SenderUptimeUs: 999},
-		"pong": Pong{Seq: 7, SenderUptimeUs: 1100, EchoUptimeUs: 999},
+		"ping":     Ping{Seq: 7, SenderUptimeUs: 999},
+		"pong":     Pong{Seq: 7, SenderUptimeUs: 1100, EchoUptimeUs: 999},
 		"ack_ok":   Ack{ForSeq: 99, OK: true},
 		"ack_fail": Ack{ForSeq: 100, OK: false},
 	}
