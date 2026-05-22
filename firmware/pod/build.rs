@@ -77,9 +77,7 @@ fn resolve_config_path() -> PathBuf {
         return PathBuf::from(p);
     }
     let home = env::var("HOME").unwrap_or_else(|_| {
-        panic!(
-            "pod firmware build: HOME not set; export KINGFISHER_CONFIG=/path/to/config.json"
-        );
+        panic!("pod firmware build: HOME not set; export KINGFISHER_CONFIG=/path/to/config.json");
     });
     PathBuf::from(home)
         .join(".config")

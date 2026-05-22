@@ -103,8 +103,15 @@ pub enum Reading {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Cmd {
-    SetRate { sensor: SensorId, hz: u16 },
-    SetAttr { sensor: SensorId, key: AttrKey, value: f32 },
+    SetRate {
+        sensor: SensorId,
+        hz: u16,
+    },
+    SetAttr {
+        sensor: SensorId,
+        key: AttrKey,
+        value: f32,
+    },
     Ping,
     Reboot,
 }
@@ -163,8 +170,7 @@ pub fn encode_to_slice<'a>(frame: &Frame, out: &'a mut [u8]) -> Result<&'a [u8],
     };
     let crc = crc32fast::hash(&out[HEADER_LEN..HEADER_LEN + body_len]);
     out[0..HEADER_LEN].copy_from_slice(&(body_len as u16).to_le_bytes());
-    out[HEADER_LEN + body_len..HEADER_LEN + body_len + CRC_LEN]
-        .copy_from_slice(&crc.to_le_bytes());
+    out[HEADER_LEN + body_len..HEADER_LEN + body_len + CRC_LEN].copy_from_slice(&crc.to_le_bytes());
     Ok(&out[..HEADER_LEN + body_len + CRC_LEN])
 }
 

@@ -85,10 +85,7 @@ impl LatestSamples {
         if let Some(s) = &self.mag_sample {
             let age_us = pod_uptime_us.saturating_sub(s.captured_us);
             if let Reading::Mag {
-                x_ut,
-                y_ut,
-                z_ut,
-                ..
+                x_ut, y_ut, z_ut, ..
             } = s.reading
             {
                 let _ = samples.push(Reading::Mag {
@@ -130,10 +127,7 @@ pub fn with_samples<R>(f: impl FnOnce(&LatestSamples) -> R) -> R {
 
 pub fn update_static(reading: Reading, captured_us: u64) {
     critical_section::with(|cs| {
-        SAMPLES
-            .borrow(cs)
-            .borrow_mut()
-            .static_sample = Some(StampedReading {
+        SAMPLES.borrow(cs).borrow_mut().static_sample = Some(StampedReading {
             reading,
             captured_us,
         });
@@ -142,10 +136,7 @@ pub fn update_static(reading: Reading, captured_us: u64) {
 
 pub fn update_mag(reading: Reading, captured_us: u64) {
     critical_section::with(|cs| {
-        SAMPLES
-            .borrow(cs)
-            .borrow_mut()
-            .mag_sample = Some(StampedReading {
+        SAMPLES.borrow(cs).borrow_mut().mag_sample = Some(StampedReading {
             reading,
             captured_us,
         });
@@ -154,10 +145,7 @@ pub fn update_mag(reading: Reading, captured_us: u64) {
 
 pub fn update_airspeed(reading: Reading, captured_us: u64) {
     critical_section::with(|cs| {
-        SAMPLES
-            .borrow(cs)
-            .borrow_mut()
-            .airspeed_sample = Some(StampedReading {
+        SAMPLES.borrow(cs).borrow_mut().airspeed_sample = Some(StampedReading {
             reading,
             captured_us,
         });
@@ -250,9 +238,8 @@ pub fn bringup_board(bus: &mut Bus) -> SensorBoard {
 pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
     use pod_wire::SensorId;
 
-    let mut ticker = embassy_time::Ticker::every(embassy_time::Duration::from_millis(
-        crate::cfg::TICK_MS,
-    ));
+    let mut ticker =
+        embassy_time::Ticker::every(embassy_time::Duration::from_millis(crate::cfg::TICK_MS));
     let mut attach_ticks: u32 = 0;
     const ATTACH_INTERVAL: u32 = 50; // 5 s at 10 Hz
 

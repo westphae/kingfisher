@@ -73,8 +73,7 @@ fn read_and_decode(bus: &mut I2cBus) -> Result<Sample, &'static str> {
 fn read_raw(bus: &mut I2cBus) -> Result<[u8; 4], &'static str> {
     bus.write(ADDR, &[CMD_MEASURE]).map_err(|_| "trigger")?;
     let mut data = [0u8; 4];
-    bus.write_read(ADDR, &[], &mut data)
-        .map_err(|_| "read")?;
+    bus.write_read(ADDR, &[], &mut data).map_err(|_| "read")?;
     Ok(data)
 }
 
@@ -104,7 +103,8 @@ fn decode(data: &[u8; 4]) -> Result<Sample, &'static str> {
 
 fn bridge_to_dp_pa(bridge: u16) -> f32 {
     let raw = bridge as f32;
-    let dp_psi = -((raw - 0.1 * COUNTS_FULL) * (P_MAX_PSI - P_MIN_PSI) / (0.8 * COUNTS_FULL) + P_MIN_PSI);
+    let dp_psi =
+        -((raw - 0.1 * COUNTS_FULL) * (P_MAX_PSI - P_MIN_PSI) / (0.8 * COUNTS_FULL) + P_MIN_PSI);
     dp_psi * PSI_TO_PA
 }
 

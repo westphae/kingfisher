@@ -73,7 +73,7 @@ impl Mmc5983 {
 fn counts_to_ut(msb: u8, mid: u8, lsb2: u8) -> f32 {
     let counts = ((msb as i32) << 10) | ((mid as i32) << 2) | (lsb2 as i32);
     let counts = counts - 131_072; // null field output
-    // 16384 counts/Gauss, 1 G = 100 µT
+                                   // 16384 counts/Gauss, 1 G = 100 µT
     counts as f32 / 163.84
 }
 
@@ -87,11 +87,6 @@ fn write_u8(bus: &mut I2cBus, addr: u8, reg: u8, val: u8) -> Result<(), ()> {
     bus.write(addr, &[reg, val]).map_err(|_| ())
 }
 
-fn read_block(
-    bus: &mut I2cBus,
-    addr: u8,
-    reg: u8,
-    buf: &mut [u8],
-) -> Result<(), ()> {
+fn read_block(bus: &mut I2cBus, addr: u8, reg: u8, buf: &mut [u8]) -> Result<(), ()> {
     bus.write_read(addr, &[reg], buf).map_err(|_| ())
 }

@@ -290,10 +290,7 @@ fn backoff(sensor: SensorId) {
     } else {
         (cur / 2).max(SAFE_HZ)
     };
-    println!(
-        "pod: backing off {:?} {} -> {} Hz",
-        sensor, cur, next
-    );
+    println!("pod: backing off {:?} {} -> {} Hz", sensor, cur, next);
     store_hz(sensor, next);
     rem_atom(sensor).store(0, Ordering::Relaxed);
     fail_atom(sensor).store(0, Ordering::Relaxed);

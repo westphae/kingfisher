@@ -72,7 +72,7 @@ impl Bmp581 {
         }
         self.wait_nvm_ready(bus)?;
         write_u8(bus, self.addr, REG_INT_SOURCE, 0x01)?; // drdy_data_reg_en
-        // Temp + pressure, no oversampling (fastest forced reads).
+                                                         // Temp + pressure, no oversampling (fastest forced reads).
         let osr = (OSR_PRESS_NONE << 3) | (OSR_TEMP_NONE << 0) | (1 << 6);
         write_u8(bus, self.addr, REG_OSR, osr)?;
         write_u8(bus, self.addr, REG_ODR, PWR_STANDBY)?;
@@ -123,11 +123,9 @@ impl Bmp581 {
 }
 
 fn decode_sample(data: &[u8; 6]) -> Sample {
-    let raw_temp =
-        ((data[2] as i32) << 16) | ((data[1] as i32) << 8) | (data[0] as i32);
+    let raw_temp = ((data[2] as i32) << 16) | ((data[1] as i32) << 8) | (data[0] as i32);
     let raw_temp = (raw_temp << 8) >> 8;
-    let raw_press =
-        ((data[5] as i32) << 16) | ((data[4] as i32) << 8) | (data[3] as i32);
+    let raw_press = ((data[5] as i32) << 16) | ((data[4] as i32) << 8) | (data[3] as i32);
     Sample {
         temp_c: raw_temp as f32 / 65536.0,
         p_pa: raw_press as f32 / 64.0,
@@ -144,11 +142,6 @@ fn write_u8(bus: &mut I2cBus, addr: u8, reg: u8, val: u8) -> Result<(), ()> {
     bus.write(addr, &[reg, val]).map_err(|_| ())
 }
 
-fn read_block(
-    bus: &mut I2cBus,
-    addr: u8,
-    reg: u8,
-    buf: &mut [u8],
-) -> Result<(), ()> {
+fn read_block(bus: &mut I2cBus, addr: u8, reg: u8, buf: &mut [u8]) -> Result<(), ()> {
     bus.write_read(addr, &[reg], buf).map_err(|_| ())
 }
