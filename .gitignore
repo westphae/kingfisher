@@ -7,6 +7,9 @@ datasheets/
 target/
 *.test
 
+# Developer tool cache (golangci-lint installed via `make tools`).
+/.bin/
+
 # Editor / OS.
 *.swp
 .DS_Store

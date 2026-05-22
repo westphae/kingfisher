@@ -102,6 +102,10 @@ func (d *decoder) uvarint() (uint64, error) {
 
 // svarint decodes a zigzag-encoded signed varint (i16/i32/i64).
 // Postcard does NOT zigzag i8 — that's a raw byte. See `byte()` for i8.
+// Kept for parity with the Rust encoder; no signed-varint fields exist on
+// the wire today, but new Status/Hello fields will need this helper.
+//
+//nolint:unused // reserved for future signed-varint wire fields
 func (d *decoder) svarint() (int64, error) {
 	u, err := d.uvarint()
 	if err != nil {

@@ -40,3 +40,20 @@ toolchain, and flashing steps.
 
 The cockpit UI is served on `:8080` by default. Configuration lives in
 `~/.config/kingfisher/config.json`.
+
+## Linting and formatting
+
+Both languages are linted from a single `Makefile`:
+
+```
+make tools      # fetch golangci-lint into ./.bin/ (one-time)
+make lint       # Go (golangci-lint) + Rust (cargo fmt --check + clippy)
+make fmt        # auto-format Go (gofmt+goimports) and Rust (rustfmt)
+make fmt-check  # verify formatting without writing
+```
+
+Go rules live in `.golangci.yml`. The Rust side relies on the default
+`rustfmt` profile and `cargo clippy -- -D warnings`. The wing-pod
+firmware (`firmware/pod/`) targets `riscv32imc-unknown-none-elf` and
+needs the esp toolchain to clippy; run `make lint-firmware` from a host
+that has it installed.

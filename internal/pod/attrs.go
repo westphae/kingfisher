@@ -32,6 +32,10 @@ func parsePodAttrKey(full string) (channel, attr string, ok bool) {
 }
 
 // canonicalPodAttrKey is the form written to pod.attrs on save.
+// Kept as the symmetric counterpart to parsePodAttrKey above; the save path
+// will switch to this helper once the canonical-key migration lands.
+//
+//nolint:unused // retained for the upcoming canonical-key save path
 func canonicalPodAttrKey(channel, attr string) string {
 	return sensors.JoinIIOAttr(channel, attr)
 }

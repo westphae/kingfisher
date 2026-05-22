@@ -1,0 +1,79 @@
+# golangci-lint configuration for kingfisher.
+#
+# Runs the standard set of vet/static-analysis checks plus a few extras
+# (misspell, unconvert) that catch common review feedback. Formatters
+# (gofmt, goimports) are managed by golangci-lint so `make fmt` and
+# `make lint` share one source of truth.
+#
+# To run locally:
+#   make lint          # full lint (Go + Rust)
+#   make lint-go       # just the Go side
+#   make fmt           # auto-format Go + Rust in place
+
+version: "2"
+
+run:
+  # The build needs the sibling go-iio/goflying/geomag checkouts; if a
+  # contributor is missing them golangci-lint should fail loudly rather
+  # than silently skipping packages.
+  modules-download-mode: readonly
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+  # Linters that would be reasonable to add later but are noisy on the
+  # current tree: misspell (the codebase mixes UK/US spellings on purpose),
+  # unconvert (deliberate clarity casts for cross-arch portability of
+  # syscall structs), gocritic, revive, gosec.
+
+  settings:
+    errcheck:
+      # Errors from common "release a resource" calls are routinely
+      # ignored in this codebase (idiomatic Go for defer Close / Rollback
+      # / deadline setters). Suppress them globally rather than peppering
+      # the source with _ = ... or //nolint directives.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - (*database/sql.Tx).Rollback
+        - (net.Conn).Close
+        - (net.Conn).SetReadDeadline
+        - (net.Conn).SetWriteDeadline
+        - (net.PacketConn).Close
+        - (*net.UDPConn).Close
+        - (*net.UDPConn).SetReadDeadline
+        - (*net.UDPConn).SetWriteDeadline
+        - (*github.com/gorilla/websocket.Conn).Close
+        - (*github.com/gorilla/websocket.Conn).SetReadDeadline
+        - (*github.com/gorilla/websocket.Conn).SetWriteDeadline
+        - (*github.com/stratoberry/go-gpsd.Session).Close
+        - (github.com/westphae/kingfisher/internal/sensors.Reader).Close
+        - (*github.com/westphae/kingfisher/internal/store.Store).Close
+
+  exclusions:
+    # Don't lint generated or third-party-style fixture code if we ever
+    # add any; today this is just a safety net for the future.
+    generated: lax
+    rules:
+      # Test files lean heavily on t.Fatal/t.Error to surface failures;
+      # don't require errcheck on every helper call there.
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/westphae/kingfisher

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/westphae/go-iio"
+
 	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/live"
 	"github.com/westphae/kingfisher/internal/store"
