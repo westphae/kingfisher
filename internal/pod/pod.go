@@ -43,8 +43,8 @@ type Client struct {
 	reader *reader
 	cmdOut chan outboundCmd
 
-	cmdSeq   atomic.Uint32
-	pending  map[uint32]pendingEntry
+	cmdSeq    atomic.Uint32
+	pending   map[uint32]pendingEntry
 	pendingMu sync.Mutex
 
 	lastRxNs atomic.Int64
@@ -57,10 +57,10 @@ type Client struct {
 	offsetInited atomic.Bool
 
 	// linkSeq tracks the highest seq we've observed; gaps indicate loss.
-	linkSeq    uint32
-	rxBatches  atomic.Uint64
-	rxDropped  atomic.Uint64
-	txPackets  atomic.Uint64
+	linkSeq   uint32
+	rxBatches atomic.Uint64
+	rxDropped atomic.Uint64
+	txPackets atomic.Uint64
 
 	lastStatusNs  atomic.Int64
 	statusRssi    atomic.Int32

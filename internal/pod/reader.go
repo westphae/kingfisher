@@ -60,20 +60,20 @@ func defaultSensorCap(sid wire.SensorID) (wire.SensorCap, bool) {
 
 // channelToSensor resolves settings labels (and legacy primary data channels).
 var channelToSensor = map[string]wire.SensorID{
-	"airspeed":     wire.SensorAirspeed,
-	"static":       wire.SensorStatic,
-	"mag":          wire.SensorMag,
-	ChAirspeedDP:   wire.SensorAirspeed,
-	ChStaticP:      wire.SensorStatic,
-	ChMagX:         wire.SensorMag,
+	"airspeed":   wire.SensorAirspeed,
+	"static":     wire.SensorStatic,
+	"mag":        wire.SensorMag,
+	ChAirspeedDP: wire.SensorAirspeed,
+	ChStaticP:    wire.SensorStatic,
+	ChMagX:       wire.SensorMag,
 }
 
 // outboundCmd is queued for the send loop; PrevHz supports Ack rollback.
 type outboundCmd struct {
-	Cmd      wire.Cmd
-	Sensor   wire.SensorID
-	PrevHz   uint16
-	HasPrev  bool
+	Cmd     wire.Cmd
+	Sensor  wire.SensorID
+	PrevHz  uint16
+	HasPrev bool
 }
 
 // reader implements sensors.Reader for the pod virtual device. It is

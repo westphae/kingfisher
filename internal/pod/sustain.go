@@ -3,11 +3,11 @@ package pod
 import "github.com/westphae/kingfisher/internal/pod/wire"
 
 const (
-	baseHzPod          = 10
-	maxTickWorkUs      = 100_000
-	usPerStaticRead    = 30_000
-	usPerMagRead       = 2_000
-	usPerAirspeedRead  = 5_000
+	baseHzPod         = 10
+	maxTickWorkUs     = 100_000
+	usPerStaticRead   = 30_000
+	usPerMagRead      = 2_000
+	usPerAirspeedRead = 5_000
 )
 
 func readsPerTick(hz uint16) uint64 {

@@ -43,7 +43,7 @@ func TestUDPIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		buf := make([]byte, 512)
 		n, err := wire.Encode(f, buf)
 		if err != nil {

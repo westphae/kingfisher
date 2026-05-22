@@ -30,8 +30,3 @@ func parsePodAttrKey(full string) (channel, attr string, ok bool) {
 	}
 	return "", "", false
 }
-
-// canonicalPodAttrKey is the form written to pod.attrs on save.
-func canonicalPodAttrKey(channel, attr string) string {
-	return sensors.JoinIIOAttr(channel, attr)
-}

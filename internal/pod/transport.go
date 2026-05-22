@@ -28,8 +28,8 @@ type Transport interface {
 // UDP is the v1 transport. It listens on a single UDP port and remembers
 // the last peer it heard from so Send can target the same pod.
 type UDP struct {
-	conn    *net.UDPConn
-	peerCh  chan net.Addr
+	conn     *net.UDPConn
+	peerCh   chan net.Addr
 	lastPeer net.Addr
 }
 

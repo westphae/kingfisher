@@ -79,7 +79,7 @@ func (c *Client) connectOnce(stop <-chan struct{}) {
 		log.Printf("gps: dial %s: %v", c.addr, err)
 		return
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	log.Printf("gps: connected to %s", c.addr)
 
 	s.AddFilter("TPV", func(r any) {

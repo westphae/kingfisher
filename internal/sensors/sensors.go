@@ -174,7 +174,7 @@ func Run(ctx context.Context, holder *config.Holder, readers []Reader, hub *live
 		dev := cfg.DeviceOrDefault(r.Name(), 10)
 		if !dev.Enabled {
 			log.Printf("sensors: %s disabled by config", name)
-			r.Close()
+			_ = r.Close()
 			continue
 		}
 		active = append(active, runCtx{r: r, name: name})
@@ -209,7 +209,7 @@ func Run(ctx context.Context, holder *config.Holder, readers []Reader, hub *live
 		wg.Add(1)
 		go func(r Reader, name string) {
 			defer wg.Done()
-			defer r.Close()
+			defer func() { _ = r.Close() }()
 			runOne(ctx, r, name, holder, hub, buf, st, reg)
 		}(a.r, a.name)
 	}

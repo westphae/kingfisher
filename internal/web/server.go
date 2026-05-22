@@ -1,10 +1,11 @@
 // Package web serves the cockpit status UI and the JSON config API.
 // Routes:
-//   GET  /            — server-rendered index.html with the device list.
-//   GET  /ws          — WebSocket; pushes live.Hub snapshots every 100ms.
-//   GET  /api/config  — current config JSON.
-//   POST /api/config  — replace config; persists to disk + signals reload.
-//   GET  /api/status  — DB path, size, buffered rows, GPS fix state.
+//
+//	GET  /            — server-rendered index.html with the device list.
+//	GET  /ws          — WebSocket; pushes live.Hub snapshots every 100ms.
+//	GET  /api/config  — current config JSON.
+//	POST /api/config  — replace config; persists to disk + signals reload.
+//	GET  /api/status  — DB path, size, buffered rows, GPS fix state.
 package web
 
 import (
@@ -121,9 +122,12 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	defer c.Close()
-	c.SetReadDeadline(time.Now().Add(60 * time.Second))
-	c.SetPongHandler(func(string) error { c.SetReadDeadline(time.Now().Add(60 * time.Second)); return nil })
+	defer func() { _ = c.Close() }()
+	_ = c.SetReadDeadline(time.Now().Add(60 * time.Second))
+	c.SetPongHandler(func(string) error {
+		_ = c.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
 	// Drain reads so the pong handler fires.
 	go func() {
 		for {
@@ -143,12 +147,12 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			c.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			_ = c.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			if err := c.WriteJSON(snap); err != nil {
 				return
 			}
 		case <-ping.C:
-			c.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			_ = c.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			if err := c.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}

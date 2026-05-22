@@ -39,7 +39,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("store: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	log.Printf("kingfisher v%s flight DB: %s", version, st.Path())
 	if err := st.WriteSession(cfg.Aircraft, cfg.AircraftName, cfg.Notes, version); err != nil {
 		log.Printf("store: write session: %v", err)

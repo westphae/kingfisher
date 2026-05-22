@@ -46,8 +46,8 @@ func TestRustFixtures(t *testing.T) {
 			TxSeq:       100,
 			RxSeqLast:   12,
 		},
-		"ping": Ping{Seq: 7, SenderUptimeUs: 999},
-		"pong": Pong{Seq: 7, SenderUptimeUs: 1100, EchoUptimeUs: 999},
+		"ping":     Ping{Seq: 7, SenderUptimeUs: 999},
+		"pong":     Pong{Seq: 7, SenderUptimeUs: 1100, EchoUptimeUs: 999},
 		"ack_ok":   Ack{ForSeq: 99, OK: true},
 		"ack_fail": Ack{ForSeq: 100, OK: false},
 	}
@@ -57,7 +57,7 @@ func TestRustFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open %s: %v", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	seen := map[string]bool{}
 	sc := bufio.NewScanner(f)
@@ -144,5 +144,27 @@ func TestCRCRejection(t *testing.T) {
 	buf[HeaderLen] ^= 0x01
 	if _, err := Decode(buf[:n]); err != ErrCRC {
 		t.Fatalf("expected ErrCRC, got %v", err)
+	}
+}
+
+func TestSvarint(t *testing.T) {
+	cases := []struct {
+		encoded []byte
+		want    int64
+	}{
+		{[]byte{0}, 0},
+		{[]byte{1}, -1},
+		{[]byte{2}, 1},
+		{[]byte{3}, -2},
+	}
+	for _, tc := range cases {
+		d := newDecoder(tc.encoded)
+		got, err := d.svarint()
+		if err != nil {
+			t.Fatalf("svarint(%v): %v", tc.encoded, err)
+		}
+		if got != tc.want {
+			t.Fatalf("svarint(%v): got %d, want %d", tc.encoded, got, tc.want)
+		}
 	}
 }

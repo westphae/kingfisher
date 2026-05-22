@@ -9,10 +9,10 @@ import (
 )
 
 var (
-	ErrShort         = errors.New("wire: input shorter than framing overhead")
-	ErrLengthBounds  = errors.New("wire: declared length exceeds buffer")
-	ErrCRC           = errors.New("wire: crc mismatch")
-	ErrVarintTooLong = errors.New("wire: varint exceeds 10 bytes")
+	ErrShort          = errors.New("wire: input shorter than framing overhead")
+	ErrLengthBounds   = errors.New("wire: declared length exceeds buffer")
+	ErrCRC            = errors.New("wire: crc mismatch")
+	ErrVarintTooLong  = errors.New("wire: varint exceeds 10 bytes")
 	ErrUnknownVariant = errors.New("wire: unknown enum discriminant")
 	ErrTrailingBytes  = errors.New("wire: trailing bytes after frame body")
 )

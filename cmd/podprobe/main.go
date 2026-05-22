@@ -45,7 +45,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("listen %s: %v", listenAddr, err)
 	}
-	defer pc.Close()
+	defer func() { _ = pc.Close() }()
 	log.Printf("podprobe: listening on %s", pc.LocalAddr())
 
 	ctx, cancel := context.WithCancel(context.Background())

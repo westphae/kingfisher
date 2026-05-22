@@ -36,6 +36,8 @@ These resolve to sibling directories at `$GOPATH/src/github.com/westphae/{go-iio
 # Build & run everything (Go)
 go build ./...
 go test ./...
+make lint          # golangci-lint + pod_wire clippy (needs golangci-lint on PATH)
+make fmt           # gofmt/goimports + cargo fmt in pod_wire
 go test -count=1 -run TestUDPIntegration ./internal/pod/    # one test
 go run ./cmd/kingfisher                                      # run on this Pi
 

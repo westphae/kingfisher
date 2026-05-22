@@ -21,7 +21,7 @@ func openTemp(t *testing.T) *Store {
 
 func TestStoreBufferFlushWritesRows(t *testing.T) {
 	s := openTemp(t)
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	buf := NewBuffer(s, 100*time.Millisecond)
 
 	for i := 0; i < 5; i++ {
@@ -66,7 +66,7 @@ func TestStoreBufferFlushWritesRows(t *testing.T) {
 
 func TestStoreEnsureTableAddsMissingColumns(t *testing.T) {
 	s := openTemp(t)
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	if err := s.EnsureTable("dev", []string{"a", "b"}); err != nil {
 		t.Fatalf("ensure 1: %v", err)
@@ -78,7 +78,7 @@ func TestStoreEnsureTableAddsMissingColumns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	cols := map[string]bool{}
 	for rows.Next() {
 		var cid int
@@ -99,7 +99,7 @@ func TestStoreEnsureTableAddsMissingColumns(t *testing.T) {
 
 func TestStoreSizeIncludesWalShm(t *testing.T) {
 	s := openTemp(t)
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	for name, size := range map[string]int64{
 		s.Path() + "-wal": 5000,
@@ -117,7 +117,7 @@ func TestStoreSizeIncludesWalShm(t *testing.T) {
 
 func TestStoreVolumeFreeBytes(t *testing.T) {
 	s := openTemp(t)
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	free, err := s.VolumeFreeBytes()
 	if err != nil {
 		t.Skipf("volume free: %v", err)

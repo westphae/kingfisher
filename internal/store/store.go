@@ -41,12 +41,12 @@ func Open(dir, tail string) (*Store, error) {
 		return nil, err
 	}
 	if err := db.Ping(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	s := &Store{db: db, path: path}
 	if err := s.bootstrap(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	return s, nil
@@ -131,19 +131,17 @@ func (s *Store) LogAttrs(device string, recs []AttrRecord) error {
 	if err != nil {
 		return err
 	}
+	defer func() { _ = tx.Rollback() }()
 	stmt, err := tx.Prepare(`INSERT INTO sensor_attrs(ts_ns,device,channel,attr,value) VALUES(?,?,?,?,?)`)
 	if err != nil {
-		tx.Rollback()
 		return err
 	}
+	defer func() { _ = stmt.Close() }()
 	for _, r := range recs {
 		if _, err := stmt.Exec(ts, device, r.Channel, r.Attr, r.Value); err != nil {
-			stmt.Close()
-			tx.Rollback()
 			return err
 		}
 	}
-	stmt.Close()
 	return tx.Commit()
 }
 
@@ -202,7 +200,7 @@ func (s *Store) addMissingColumns(tbl string, want []string) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	have := map[string]bool{}
 	for rows.Next() {
 		var cid int
@@ -265,8 +263,8 @@ func (s *Store) FlushBatch(device string, columns []string, samples []live.Sampl
 	if err != nil {
 		return err
 	}
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.Exec(stmt, args...); err != nil {
-		tx.Rollback()
 		return err
 	}
 	return tx.Commit()
