@@ -96,6 +96,19 @@ func AttrOptions(r Reader, channel, attr string) []string {
 	return out
 }
 
+// hzRatePresets are offered for integer Hz ranges (pod caps, IIO sampling_frequency).
+var hzRatePresets = []float64{1, 2, 5, 10, 15, 20, 25, 50, 100, 200}
+
+func optionsFromHzPresets(min, max float64) []string {
+	var out []string
+	for _, v := range hzRatePresets {
+		if v >= min-1e-9 && v <= max+1e-9 {
+			out = append(out, strconv.FormatFloat(v, 'f', -1, 64))
+		}
+	}
+	return out
+}
+
 // optionsFromBracketRange parses "[min step max]" (e.g. pod sampling_frequency_available)
 // into a small dropdown list.
 func optionsFromBracketRange(raw string) []string {
@@ -110,17 +123,15 @@ func optionsFromBracketRange(raw string) []string {
 	if err1 != nil || err2 != nil || err3 != nil || step <= 0 || max < min {
 		return nil
 	}
+	// Pod and most IIO drivers use step 1 Hz; avoid 1..N integer menus when max shrinks.
+	if step == 1 {
+		if out := optionsFromHzPresets(min, max); len(out) > 0 {
+			return out
+		}
+	}
 	span := max - min
 	if span/step > 30 {
-		// Wide range (e.g. pod mag 1–200 Hz): use sensible presets, not every integer.
-		presets := []float64{1, 2, 5, 10, 20, 25, 50, 100, 200}
-		var out []string
-		for _, v := range presets {
-			if v >= min-1e-9 && v <= max+1e-9 {
-				out = append(out, strconv.FormatFloat(v, 'f', -1, 64))
-			}
-		}
-		if len(out) > 0 {
+		if out := optionsFromHzPresets(min, max); len(out) > 0 {
 			return out
 		}
 	}
