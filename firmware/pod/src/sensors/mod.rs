@@ -4,6 +4,7 @@ pub mod bmp581;
 pub mod bus;
 pub mod mmc5983;
 pub mod ms4525;
+mod recover;
 
 use core::cell::RefCell;
 use core::sync::atomic::{AtomicU8, Ordering};
@@ -43,6 +44,10 @@ fn sync_attached(board: &SensorBoard) {
     if board.ms4525.is_some() {
         mask |= MS4525_BIT;
     }
+    sync_attached_mask(mask);
+}
+
+pub(crate) fn sync_attached_mask(mask: u8) {
     let prev = ATTACHED.load(Ordering::Relaxed);
     ATTACHED.store(mask, Ordering::Relaxed);
     if prev != mask {
@@ -249,56 +254,40 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
         crate::cfg::TICK_MS,
     ));
     let mut attach_ticks: u32 = 0;
-    let mut poll_tick: u32 = 0;
     const ATTACH_INTERVAL: u32 = 50; // 5 s at 10 Hz
+
+    let mut need_recovery = false;
 
     loop {
         ticker.next().await;
-        poll_tick = poll_tick.wrapping_add(1);
-        let captured_us = Instant::now().as_micros();
+        let tick_start = Instant::now();
+        rates::begin_tick();
+        let captured_us = tick_start.as_micros();
+        let mut tick_failures = 0u8;
 
-        if board.bmp581.is_some() {
-            let hz = rates::get(SensorId::Static);
-            if rates::should_poll(poll_tick, hz) {
-                let n = rates::reads_this_tick(hz);
-                for _ in 0..n {
-                    if let Some(ref bmp581) = board.bmp581 {
-                        match bmp581.read(bus) {
-                            Ok(s) => {
-                                update_static(
-                                    Reading::Static {
-                                        p_pa: s.p_pa,
-                                        temp_c: s.temp_c,
-                                        age_us: 0,
-                                    },
-                                    captured_us,
-                                );
-                            }
-                            Err(()) => println!("pod: bmp581 read failed"),
-                        }
-                    }
-                }
-            }
-        }
+        // Cheap sensors first so mag/airspeed keep updating under BMP load.
         if board.mmc5983.is_some() {
             let hz = rates::get(SensorId::Mag);
-            if rates::should_poll(poll_tick, hz) {
-                let n = rates::reads_this_tick(hz);
-                for _ in 0..n {
-                    if let Some(ref mmc5983) = board.mmc5983 {
-                        match mmc5983.read(bus) {
-                            Ok(s) => {
-                                update_mag(
-                                    Reading::Mag {
-                                        x_ut: s.x_ut,
-                                        y_ut: s.y_ut,
-                                        z_ut: s.z_ut,
-                                        age_us: 0,
-                                    },
-                                    captured_us,
-                                );
+            for _ in 0..rates::poll_budget(SensorId::Mag, hz) {
+                if let Some(ref mmc5983) = board.mmc5983 {
+                    match mmc5983.read(bus) {
+                        Ok(s) => {
+                            rates::note_read_ok(SensorId::Mag);
+                            update_mag(
+                                Reading::Mag {
+                                    x_ut: s.x_ut,
+                                    y_ut: s.y_ut,
+                                    z_ut: s.z_ut,
+                                    age_us: 0,
+                                },
+                                captured_us,
+                            );
+                        }
+                        Err(()) => {
+                            tick_failures = tick_failures.saturating_add(1);
+                            if rates::note_read_fail(SensorId::Mag) {
+                                need_recovery = true;
                             }
-                            Err(()) => println!("pod: mmc5983 read failed"),
                         }
                     }
                 }
@@ -306,26 +295,71 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
         }
         if board.ms4525.is_some() {
             let hz = rates::get(SensorId::Airspeed);
-            if rates::should_poll(poll_tick, hz) {
-                let n = rates::reads_this_tick(hz);
-                for _ in 0..n {
-                    if let Some(ref ms4525) = board.ms4525 {
-                        match ms4525.read(bus) {
-                            Ok(s) => {
-                                update_airspeed(
-                                    Reading::Airspeed {
-                                        dp_pa: s.dp_pa,
-                                        temp_c: s.temp_c,
-                                        age_us: 0,
-                                    },
-                                    captured_us,
-                                );
+            for _ in 0..rates::poll_budget(SensorId::Airspeed, hz) {
+                if let Some(ref ms4525) = board.ms4525 {
+                    match ms4525.read(bus) {
+                        Ok(s) => {
+                            rates::note_read_ok(SensorId::Airspeed);
+                            update_airspeed(
+                                Reading::Airspeed {
+                                    dp_pa: s.dp_pa,
+                                    temp_c: s.temp_c,
+                                    age_us: 0,
+                                },
+                                captured_us,
+                            );
+                        }
+                        Err(()) => {
+                            tick_failures = tick_failures.saturating_add(1);
+                            if rates::note_read_fail(SensorId::Airspeed) {
+                                need_recovery = true;
                             }
-                            Err(()) => println!("pod: ms4525 read failed"),
                         }
                     }
                 }
             }
+        }
+        if board.bmp581.is_some() {
+            let hz = rates::get(SensorId::Static);
+            for _ in 0..rates::poll_budget(SensorId::Static, hz) {
+                if let Some(ref bmp581) = board.bmp581 {
+                    match bmp581.read(bus) {
+                        Ok(s) => {
+                            rates::note_read_ok(SensorId::Static);
+                            update_static(
+                                Reading::Static {
+                                    p_pa: s.p_pa,
+                                    temp_c: s.temp_c,
+                                    age_us: 0,
+                                },
+                                captured_us,
+                            );
+                        }
+                        Err(()) => {
+                            tick_failures = tick_failures.saturating_add(1);
+                            if rates::note_read_fail(SensorId::Static) {
+                                need_recovery = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let elapsed_ms = tick_start.elapsed().as_millis() as u64;
+        if elapsed_ms > 80 {
+            if rates::note_tick_overrun() {
+                need_recovery = true;
+            }
+        } else {
+            rates::clear_overrun_streak();
+        }
+        if tick_failures >= 4 {
+            need_recovery = true;
+        }
+        if need_recovery {
+            recover::recover_bus(bus, &mut board);
+            need_recovery = false;
         }
 
         if board.bmp581.is_none() || board.mmc5983.is_none() || board.ms4525.is_none() {

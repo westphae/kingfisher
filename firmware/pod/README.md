@@ -175,9 +175,22 @@ them on startup and after each pod Hello; changing config and saving also re-sen
 `SetRate` to the pod. Firmware does not read this file — only the Pi pushes rates
 over UDP after restart.
 
+### Sampling rates and autonomic recovery (FW `0x0004_0002+`)
+
+BMP581 uses ~25 ms forced conversions; MMC5983 reads are much faster. The firmware
+enforces a **75 ms I²C work budget per 100 ms tick** and rejects unsustainable
+combinations at `SetRate` time (Ack `ok=false`). Example: **50 Hz static + 50 Hz
+mag is rejected**; **25 + 50** is OK. Hello **max Hz** shrinks when more sensors
+are attached so the UI does not offer impossible pairs.
+
+If reads fail repeatedly, a tick overruns (>80 ms of I²C), or many errors occur in
+one tick, the pod **backs off** the last changed rate (or halves it) and runs
+**I²C recovery** (re-init attached sensors, safe 10 Hz defaults). Serial log:
+`pod: backing off …` / `pod: i2c recovery`. No wing visit required for that flight.
+
 ### Phase 4 verification
 
-1. Flash FW `0x0004_0001` (or later); start kingfisher on the Pi AP.
+1. Flash FW `0x0004_0002` (or later); start kingfisher on the Pi AP.
 2. Serial: `sent Hello` once at boot, then quiet; `uplink ok` when sensors present.
 3. Pi log: no repeated `pod: ping` errors after the pod appears; `ack for_seq=…` when
    changing `sampling_frequency` on `mag_x` / `static_p` / `airspeed_dp` in the UI.

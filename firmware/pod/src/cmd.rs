@@ -17,8 +17,7 @@ pub fn last_rx_cmd_seq() -> u32 {
 /// Sensor rate limits advertised in Hello (must match `hello::cap` defaults).
 fn rate_ok(sensor: SensorId, hz: u16) -> bool {
     let (min, max) = match sensor {
-        SensorId::Static | SensorId::Airspeed => (1, 50),
-        SensorId::Mag => (1, 200),
+        SensorId::Static | SensorId::Mag | SensorId::Airspeed => (1, 50),
     };
     hz >= min && hz <= max
 }
@@ -34,8 +33,7 @@ pub fn handle(envelope: CmdEnvelope) -> Ack {
             } else if !sensor_attached(sensor) {
                 false
             } else {
-                rates::set(sensor, hz);
-                true
+                rates::try_set(sensor, hz)
             }
         }
         Cmd::SetAttr { .. } => false,
@@ -72,6 +70,8 @@ pub fn handle_datagram(
 
     match frame {
         Frame::Ping(p) => {
+            // Pi may start after our boot Hello; re-advertise caps on link-up.
+            link::request_hello();
             let _ = out.push(Frame::Pong(pod_wire::Pong {
                 seq: p.seq,
                 sender_uptime_us: uptime_us,
