@@ -234,6 +234,7 @@ func (c *Client) dispatch(frame wire.Frame, peer string) {
 		}
 	case wire.Pong:
 		c.lastPongNs.Store(time.Now().UnixNano())
+		c.maybeRefreshViewsAfterTraffic()
 	case wire.CmdFrame:
 		// We should never receive Cmd from the pod.
 		log.Printf("pod: unexpected Cmd frame from %s", peer)
@@ -264,7 +265,11 @@ func (c *Client) onBatch(b wire.SampleBatch) {
 	c.linkSeq = b.Seq
 	c.mu.Unlock()
 
+	capsAdded := false
 	for _, rd := range b.Samples {
+		if c.reader.ensureCapsFromReading(rd) {
+			capsAdded = true
+		}
 		c.reader.applyReading(rd)
 		readingNs := podUptimeNs - int64(rd.AgeMicros())*1000 + offset
 		sm := live.Sample{
@@ -277,6 +282,19 @@ func (c *Client) onBatch(b wire.SampleBatch) {
 			c.buf.Append(sm)
 		}
 	}
+	if capsAdded {
+		c.applySavedSettings(false)
+		c.refreshRegistryViews()
+	}
+}
+
+// maybeRefreshViewsAfterTraffic updates the registry when caps were inferred
+// from traffic but Hello has not been processed yet.
+func (c *Client) maybeRefreshViewsAfterTraffic() {
+	if len(c.reader.SettingsAttrRecords()) == 0 {
+		return
+	}
+	c.refreshRegistryViews()
 }
 
 func (c *Client) runConfigReload(ctx context.Context) {

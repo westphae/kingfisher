@@ -43,6 +43,22 @@ func TestPodAttrsRoundTripOnDisk(t *testing.T) {
 	}
 }
 
+func TestMigratePodAttrsNormalizesLegacyKeys(t *testing.T) {
+	c := &Config{
+		Devices: map[string]Device{
+			PodDeviceName: {
+				Attrs: map[string]string{
+					"in_mag_x_sampling_frequency": "20",
+				},
+			},
+		},
+	}
+	migratePodAttrs(c)
+	if got := c.Pod.Attrs["in_mag_sampling_frequency"]; got != "20" {
+		t.Fatalf("normalized: got %q want 20", got)
+	}
+}
+
 func TestMigratePodAttrsFromDevices(t *testing.T) {
 	c := &Config{
 		Devices: map[string]Device{

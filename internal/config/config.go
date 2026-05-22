@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -176,7 +177,32 @@ func migratePodAttrs(c *Config) {
 	}
 	c.Pod.Attrs = make(map[string]string, len(d.Attrs))
 	for k, v := range d.Attrs {
-		c.Pod.Attrs[k] = v
+		c.Pod.Attrs[normalizePodAttrKeyForConfig(k)] = v
+	}
+}
+
+// normalizePodAttrKeyForConfig rewrites legacy per-channel rate keys to the
+// canonical in_{mag,static,airspeed}_sampling_frequency form.
+func normalizePodAttrKeyForConfig(key string) string {
+	// Avoid import cycle with internal/pod; duplicate the small prefix rule.
+	if !strings.HasPrefix(key, "in_") || !strings.HasSuffix(key, "_sampling_frequency") {
+		return key
+	}
+	mid := strings.TrimPrefix(key, "in_")
+	mid = strings.TrimSuffix(mid, "_sampling_frequency")
+	prefix := mid
+	if i := strings.IndexByte(mid, '_'); i > 0 {
+		prefix = mid[:i]
+	}
+	switch prefix {
+	case "mag":
+		return "in_mag_sampling_frequency"
+	case "static":
+		return "in_static_sampling_frequency"
+	case "airspeed":
+		return "in_airspeed_sampling_frequency"
+	default:
+		return key
 	}
 }
 

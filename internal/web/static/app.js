@@ -249,8 +249,8 @@ async function loadIIODevices() {
     state.iioDevices = new Set((devices || []).map(d => d.name));
     // Ensure tabs exist even before WS samples arrive.
     for (const name of state.iioDevices) ensureTab(name);
-    // Eager-load attrs for the active tab.
-    if (state.activeTab && state.iioDevices.has(state.activeTab)) {
+    // Eager-load attrs for the active tab (IIO + virtual devices like pod).
+    if (state.activeTab && !state.attrs.has(state.activeTab)) {
       loadAttrs(state.activeTab);
     }
   } catch {}
