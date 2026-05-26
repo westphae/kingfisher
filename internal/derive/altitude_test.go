@@ -27,8 +27,8 @@ func TestPressureAltitudeAt500hPaIsAround18000Ft(t *testing.T) {
 func TestFindPressurePa_prefersPodOverCabin(t *testing.T) {
 	snap := live.Snapshot{
 		Devices: map[string]live.Sample{
-			pod.DeviceName: {
-				Device: pod.DeviceName,
+			"bmp581": {
+				Device: "bmp581",
 				Values: map[string]float64{pod.ChStaticP: 101_325},
 			},
 			"bmp280": {
@@ -89,7 +89,7 @@ func TestDensityAltFt_hotDayRaisesDA(t *testing.T) {
 func TestFindOATC_pod(t *testing.T) {
 	snap := live.Snapshot{
 		Devices: map[string]live.Sample{
-			pod.DeviceName: {
+			"bmp581": {
 				Values: map[string]float64{
 					pod.ChStaticP:    101_325,
 					pod.ChStaticTemp: 22.0,
@@ -106,7 +106,7 @@ func TestFindOATC_pod(t *testing.T) {
 func TestFindOATC_pod_milliC(t *testing.T) {
 	snap := live.Snapshot{
 		Devices: map[string]live.Sample{
-			pod.DeviceName: {
+			"bmp581": {
 				Values: map[string]float64{
 					pod.ChStaticTemp: 22_000,
 				},

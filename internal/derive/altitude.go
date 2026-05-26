@@ -13,6 +13,7 @@ import (
 
 	"github.com/westphae/kingfisher/internal/live"
 	"github.com/westphae/kingfisher/internal/pod"
+	"github.com/westphae/kingfisher/internal/pod/wire"
 	"github.com/westphae/kingfisher/internal/store"
 	"github.com/westphae/kingfisher/internal/units"
 )
@@ -81,13 +82,14 @@ func isaTempCAtPAFt(paFt float64) float64 {
 // findPressurePa returns barometric pressure in Pa and a pressure_source code.
 // Prefers pod static_pressure_pa over cabin IIO pressure_pa.
 func findPressurePa(s live.Snapshot) (pa float64, source float64, ok bool) {
-	if sm, have := s.Devices[pod.DeviceName]; have {
+	wingBaro := pod.DefaultDeviceName(wire.SensorStatic)
+	if sm, have := s.Devices[wingBaro]; have {
 		if v, ok := sm.Values[pod.ChStaticP]; ok && validPressurePa(v) {
 			return v, PressureSourcePod, true
 		}
 	}
 	for name, sm := range s.Devices {
-		if name == "press_alt" || name == pod.DeviceName {
+		if name == "press_alt" || name == pod.DeviceName || name == wingBaro {
 			continue
 		}
 		if pa, ok := cabinPressurePa(sm); ok {
@@ -98,14 +100,15 @@ func findPressurePa(s live.Snapshot) (pa float64, source float64, ok bool) {
 }
 
 func findOATC(s live.Snapshot, source float64) (float64, bool) {
+	wingBaro := pod.DefaultDeviceName(wire.SensorStatic)
 	switch source {
 	case PressureSourcePod:
-		if sm, ok := s.Devices[pod.DeviceName]; ok {
+		if sm, ok := s.Devices[wingBaro]; ok {
 			return sampleTempC(sm, pod.ChStaticTemp)
 		}
 	case PressureSourceCabin:
 		for name, sm := range s.Devices {
-			if name == "press_alt" || name == pod.DeviceName {
+			if name == "press_alt" || name == pod.DeviceName || name == wingBaro {
 				continue
 			}
 			if _, ok := cabinPressurePa(sm); ok {
