@@ -14,7 +14,7 @@ func TestEnsureCapsFromReadingEnablesSettings(t *testing.T) {
 		t.Fatal("expected cap seed")
 	}
 	recs := r.SettingsAttrRecords()
-	if len(recs) != 1 || recs[0].Channel != "mag" {
+	if len(recs) != 1 || recs[0].Attr != "sampling_frequency" {
 		t.Fatalf("records: %+v", recs)
 	}
 }
@@ -29,9 +29,9 @@ func TestNewWithLegacyConfigAttrs(t *testing.T) {
 		},
 	}
 	reg := sensors.NewRegistry()
-	_ = New("", nil, nil, nil, reg, config.NewHolder("", cfg))
-	views := reg.Get(DeviceName)
-	if len(views) == 0 {
-		t.Fatalf("registry views empty; attrs API would show no settings")
+	_ = New("", nil, nil, nil, nil, reg, config.NewHolder("", cfg))
+	views := reg.Get("mmc5983")
+	if len(views) != 1 || views[0].Attr != "sampling_frequency" {
+		t.Fatalf("mmc5983 registry views: %+v", views)
 	}
 }

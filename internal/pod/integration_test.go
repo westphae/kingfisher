@@ -22,7 +22,7 @@ func TestUDPIntegration(t *testing.T) {
 
 	hub := live.NewHub()
 	reg := sensors.NewRegistry()
-	c := New(listenAddr.String(), transport, hub, nil, reg, nil)
+	c := New(listenAddr.String(), transport, hub, nil, nil, reg, nil)
 
 	stop := make(chan struct{})
 	done := make(chan struct{})
@@ -78,18 +78,14 @@ func TestUDPIntegration(t *testing.T) {
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		snap := hub.SnapshotNow()
-		sm, ok := snap.Devices[DeviceName]
-		if ok && sm.Values[ChAirspeedDP] == 250.0 && sm.Values[ChMagX] == 12.0 {
-			// Registry should now expose three writable rate rows.
-			views := reg.Get(DeviceName)
-			var writable int
-			for _, v := range views {
-				if v.Attr == "sampling_frequency" && v.Writable {
-					writable++
+		air, okAir := snap.Devices["ms4525"]
+		mag, okMag := snap.Devices["mmc5983"]
+		if okAir && okMag && air.Values[ChAirspeedDP] == 250.0 && mag.Values[ChMagX] == 12.0 {
+			for _, dev := range []string{"bmp581", "mmc5983", "ms4525"} {
+				views := reg.Get(dev)
+				if len(views) != 1 || views[0].Attr != "sampling_frequency" || !views[0].Writable {
+					t.Errorf("%s registry views: %+v", dev, views)
 				}
-			}
-			if writable != 3 {
-				t.Errorf("registry has %d writable sampling_frequency rows, want 3", writable)
 			}
 			return
 		}

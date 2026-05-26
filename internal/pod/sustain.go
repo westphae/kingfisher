@@ -3,11 +3,13 @@ package pod
 import "github.com/westphae/kingfisher/internal/pod/wire"
 
 const (
-	baseHzPod          = 10
-	maxTickWorkUs      = 100_000
-	usPerStaticRead    = 30_000
-	usPerMagRead       = 2_000
-	usPerAirspeedRead  = 5_000
+	baseHzPod         = 10
+	maxTickWorkUs     = 100_000
+	usPerStaticDrain  = 3_000
+	usPerStaticFrame  = 400
+	usPerMagRead      = 1_200
+	usPerAirspeedRead = 5_000
+	maxReadsPerTick   = 3
 )
 
 func readsPerTick(hz uint16) uint64 {
@@ -19,17 +21,29 @@ func readsPerTick(hz uint16) uint64 {
 
 func readsPerTickCapped(hz uint16) uint64 {
 	r := readsPerTick(hz)
-	if r > 3 {
-		return 3
+	if r > maxReadsPerTick {
+		return maxReadsPerTick
 	}
 	return r
 }
 
+// staticTickWorkUs estimates BMP581 FIFO drain cost per poll tick
+// (matches firmware/pod/src/rates.rs static_tick_work_us).
+func staticTickWorkUs(hz uint16) uint64 {
+	if hz == 0 {
+		return 0
+	}
+	frames := readsPerTick(hz)
+	if frames < 1 {
+		frames = 1
+	}
+	return uint64(usPerStaticDrain) + frames*uint64(usPerStaticFrame)
+}
+
 // SustainableRates reports whether the combined schedule fits the pod bus
-// budget (matches firmware rates::sustainable). BMP reads use the full
-// requested cadence; faster sensors are planner-capped per tick.
+// budget (matches firmware rates::sustainable).
 func SustainableRates(staticHz, magHz, airHz uint16) bool {
-	work := readsPerTick(staticHz)*usPerStaticRead +
+	work := staticTickWorkUs(staticHz) +
 		readsPerTickCapped(magHz)*usPerMagRead +
 		readsPerTickCapped(airHz)*usPerAirspeedRead
 	return work <= maxTickWorkUs

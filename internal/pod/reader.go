@@ -2,6 +2,7 @@ package pod
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -11,9 +12,7 @@ import (
 	"github.com/westphae/kingfisher/internal/store"
 )
 
-// DeviceName is the live.Sample.Device value the pod publishes under. It
-// also doubles as the registry key — `/api/devices/pod/attrs` resolves
-// here.
+// DeviceName is the legacy aggregate registry key (sticky cache); hidden from UI tabs.
 const DeviceName = "pod"
 
 // channel names exposed on the pod device. They land as columns in the
@@ -34,38 +33,101 @@ var podChannels = []string{
 	ChMagX, ChMagY, ChMagZ,
 }
 
-// sensorSettingsChannel is the UI label for per-sensor rate control. The pod
-// firmware sets one Hz per physical sensor (MMC5983, BMP581, MS4525), not per
-// data channel — mag_*_ut and static_pressure_pa/temp_c share the same rate.
-var sensorSettingsChannel = map[wire.SensorID]string{
-	wire.SensorAirspeed: "airspeed",
-	wire.SensorStatic:   "static",
-	wire.SensorMag:      "mag",
+// legacySettingsChannel maps old config/UI channel names to SensorID.
+var legacySettingsChannel = map[string]wire.SensorID{
+	"airspeed": wire.SensorAirspeed,
+	"static":   wire.SensorStatic,
+	"mag":      wire.SensorMag,
 }
 
-// defaultSensorCap matches firmware hello.rs limits when Hello has not
-// arrived yet; used so saved pod.attrs still appear in the web UI.
+// dataChannelToSensor maps telemetry column names to SensorID.
+var dataChannelToSensor = map[string]wire.SensorID{
+	ChAirspeedDP: wire.SensorAirspeed,
+	ChStaticP:    wire.SensorStatic,
+	ChMagX:       wire.SensorMag,
+}
+
+// defaultSensorCap matches firmware hello.rs limits when Hello has not arrived.
 func defaultSensorCap(sid wire.SensorID) (wire.SensorCap, bool) {
 	switch sid {
 	case wire.SensorStatic:
-		return wire.SensorCap{ID: sid, MinHz: 1, MaxHz: 50, DefaultHz: 10}, true
+		return wire.SensorCap{
+			ID: sid, MinHz: 1, MaxHz: 50, DefaultHz: 10,
+			DeviceName: wire.NewDeviceName(DefaultDeviceName(sid)),
+		}, true
 	case wire.SensorMag:
-		return wire.SensorCap{ID: sid, MinHz: 1, MaxHz: 50, DefaultHz: 10}, true
+		return wire.SensorCap{
+			ID: sid, MinHz: 1, MaxHz: 100, DefaultHz: 10,
+			DeviceName: wire.NewDeviceName(DefaultDeviceName(sid)),
+		}, true
 	case wire.SensorAirspeed:
-		return wire.SensorCap{ID: sid, MinHz: 1, MaxHz: 50, DefaultHz: 10}, true
+		return wire.SensorCap{
+			ID: sid, MinHz: 1, MaxHz: 50, DefaultHz: 10,
+			DeviceName: wire.NewDeviceName(DefaultDeviceName(sid)),
+		}, true
 	default:
 		return wire.SensorCap{}, false
 	}
 }
 
-// channelToSensor resolves settings labels (and legacy primary data channels).
-var channelToSensor = map[string]wire.SensorID{
-	"airspeed":     wire.SensorAirspeed,
-	"static":       wire.SensorStatic,
-	"mag":          wire.SensorMag,
-	ChAirspeedDP:   wire.SensorAirspeed,
-	ChStaticP:      wire.SensorStatic,
-	ChMagX:         wire.SensorMag,
+func (r *reader) deviceNameLocked(sid wire.SensorID) string {
+	if c, ok := r.caps[sid]; ok {
+		if n := c.DeviceName.String(); n != "" {
+			return n
+		}
+	}
+	return DefaultDeviceName(sid)
+}
+
+func (r *reader) sensorIDForDevice(device string) (wire.SensorID, bool) {
+	if sid, ok := legacySettingsChannel[device]; ok {
+		return sid, true
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for sid, c := range r.caps {
+		if c.DeviceName.String() == device {
+			return sid, true
+		}
+	}
+	for _, sid := range []wire.SensorID{wire.SensorStatic, wire.SensorMag, wire.SensorAirspeed} {
+		if DefaultDeviceName(sid) == device {
+			return sid, true
+		}
+	}
+	return 0, false
+}
+
+func (r *reader) sensorIDForKey(ch string) (wire.SensorID, bool) {
+	if sid, ok := dataChannelToSensor[ch]; ok {
+		return sid, true
+	}
+	return r.sensorIDForDevice(ch)
+}
+
+// TelemetryDeviceNames returns chip names currently advertised or defaulted.
+func (r *reader) TelemetryDeviceNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	seen := make(map[string]struct{}, 3)
+	var out []string
+	for _, sid := range []wire.SensorID{wire.SensorStatic, wire.SensorMag, wire.SensorAirspeed} {
+		if _, ok := r.caps[sid]; !ok {
+			if _, ok := r.rates[sid]; !ok {
+				continue
+			}
+		}
+		name := r.deviceNameLocked(sid)
+		if name == "" {
+			continue
+		}
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
 }
 
 // outboundCmd is queued for the send loop; PrevHz supports Ack rollback.
@@ -120,6 +182,30 @@ func (r *reader) applyReading(rd wire.Reading) {
 	}
 }
 
+// sampleDeviceValues maps one wire reading to its telemetry device and sparse columns.
+func (r *reader) sampleDeviceValues(rd wire.Reading) (device string, values map[string]float64, ok bool) {
+	switch v := rd.(type) {
+	case wire.StaticReading:
+		return r.deviceNameLocked(wire.SensorStatic), map[string]float64{
+			ChStaticP:    float64(v.PPa),
+			ChStaticTemp: float64(v.TempC),
+		}, true
+	case wire.MagReading:
+		return r.deviceNameLocked(wire.SensorMag), map[string]float64{
+			ChMagX: float64(v.XUt),
+			ChMagY: float64(v.YUt),
+			ChMagZ: float64(v.ZUt),
+		}, true
+	case wire.AirspeedReading:
+		return r.deviceNameLocked(wire.SensorAirspeed), map[string]float64{
+			ChAirspeedDP:   float64(v.DpPa),
+			ChAirspeedTemp: float64(v.TempC),
+		}, true
+	default:
+		return "", nil, false
+	}
+}
+
 // snapshotValues returns a copy of the sticky cache for publishing.
 func (r *reader) snapshotValues() map[string]float64 {
 	r.mu.RLock()
@@ -137,9 +223,13 @@ func (r *reader) applyHello(h wire.Hello) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, c := range h.Caps.Sensors {
-		r.caps[c.ID] = c
-		if _, ok := r.rates[c.ID]; !ok {
-			r.rates[c.ID] = c.DefaultHz
+		cap := c
+		if cap.DeviceName.String() == "" {
+			cap.DeviceName = wire.NewDeviceName(DefaultDeviceName(cap.ID))
+		}
+		r.caps[cap.ID] = cap
+		if _, ok := r.rates[cap.ID]; !ok {
+			r.rates[cap.ID] = cap.DefaultHz
 		}
 	}
 }
@@ -203,11 +293,39 @@ func (r *reader) capForSettings(sid wire.SensorID) (wire.SensorCap, bool) {
 // SettingsAttrRecords is the attr snapshot for the registry / web UI: one
 // sampling_frequency row per sensor from Hello or from saved pod.attrs.
 func (r *reader) SettingsAttrRecords() []store.AttrRecord {
+	return r.settingsAttrRecords("")
+}
+
+// SettingsAttrRecordsForUIDevice implements registry per-tab attr snapshots.
+func (r *reader) SettingsAttrRecordsForUIDevice(uiDevice string) []store.AttrRecord {
+	if _, ok := r.sensorIDForDevice(uiDevice); !ok {
+		return nil
+	}
+	return r.settingsAttrRecords(uiDevice)
+}
+
+func (r *reader) settingsAttrRecords(onlyChannel string) []store.AttrRecord {
+	return r.attrRecords(onlyChannel, false)
+}
+
+// FlightLogAttrRecordsForUIDevice returns attrs for sensor_attrs persistence.
+func (r *reader) FlightLogAttrRecordsForUIDevice(uiDevice string) []store.AttrRecord {
+	if _, ok := r.sensorIDForDevice(uiDevice); !ok {
+		return nil
+	}
+	return r.attrRecords(uiDevice, true)
+}
+
+func (r *reader) attrRecords(onlyDevice string, includeCapMeta bool) []store.AttrRecord {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	order := []wire.SensorID{wire.SensorStatic, wire.SensorMag, wire.SensorAirspeed}
-	out := make([]store.AttrRecord, 0, len(order))
+	out := make([]store.AttrRecord, 0, len(order)*4)
 	for _, sid := range order {
+		dev := r.deviceNameLocked(sid)
+		if onlyDevice != "" && dev != onlyDevice {
+			continue
+		}
 		cap, ok := r.capForSettings(sid)
 		if !ok {
 			continue
@@ -217,17 +335,24 @@ func (r *reader) SettingsAttrRecords() []store.AttrRecord {
 			hz = cap.DefaultHz
 		}
 		out = append(out, store.AttrRecord{
-			Channel: sensorSettingsChannel[sid],
+			Channel: "",
 			Attr:    "sampling_frequency",
 			Value:   strconv.FormatUint(uint64(hz), 10),
 		})
+		if includeCapMeta {
+			out = append(out,
+				store.AttrRecord{Channel: "", Attr: "min_hz", Value: strconv.FormatUint(uint64(cap.MinHz), 10)},
+				store.AttrRecord{Channel: "", Attr: "max_hz", Value: strconv.FormatUint(uint64(cap.MaxHz), 10)},
+				store.AttrRecord{Channel: "", Attr: "default_hz", Value: strconv.FormatUint(uint64(cap.DefaultHz), 10)},
+			)
+		}
 	}
 	return out
 }
 
 // ChannelAttr exposes per-sensor settings (not on mag_y, static_temp, etc.).
 func (r *reader) ChannelAttr(ch, attr string) (string, error) {
-	sid, ok := channelToSensor[ch]
+	sid, ok := r.sensorIDForKey(ch)
 	if !ok {
 		return "", fmt.Errorf("pod: channel %q has no attrs", ch)
 	}
@@ -258,7 +383,7 @@ func (r *reader) Attr(name string) (string, error) {
 }
 
 func (r *reader) SetChannelAttr(ch, attr, value string) error {
-	sid, ok := channelToSensor[ch]
+	sid, ok := r.sensorIDForKey(ch)
 	if !ok {
 		return fmt.Errorf("pod: channel %q is not writable", ch)
 	}
@@ -273,7 +398,9 @@ func (r *reader) SetChannelAttr(ch, attr, value string) error {
 	if c, ok := r.caps[sid]; ok {
 		if uint16(hz) < c.MinHz || uint16(hz) > c.MaxHz {
 			r.mu.Unlock()
-			return fmt.Errorf("pod: %s rate %d out of range [%d, %d]", sid, hz, c.MinHz, c.MaxHz)
+			err := fmt.Errorf("pod: %s rate %d out of range [%d, %d] (Hello cap; re-link after firmware update if max looks too low)", sid, hz, c.MinHz, c.MaxHz)
+			log.Printf("pod: %v", err)
+			return err
 		}
 	}
 	prevHz := r.rates[sid]
@@ -281,7 +408,9 @@ func (r *reader) SetChannelAttr(ch, attr, value string) error {
 	sHz, mHz, aHz := RatesAfterChange(r.rates, sid, newHz)
 	if !SustainableRates(sHz, mHz, aHz) {
 		r.mu.Unlock()
-		return fmt.Errorf("pod: combined rates (static=%d mag=%d airspeed=%d Hz) exceed wing I²C budget — e.g. 50+50 static+mag is not supported; try 25+50 or lower", sHz, mHz, aHz)
+		err := fmt.Errorf("pod: combined rates (static=%d mag=%d airspeed=%d Hz) exceed wing I²C budget", sHz, mHz, aHz)
+		log.Printf("pod: %v", err)
+		return err
 	}
 	r.rates[sid] = newHz
 	r.mu.Unlock()
@@ -306,11 +435,11 @@ func (r *reader) SetChannelAttr(ch, attr, value string) error {
 func (r *reader) ApplyDeviceConfig(dev config.Device) []outboundCmd {
 	var outs []outboundCmd
 	for k, v := range dev.Attrs {
-		ch, _, ok := parsePodAttrKey(k)
+		device, _, ok := parsePodAttrKey(k)
 		if !ok {
 			continue
 		}
-		sid, ok := channelToSensor[ch]
+		sid, ok := r.sensorIDForDevice(device)
 		if !ok {
 			continue
 		}
@@ -349,14 +478,26 @@ func (r *reader) setRateHz(sid wire.SensorID, hz uint16) {
 func (r *reader) ReloadScale() error { return nil }
 
 func (r *reader) WritableAttr(ch, attr string) bool {
+	return r.WritableForDevice("", ch, attr)
+}
+
+// WritableForDevice implements per-tab registry writability (device is the UI tab name).
+func (r *reader) WritableForDevice(device, ch, attr string) bool {
 	if attr != "sampling_frequency" {
 		return false
 	}
-	sid, ok := channelToSensor[ch]
+	if device != "" {
+		sid, ok := r.sensorIDForDevice(device)
+		if !ok {
+			return false
+		}
+		return ch == "" || ch == r.deviceNameLocked(sid) || legacySettingsChannel[ch] == sid
+	}
+	sid, ok := r.sensorIDForKey(ch)
 	if !ok {
 		return false
 	}
-	return sensorSettingsChannel[sid] == ch
+	return ch == "" || ch == r.deviceNameLocked(sid) || legacySettingsChannel[ch] == sid
 }
 
 func (r *reader) Close() error { return nil }

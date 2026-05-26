@@ -16,6 +16,7 @@ import (
 
 	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/live"
+	"github.com/westphae/kingfisher/internal/location"
 	"github.com/westphae/kingfisher/internal/pod/wire"
 	"github.com/westphae/kingfisher/internal/sensors"
 	"github.com/westphae/kingfisher/internal/store"
@@ -37,10 +38,14 @@ type Client struct {
 	transport Transport
 	hub       *live.Hub
 	buf       *store.Buffer
+	st        *store.Store
 	registry  *sensors.Registry
 	cfg       *config.Holder
 
 	reader *reader
+
+	loggedMu sync.Mutex
+	logged   map[string][]store.AttrRecord
 	cmdOut chan outboundCmd
 
 	cmdSeq   atomic.Uint32
@@ -75,25 +80,30 @@ type Client struct {
 //
 // transport is the link to the pod. Pass nil to skip wiring (useful for
 // tests that drive the reader directly).
-func New(addr string, transport Transport, hub *live.Hub, buf *store.Buffer, reg *sensors.Registry, cfg *config.Holder) *Client {
+func New(addr string, transport Transport, hub *live.Hub, buf *store.Buffer, st *store.Store, reg *sensors.Registry, cfg *config.Holder) *Client {
 	cmdOut := make(chan outboundCmd, cmdQueueSize)
 	c := &Client{
 		addr:      addr,
 		transport: transport,
 		hub:       hub,
 		buf:       buf,
+		st:        st,
 		registry:  reg,
 		cfg:       cfg,
 		reader:    newReader(cmdOut),
 		cmdOut:    cmdOut,
 	}
 	if reg != nil {
-		reg.Register(c.reader, DeviceName)
+		reg.Register(c.reader, DeviceName, location.Pod)
+		for _, name := range DefaultPodDeviceNames() {
+			reg.RegisterAlias(name, c.reader, location.Pod)
+		}
 	}
 	if cfg != nil {
 		c.applySavedSettings(false)
 		c.refreshRegistryViews()
 	}
+	c.logPodSensorAttrs()
 	return c
 }
 
@@ -213,14 +223,10 @@ func (c *Client) dispatch(frame wire.Frame, peer string) {
 	case wire.Hello:
 		log.Printf("pod: hello from %s fw=%#x sensors=%d", peer, f.FwVersion, len(f.Caps.Sensors))
 		c.reader.applyHello(f)
+		c.syncRegistryAliases()
 		c.applySavedSettings(true)
 		c.refreshRegistryViews()
-		// Publish so the cockpit tab appears before the first SampleBatch.
-		c.hub.Publish(live.Sample{
-			Device: DeviceName,
-			TsNs:   time.Now().UnixNano(),
-			Values: c.reader.snapshotValues(),
-		})
+		c.logPodSensorAttrs()
 	case wire.Status:
 		c.noteStatus(f)
 		log.Printf("pod: status uptime=%dus batt=%.2fV rssi=%ddBm tx=%d", f.PodUptimeUs, f.BatteryV, f.RssiDBm, f.TxSeq)
@@ -231,6 +237,10 @@ func (c *Client) dispatch(frame wire.Frame, peer string) {
 			if !f.OK {
 				c.reader.setRateHz(e.rollbackSensor, e.rollbackHz)
 				log.Printf("pod: ack for_seq=%d rejected; reverted %s to %d Hz", f.ForSeq, e.rollbackSensor, e.rollbackHz)
+				c.refreshRegistryViews()
+			} else {
+				c.logPodRateAck(e.rollbackSensor)
+				c.refreshRegistryViews()
 			}
 		} else {
 			log.Printf("pod: ack for_seq=%d ok=%v (no pending)", f.ForSeq, f.OK)
@@ -288,12 +298,16 @@ func (c *Client) onBatch(b wire.SampleBatch) {
 		if c.reader.ensureCapsFromReading(rd) {
 			capsAdded = true
 		}
+		dev, values, ok := c.reader.sampleDeviceValues(rd)
+		if !ok {
+			continue
+		}
 		c.reader.applyReading(rd)
 		readingNs := podUptimeNs - int64(rd.AgeMicros())*1000 + offset
 		sm := live.Sample{
-			Device: DeviceName,
+			Device: dev,
 			TsNs:   readingNs,
-			Values: c.reader.snapshotValues(),
+			Values: values,
 		}
 		c.hub.Publish(sm)
 		if c.buf != nil {
@@ -324,6 +338,7 @@ func (c *Client) runConfigReload(ctx context.Context) {
 		case <-reload:
 			c.applySavedSettings(true)
 			c.refreshRegistryViews()
+			c.logPodSensorAttrDiff()
 		}
 	}
 }
@@ -351,11 +366,25 @@ func (c *Client) enqueueOutbound(o outboundCmd) {
 	}
 }
 
+// RefreshRegistryViews updates registry attr snapshots for pod_* tabs.
+func (c *Client) RefreshRegistryViews() { c.refreshRegistryViews() }
+
+func (c *Client) syncRegistryAliases() {
+	if c.registry == nil {
+		return
+	}
+	for _, name := range c.reader.TelemetryDeviceNames() {
+		c.registry.RegisterAlias(name, c.reader, location.Pod)
+	}
+}
+
 // refreshRegistryViews resnaps the reader's attrs into the registry so
-// the web UI sees the latest caps/rates. Called after Hello.
+// the web UI sees the latest caps/rates on each wing sensor tab.
 func (c *Client) refreshRegistryViews() {
 	if c.registry == nil {
 		return
 	}
-	c.registry.Update(DeviceName, c.reader.SettingsAttrRecords())
+	for _, device := range c.reader.TelemetryDeviceNames() {
+		c.registry.Update(device, c.reader.SettingsAttrRecordsForUIDevice(device))
+	}
 }

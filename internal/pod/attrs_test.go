@@ -8,18 +8,19 @@ import (
 
 func TestParsePodAttrKey_legacyDataChannels(t *testing.T) {
 	cases := []struct {
-		key      string
-		wantCh   string
-		wantAttr string
+		key        string
+		wantDevice string
+		wantAttr   string
 	}{
-		{"in_mag_x_sampling_frequency", "mag", "sampling_frequency"},
-		{"in_static_p_sampling_frequency", "static", "sampling_frequency"},
-		{"in_mag_sampling_frequency", "mag", "sampling_frequency"},
+		{"in_mag_x_sampling_frequency", "mmc5983", "sampling_frequency"},
+		{"in_static_p_sampling_frequency", "bmp581", "sampling_frequency"},
+		{"in_mag_sampling_frequency", "mmc5983", "sampling_frequency"},
+		{"in_bmp581_sampling_frequency", "bmp581", "sampling_frequency"},
 	}
 	for _, tc := range cases {
-		ch, attr, ok := parsePodAttrKey(tc.key)
-		if !ok || ch != tc.wantCh || attr != tc.wantAttr {
-			t.Errorf("%q -> (%q,%q,%v) want (%q,%q,true)", tc.key, ch, attr, ok, tc.wantCh, tc.wantAttr)
+		dev, attr, ok := parsePodAttrKey(tc.key)
+		if !ok || dev != tc.wantDevice || attr != tc.wantAttr {
+			t.Errorf("%q -> (%q,%q,%v) want (%q,%q,true)", tc.key, dev, attr, ok, tc.wantDevice, tc.wantAttr)
 		}
 	}
 }

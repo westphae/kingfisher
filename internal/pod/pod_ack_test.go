@@ -9,7 +9,7 @@ import (
 )
 
 func TestAckFailureRevertsRate(t *testing.T) {
-	c := New("", nil, live.NewHub(), nil, sensors.NewRegistry(), nil)
+	c := New("", nil, live.NewHub(), nil, nil, sensors.NewRegistry(), nil)
 	c.reader.applyHello(wire.Hello{
 		FwVersion:    1,
 		ProtoVersion: wire.ProtoVersion,

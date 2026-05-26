@@ -4,29 +4,33 @@ import (
 	"testing"
 
 	"github.com/westphae/kingfisher/internal/live"
+	"github.com/westphae/kingfisher/internal/location"
 	"github.com/westphae/kingfisher/internal/pod/wire"
 	"github.com/westphae/kingfisher/internal/sensors"
 )
 
-func TestOnBatchPublishesAllChannels(t *testing.T) {
+func helloCap(id wire.SensorID, min, max, def uint16) wire.SensorCap {
+	return wire.SensorCap{
+		ID: id, MinHz: min, MaxHz: max, DefaultHz: def,
+		DeviceName: wire.NewDeviceName(DefaultDeviceName(id)),
+	}
+}
+
+func TestOnBatchPublishesSplitDevices(t *testing.T) {
 	hub := live.NewHub()
 	reg := sensors.NewRegistry()
-	c := New("", nil, hub, nil, reg, nil)
+	c := New("", nil, hub, nil, nil, reg, nil)
 
-	// Seed caps so the reader knows the legal Hz ranges for each sensor.
 	c.reader.applyHello(wire.Hello{
 		FwVersion:    1,
 		ProtoVersion: wire.ProtoVersion,
 		Caps: wire.Capabilities{Sensors: []wire.SensorCap{
-			{ID: wire.SensorAirspeed, MinHz: 1, MaxHz: 50, DefaultHz: 10},
-			{ID: wire.SensorStatic, MinHz: 1, MaxHz: 50, DefaultHz: 10},
-			{ID: wire.SensorMag, MinHz: 1, MaxHz: 200, DefaultHz: 50},
+			helloCap(wire.SensorAirspeed, 1, 50, 10),
+			helloCap(wire.SensorStatic, 1, 50, 10),
+			helloCap(wire.SensorMag, 1, 200, 50),
 		}},
 	})
 
-	// First batch contains one of each. Sticky cache should fill in.
-	// All values chosen with exact float32 representations so equality
-	// checks below are stable.
 	c.onBatch(wire.SampleBatch{
 		PodUptimeUs: 1_000_000,
 		Seq:         1,
@@ -38,54 +42,66 @@ func TestOnBatchPublishesAllChannels(t *testing.T) {
 	})
 
 	snap := hub.SnapshotNow()
-	sample, ok := snap.Devices[DeviceName]
+	static, ok := snap.Devices["bmp581"]
 	if !ok {
-		t.Fatal("hub has no pod sample")
+		t.Fatal("hub missing bmp581")
 	}
-	want := map[string]float64{
-		ChAirspeedDP: 100.0, ChAirspeedTemp: 17.0,
-		ChStaticP: 98_000.0, ChStaticTemp: 17.5,
-		ChMagX: 22.0, ChMagY: -3.0, ChMagZ: 41.0,
+	if static.Values[ChStaticP] != 98_000.0 || static.Values[ChStaticTemp] != 17.5 {
+		t.Errorf("bmp581: %v", static.Values)
 	}
-	for k, v := range want {
-		if sample.Values[k] != v {
-			t.Errorf("channel %s: got %v want %v", k, sample.Values[k], v)
-		}
+	if _, ok := static.Values[ChMagX]; ok {
+		t.Errorf("bmp581 must not contain mag channels")
 	}
+	mag, ok := snap.Devices["mmc5983"]
+	if !ok || mag.Values[ChMagX] != 22.0 {
+		t.Errorf("mmc5983: %v", mag.Values)
+	}
+	air, ok := snap.Devices["ms4525"]
+	if !ok || air.Values[ChAirspeedDP] != 100.0 {
+		t.Errorf("ms4525: %v", air.Values)
+	}
+}
 
-	// Second batch contains only a mag reading; sticky cache must still
-	// expose airspeed_dp_pa and static_pressure_pa in the published sample.
+func TestOnBatchMultipleStaticTimestamps(t *testing.T) {
+	hub := live.NewHub()
+	c := New("", nil, hub, nil, nil, nil, nil)
+	c.reader.applyHello(wire.Hello{
+		FwVersion:    1,
+		ProtoVersion: wire.ProtoVersion,
+		Caps: wire.Capabilities{Sensors: []wire.SensorCap{
+			helloCap(wire.SensorStatic, 1, 50, 10),
+		}},
+	})
+
 	c.onBatch(wire.SampleBatch{
-		PodUptimeUs: 1_020_000,
-		Seq:         2,
+		PodUptimeUs: 1_100_000,
+		Seq:         1,
 		Samples: []wire.Reading{
-			wire.MagReading{XUt: 23.0, YUt: -3.0, ZUt: 41.5, AgeUs: 0},
+			wire.StaticReading{PPa: 98_000.0, TempC: 17.0, AgeUs: 100_000},
+			wire.StaticReading{PPa: 98_100.0, TempC: 17.1, AgeUs: 0},
 		},
 	})
-	snap = hub.SnapshotNow()
-	sample = snap.Devices[DeviceName]
-	if sample.Values[ChAirspeedDP] != 100.0 {
-		t.Errorf("airspeed_dp_pa lost after mag-only batch: %v", sample.Values[ChAirspeedDP])
-	}
-	if sample.Values[ChMagX] != 23.0 {
-		t.Errorf("mag_x_ut not updated: %v", sample.Values[ChMagX])
+	snap := hub.SnapshotNow()
+	last := snap.Devices["bmp581"]
+	if last.Values[ChStaticP] != 98_100.0 {
+		t.Fatalf("hub keeps latest static: %v", last.Values)
 	}
 }
 
 func TestSetSamplingFrequencyEnqueuesCmd(t *testing.T) {
 	hub := live.NewHub()
 	reg := sensors.NewRegistry()
-	c := New("", nil, hub, nil, reg, nil)
+	c := New("", nil, hub, nil, nil, reg, nil)
 
 	c.reader.applyHello(wire.Hello{
 		FwVersion:    1,
 		ProtoVersion: wire.ProtoVersion,
 		Caps: wire.Capabilities{Sensors: []wire.SensorCap{
-			{ID: wire.SensorMag, MinHz: 1, MaxHz: 200, DefaultHz: 50},
+			helloCap(wire.SensorMag, 1, 200, 50),
 		}},
 	})
 
-	if err := c.reader.SetChannelAttr("mag", "sampling_frequency", "100"); err != nil {
+	if err := c.reader.SetChannelAttr("mmc5983", "sampling_frequency", "100"); err != nil {
 		t.Fatalf("SetChannelAttr: %v", err)
 	}
 	select {
@@ -104,72 +120,53 @@ func TestSetSamplingFrequencyEnqueuesCmd(t *testing.T) {
 		t.Fatal("no Cmd enqueued")
 	}
 
-	// Out-of-range rejected.
-	if err := c.reader.SetChannelAttr("mag", "sampling_frequency", "9999"); err == nil {
+	if err := c.reader.SetChannelAttr("mmc5983", "sampling_frequency", "9999"); err == nil {
 		t.Fatal("expected out-of-range error")
 	}
-	// Per-channel rates are not supported (one rate for the whole mag sensor).
 	if err := c.reader.SetChannelAttr(ChMagY, "sampling_frequency", "100"); err == nil {
 		t.Fatal("expected non-settings channel error")
 	}
 }
 
-func TestHelloPublishesToHub(t *testing.T) {
+func TestHelloDoesNotPublishAggregatePodDevice(t *testing.T) {
 	hub := live.NewHub()
-	c := New("", nil, hub, nil, nil, nil)
+	c := New("", nil, hub, nil, nil, nil, nil)
 	c.dispatch(wire.Hello{
 		FwVersion:    0x0003_0000,
 		ProtoVersion: wire.ProtoVersion,
 		Caps: wire.Capabilities{Sensors: []wire.SensorCap{
-			{ID: wire.SensorStatic, MinHz: 1, MaxHz: 50, DefaultHz: 10},
+			helloCap(wire.SensorStatic, 1, 50, 10),
 		}},
 	}, "192.168.10.94:4711")
-	if _, ok := hub.SnapshotNow().Devices[DeviceName]; !ok {
-		t.Fatal("hub missing pod after Hello")
+	if _, ok := hub.SnapshotNow().Devices[DeviceName]; ok {
+		t.Fatal("hub should not publish legacy aggregate pod device")
 	}
 }
 
 func TestRegistrySnapshotAfterHello(t *testing.T) {
 	hub := live.NewHub()
 	reg := sensors.NewRegistry()
-	c := New("", nil, hub, nil, reg, nil)
+	c := New("", nil, hub, nil, nil, reg, nil)
 
 	c.reader.applyHello(wire.Hello{
 		FwVersion:    1,
 		ProtoVersion: wire.ProtoVersion,
 		Caps: wire.Capabilities{Sensors: []wire.SensorCap{
-			{ID: wire.SensorAirspeed, MinHz: 1, MaxHz: 50, DefaultHz: 10},
-			{ID: wire.SensorStatic, MinHz: 1, MaxHz: 50, DefaultHz: 10},
-			{ID: wire.SensorMag, MinHz: 1, MaxHz: 200, DefaultHz: 50},
+			helloCap(wire.SensorAirspeed, 1, 50, 10),
+			helloCap(wire.SensorStatic, 1, 50, 10),
+			helloCap(wire.SensorMag, 1, 200, 50),
 		}},
 	})
 	c.refreshRegistryViews()
 
-	views := reg.Get(DeviceName)
-	if len(views) == 0 {
-		t.Fatal("registry has no views for pod")
-	}
-	var writable int
-	var channels []string
-	for _, v := range views {
-		if v.Attr == "sampling_frequency" && v.Writable {
-			writable++
-			channels = append(channels, v.Channel)
+	for _, device := range []string{"bmp581", "mmc5983", "ms4525"} {
+		views := reg.Get(device)
+		if len(views) != 1 {
+			t.Fatalf("%s: got %d attr rows, want 1 (%+v)", device, len(views), views)
 		}
-	}
-	if writable != 3 {
-		t.Errorf("got %d writable sampling_frequency rows, want 3 (views=%+v)", writable, views)
-	}
-	for _, want := range []string{"static", "mag", "airspeed"} {
-		found := false
-		for _, ch := range channels {
-			if ch == want {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("missing settings channel %q (got %v)", want, channels)
+		v := views[0]
+		if v.Attr != "sampling_frequency" || !v.Writable || v.Location != location.Pod {
+			t.Errorf("%s: got %+v", device, v)
 		}
 	}
 }
