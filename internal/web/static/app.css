@@ -180,7 +180,16 @@ body {
   font-size: 1.05rem;
 }
 .kv .k { color: var(--dim); }
-.kv .v { font-variant: tabular-nums; }
+.kv .v { font-variant-numeric: tabular-nums; }
+.kv .du {
+  display: inline-grid;
+  grid-template-columns: var(--du-a, 7ch) auto 1.25ch var(--du-b, 7ch) auto;
+  column-gap: 0.35ch;
+  align-items: baseline;
+}
+.kv .du-n { text-align: right; font-variant-numeric: tabular-nums; }
+.kv .du-u { color: var(--dim); font-size: 0.92em; padding-left: 0.25ch; }
+.kv .du-sep { text-align: center; color: var(--dim); }
 .kv.kv-accuracy .k { font-style: italic; }
 .kv.kv-accuracy .v { color: var(--dim); font-size: 0.95rem; }
 .gpsFootnote {

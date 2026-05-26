@@ -126,10 +126,11 @@ function renderLiveValues() {
   let html = '';
   const keys = KFDisplay.sortKeys(name, Object.keys(vals));
   for (const k of keys) {
-    const v = KFDisplay.formatValue(name, k, vals[k]);
+    const out = KFDisplay.formatValue(name, k, vals[k]);
+    const vCell = out.html ?? escapeHtml(String(out.text ?? ''));
     const label = escapeHtml(KFDisplay.channelLabel(name, k));
     const rowCls = KFDisplay.rowClass(name, k);
-    html += `<div class="kv${rowCls}"><div class="k">${label}</div><div class="v">${escapeHtml(String(v))}</div></div>`;
+    html += `<div class="kv${rowCls}"><div class="k">${label}</div><div class="v">${vCell}</div></div>`;
   }
   html += KFDisplay.gpsFootnote(name);
   panelRegions.kv.innerHTML = html;
@@ -151,13 +152,20 @@ function renderAttrs() {
     html += `<div class="dim">(no editable attributes)</div>`;
   } else {
     for (const a of attrs) {
-      const label = a.channel ? `${a.channel} ${a.attr}` : a.attr;
+      const label = attrLabel(name, a);
       html += `<div class="attrRow"><div class="k">${label}</div><div class="v">${renderAttrInput(a)}</div></div>`;
     }
   }
   html += `</section>`;
   panelRegions.attrs.innerHTML = html;
   wireAttrEdits(name);
+}
+
+function attrLabel(device, a) {
+  if (device === 'press_alt' && !a.channel && a.attr === 'kollsman_inhg') {
+    return 'Kollsman (inHg)';
+  }
+  return a.channel ? `${a.channel} ${a.attr}` : a.attr;
 }
 
 function renderAttrInput(a) {

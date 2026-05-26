@@ -19,7 +19,11 @@ const KFDisplay = (function () {
     'fix', 'sats',
   ];
 
-  const GEO_SORT = ['declination', 'inclination', 'field_h_nt', 'field_f_nt'];
+  const GEO_SORT = [
+    'declination', 'inclination',
+    'field_x_nt', 'field_y_nt', 'field_z_nt',
+    'field_h_nt', 'field_f_nt',
+  ];
 
   const IMU_ACCEL = ['accel_x', 'accel_y', 'accel_z'];
   const IMU_GYRO = ['anglvel_x', 'anglvel_y', 'anglvel_z'];
@@ -34,7 +38,9 @@ const KFDisplay = (function () {
   const AHRS_SORT = ['roll', 'pitch', 'yaw', 'g_load', 'turn_rate_deg_s', 'slip_skid'];
 
   const PRESS_ALT_SORT = [
-    'pressure_alt_m', 'pressure_alt_ft', 'density_alt_ft',
+    'pressure_alt_m', 'pressure_alt_ft',
+    'indicated_alt_m', 'indicated_alt_ft',
+    'density_alt_ft',
     'pressure_pa', 'pressure_source',
   ];
 
@@ -61,9 +67,43 @@ const KFDisplay = (function () {
     return n.toFixed(decimals);
   }
 
+  /** Fixed-width numeric field (character count includes sign). */
+  function fmtPadded(v, decimals, width, signed) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return String(v);
+    let s;
+    if (signed) {
+      const sign = n >= 0 ? '+' : '-';
+      s = sign + Math.abs(n).toFixed(decimals);
+    } else {
+      s = n.toFixed(decimals);
+    }
+    if (s.length > width) return s;
+    return s.padStart(width, '\u2007'); // figure space — same width as digits
+  }
+
+  /** Dual metric/imperial row with fixed ch-width number columns. */
+  function fmtDualHTML(mVal, mDec, mW, mUnit, iVal, iDec, iW, iUnit, signed) {
+    const m = fmtPadded(mVal, mDec, mW, signed);
+    const i = fmtPadded(iVal, iDec, iW, signed);
+    return `<span class="du" style="--du-a:${mW}ch;--du-b:${iW}ch">` +
+      `<span class="du-n">${m}</span><span class="du-u">${mUnit}</span>` +
+      `<span class="du-sep">·</span>` +
+      `<span class="du-n">${i}</span><span class="du-u">${iUnit}</span></span>`;
+  }
+
+  function fmtDualAccHTML(mVal, mDec, mW, mUnit, iVal, iDec, iW, iUnit) {
+    const m = fmtPadded(mVal, mDec, mW, false);
+    const i = fmtPadded(iVal, iDec, iW, false);
+    return `<span class="du du-acc" style="--du-a:${mW}ch;--du-b:${iW}ch">` +
+      `<span class="du-n">±${m}</span><span class="du-u">${mUnit}</span>` +
+      `<span class="du-sep">·</span>` +
+      `<span class="du-n">±${i}</span><span class="du-u">${iUnit}</span></span>`;
+  }
+
   function fmtLengthAcc(m) {
     const ft = m * M_TO_FT;
-    return `±${fmtNum(m, 1)} m · ±${fmtNum(ft, 0)} ft`;
+    return fmtDualAccHTML(m, 1, 6, 'm', ft, 0, 5, 'ft');
   }
 
   function fmtPressurePa(v) {
@@ -110,14 +150,14 @@ const KFDisplay = (function () {
       label: 'Altitude MSL',
       fmt(v) {
         const ft = v * M_TO_FT;
-        return `${fmtNum(v, 1)} m · ${fmtNum(ft, 0)} ft`;
+        return { html: fmtDualHTML(v, 1, 7, 'm', ft, 0, 6, 'ft', false) };
       },
     },
     gs: {
       label: 'Ground speed',
       fmt(v) {
         const kt = v * MPS_TO_KT;
-        return `${fmtNum(v, 2)} m/s · ${fmtNum(kt, 1)} kt`;
+        return { html: fmtDualHTML(v, 2, 7, 'm/s', kt, 1, 6, 'kt', false) };
       },
     },
     track: {
@@ -127,10 +167,8 @@ const KFDisplay = (function () {
     vs: {
       label: 'Vertical speed',
       fmt(v) {
-        const sign = v >= 0 ? '+' : '';
         const fpm = v * MPS_TO_FPM;
-        const fpmSign = fpm >= 0 ? '+' : '';
-        return `${sign}${fmtNum(v, 2)} m/s · ${fpmSign}${fmtNum(fpm, 0)} fpm`;
+        return { html: fmtDualHTML(v, 2, 7, 'm/s', fpm, 0, 7, 'fpm', true) };
       },
     },
     fix: {
@@ -149,19 +187,19 @@ const KFDisplay = (function () {
     h_acc: {
       label: 'Horizontal accuracy (est.)',
       accuracy: true,
-      fmt: fmtLengthAcc,
+      fmt(m) { return { html: fmtLengthAcc(m) }; },
     },
     v_acc: {
       label: 'Vertical accuracy (est.)',
       accuracy: true,
-      fmt: fmtLengthAcc,
+      fmt(m) { return { html: fmtLengthAcc(m) }; },
     },
     gs_acc: {
       label: 'Ground speed accuracy (est.)',
       accuracy: true,
       fmt(v) {
         const kt = v * MPS_TO_KT;
-        return `±${fmtNum(v, 2)} m/s · ±${fmtNum(kt, 1)} kt`;
+        return { html: fmtDualAccHTML(v, 2, 6, 'm/s', kt, 1, 5, 'kt') };
       },
     },
     vs_acc: {
@@ -169,7 +207,7 @@ const KFDisplay = (function () {
       accuracy: true,
       fmt(v) {
         const fpm = v * MPS_TO_FPM;
-        return `±${fmtNum(v, 2)} m/s · ±${fmtNum(fpm, 0)} fpm`;
+        return { html: fmtDualAccHTML(v, 2, 6, 'm/s', fpm, 0, 6, 'fpm') };
       },
     },
     track_acc: {
@@ -237,6 +275,17 @@ const KFDisplay = (function () {
       label: 'Pressure altitude',
       fmt(v) { return `${fmtNum(v, 0)} ft`; },
     },
+    indicated_alt_m: {
+      label: 'Indicated altitude',
+      fmt(v) {
+        const ft = v * M_TO_FT;
+        return `${fmtNum(v, 0)} m · ${fmtNum(ft, 0)} ft`;
+      },
+    },
+    indicated_alt_ft: {
+      label: 'Indicated altitude',
+      fmt(v) { return `${fmtNum(v, 0)} ft`; },
+    },
     density_alt_ft: {
       label: 'Density altitude',
       fmt(v) { return `${fmtNum(v, 0)} ft`; },
@@ -267,6 +316,8 @@ const KFDisplay = (function () {
     press_alt: {
       pressure_alt_m: CHANNEL_SPECS.pressure_alt_m,
       pressure_alt_ft: CHANNEL_SPECS.pressure_alt_ft,
+      indicated_alt_m: CHANNEL_SPECS.indicated_alt_m,
+      indicated_alt_ft: CHANNEL_SPECS.indicated_alt_ft,
       density_alt_ft: CHANNEL_SPECS.density_alt_ft,
       pressure_pa: CHANNEL_SPECS.pressure_pa,
       pressure_source: CHANNEL_SPECS.pressure_source,
@@ -287,6 +338,18 @@ const KFDisplay = (function () {
       inclination: {
         label: 'Magnetic inclination',
         fmt(v) { return `${fmtNum(v, 2)}°`; },
+      },
+      field_x_nt: {
+        label: 'Field X (north)',
+        fmt(v) { return `${fmtNum(v / 1000, 2)} µT`; },
+      },
+      field_y_nt: {
+        label: 'Field Y (east)',
+        fmt(v) { return `${fmtNum(v / 1000, 2)} µT`; },
+      },
+      field_z_nt: {
+        label: 'Field Z (down)',
+        fmt(v) { return `${fmtNum(v / 1000, 2)} µT`; },
       },
       field_h_nt: {
         label: 'Horizontal field',
@@ -399,7 +462,13 @@ const KFDisplay = (function () {
   /** Omit redundant ft-only row when dual m·ft is present (display only). */
   function filterDisplayKeys(device, keys) {
     if (device === 'press_alt' && keys.includes('pressure_alt_m') && keys.includes('pressure_alt_ft')) {
-      return keys.filter((k) => k !== 'pressure_alt_ft');
+      keys = keys.filter((k) => k !== 'pressure_alt_ft');
+    }
+    if (device === 'press_alt' && keys.includes('indicated_alt_m') && keys.includes('indicated_alt_ft')) {
+      keys = keys.filter((k) => k !== 'indicated_alt_ft');
+    }
+    if (device === 'press_alt') {
+      keys = keys.filter((k) => k !== 'kollsman_inhg');
     }
     return keys;
   }
@@ -423,15 +492,19 @@ const KFDisplay = (function () {
   }
 
   function formatValue(device, channel, value) {
-    if (typeof value !== 'number' || !Number.isFinite(value)) return value;
+    if (typeof value !== 'number' || !Number.isFinite(value)) return { text: value };
     const spec = channelSpec(device, channel);
-    if (spec && spec.fmt) return spec.fmt(value);
-    if (channel.match(/^anglvel_[xyz]$/)) return `${fmtAnglvelDegS(value)} °/s`;
-    if (channel.endsWith('_pa') || channel.endsWith('_dp_pa')) return `${fmtPressurePa(value)} Pa`;
-    if (channel.endsWith('_c') || channel === 'temp') return `${fmtTempC(value)} °C`;
-    if (channel.endsWith('_ut') || channel.startsWith('magn_')) return `${fmtMicroT(value)} µT`;
-    if (channel.endsWith('_deg_s')) return `${fmtNum(value, 2)} °/s`;
-    return fmtDefault(value);
+    if (spec && spec.fmt) {
+      const out = spec.fmt(value);
+      if (out && typeof out === 'object' && (out.html || out.text)) return out;
+      return { text: String(out) };
+    }
+    if (channel.match(/^anglvel_[xyz]$/)) return { text: `${fmtAnglvelDegS(value)} °/s` };
+    if (channel.endsWith('_pa') || channel.endsWith('_dp_pa')) return { text: `${fmtPressurePa(value)} Pa` };
+    if (channel.endsWith('_c') || channel === 'temp') return { text: `${fmtTempC(value)} °C` };
+    if (channel.endsWith('_ut') || channel.startsWith('magn_')) return { text: `${fmtMicroT(value)} µT` };
+    if (channel.endsWith('_deg_s')) return { text: `${fmtNum(value, 2)} °/s` };
+    return { text: String(fmtDefault(value)) };
   }
 
   function sortWithOrder(keys, orderList) {
