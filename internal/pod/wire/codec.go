@@ -191,12 +191,25 @@ func (d *decoder) decodeHello() (Hello, error) {
 		if err != nil {
 			return Hello{}, err
 		}
-		sensors = append(sensors, SensorCap{
+		cap := SensorCap{
 			ID:        SensorID(id),
 			MinHz:     uint16(minHz),
 			MaxHz:     uint16(maxHz),
 			DefaultHz: uint16(def),
-		})
+		}
+		if pv >= 2 {
+			for j := 0; j < MaxDeviceNameLen; j++ {
+				b, err := d.byte()
+				if err != nil {
+					return Hello{}, err
+				}
+				cap.DeviceName[j] = b
+			}
+		}
+		if cap.DeviceName.String() == "" {
+			cap.DeviceName = defaultCapDeviceName(cap.ID)
+		}
+		sensors = append(sensors, cap)
 	}
 	return Hello{
 		FwVersion:    uint32(fw),
@@ -527,8 +540,30 @@ func (e *encoder) encodeHello(h Hello) error {
 		if err := e.uvarint(uint64(s.DefaultHz)); err != nil {
 			return err
 		}
+		name := s.DeviceName
+		if name.String() == "" {
+			name = defaultCapDeviceName(s.ID)
+		}
+		for _, b := range name {
+			if err := e.byte(b); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
+}
+
+func defaultCapDeviceName(id SensorID) DeviceName {
+	switch id {
+	case SensorStatic:
+		return NewDeviceName("bmp581")
+	case SensorMag:
+		return NewDeviceName("mmc5983")
+	case SensorAirspeed:
+		return NewDeviceName("ms4525")
+	default:
+		return DeviceName{}
+	}
 }
 
 func (e *encoder) encodeStatus(s Status) error {

@@ -12,7 +12,8 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTO_VERSION: u8 = 1;
+pub const PROTO_VERSION: u8 = 2;
+pub const MAX_DEVICE_NAME: usize = 12;
 pub const MAX_READINGS: usize = 8;
 pub const MAX_SENSORS: usize = 4;
 
@@ -50,12 +51,36 @@ pub struct Capabilities {
     pub sensors: heapless::Vec<SensorCap, MAX_SENSORS>,
 }
 
+/// Fixed-width UTF-8 device name (e.g. `bmp581`, `mmc5983`); zero-padded.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SensorDeviceName(pub [u8; MAX_DEVICE_NAME]);
+
+impl SensorDeviceName {
+    pub fn from_str(s: &str) -> Self {
+        let mut b = [0u8; MAX_DEVICE_NAME];
+        let bytes = s.as_bytes();
+        let n = bytes.len().min(MAX_DEVICE_NAME);
+        b[..n].copy_from_slice(&bytes[..n]);
+        Self(b)
+    }
+
+    pub fn as_str(&self) -> &str {
+        let n = self
+            .0
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(MAX_DEVICE_NAME);
+        core::str::from_utf8(&self.0[..n]).unwrap_or("unknown")
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SensorCap {
     pub id: SensorId,
     pub min_hz: u16,
     pub max_hz: u16,
     pub default_hz: u16,
+    pub device_name: SensorDeviceName,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -207,6 +232,7 @@ mod tests {
                 min_hz: 1,
                 max_hz: 50,
                 default_hz: 10,
+                device_name: SensorDeviceName::from_str("ms4525"),
             })
             .unwrap();
         sensors
@@ -215,6 +241,7 @@ mod tests {
                 min_hz: 1,
                 max_hz: 200,
                 default_hz: 50,
+                device_name: SensorDeviceName::from_str("mmc5983"),
             })
             .unwrap();
         rt(&Frame::Hello(Hello {

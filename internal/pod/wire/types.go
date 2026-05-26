@@ -5,7 +5,8 @@
 package wire
 
 const (
-	ProtoVersion     = 1
+	ProtoVersion     = 2
+	MaxDeviceNameLen = 12
 	MaxReadings      = 8
 	MaxSensors       = 4
 	HeaderLen        = 2
@@ -57,11 +58,30 @@ type Capabilities struct {
 	Sensors []SensorCap
 }
 
+// DeviceName is a fixed-width UTF-8 name on the wire (zero-padded).
+type DeviceName [MaxDeviceNameLen]byte
+
+func NewDeviceName(s string) DeviceName {
+	var n DeviceName
+	copy(n[:], s)
+	return n
+}
+
+func (n DeviceName) String() string {
+	for i, b := range n {
+		if b == 0 {
+			return string(n[:i])
+		}
+	}
+	return string(n[:])
+}
+
 type SensorCap struct {
 	ID        SensorID
 	MinHz     uint16
 	MaxHz     uint16
 	DefaultHz uint16
+	DeviceName DeviceName
 }
 
 // SensorID enumerates the pod's sensors. Values match the Rust enum.

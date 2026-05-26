@@ -20,6 +20,7 @@ fn main() {
             min_hz: 1,
             max_hz: 50,
             default_hz: 10,
+            device_name: SensorDeviceName::from_str("ms4525"),
         })
         .unwrap();
     sensors
@@ -28,6 +29,7 @@ fn main() {
             min_hz: 1,
             max_hz: 200,
             default_hz: 50,
+            device_name: SensorDeviceName::from_str("mmc5983"),
         })
         .unwrap();
     dump(

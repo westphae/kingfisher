@@ -20,8 +20,8 @@ func TestRustFixtures(t *testing.T) {
 			FwVersion:    0x00010203,
 			ProtoVersion: ProtoVersion,
 			Caps: Capabilities{Sensors: []SensorCap{
-				{ID: SensorAirspeed, MinHz: 1, MaxHz: 50, DefaultHz: 10},
-				{ID: SensorMag, MinHz: 1, MaxHz: 200, DefaultHz: 50},
+				{ID: SensorAirspeed, MinHz: 1, MaxHz: 50, DefaultHz: 10, DeviceName: NewDeviceName("ms4525")},
+				{ID: SensorMag, MinHz: 1, MaxHz: 200, DefaultHz: 50, DeviceName: NewDeviceName("mmc5983")},
 			}},
 		},
 		"sample_batch": SampleBatch{
@@ -106,7 +106,7 @@ func TestRoundTrip(t *testing.T) {
 		Hello{
 			FwVersion: 7, ProtoVersion: ProtoVersion,
 			Caps: Capabilities{Sensors: []SensorCap{
-				{ID: SensorAirspeed, MinHz: 1, MaxHz: 50, DefaultHz: 10},
+				{ID: SensorAirspeed, MinHz: 1, MaxHz: 50, DefaultHz: 10, DeviceName: NewDeviceName("ms4525")},
 			}},
 		},
 		Status{PodUptimeUs: 99, BatteryV: 4.10, RssiDBm: -42, TxSeq: 1, RxSeqLast: 0},
