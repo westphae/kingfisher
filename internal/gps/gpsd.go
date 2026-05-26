@@ -1,6 +1,7 @@
 // Package gps connects to gpsd over TCP and emits live.Samples on the
-// "gps" virtual device. Each TPV report becomes one sample; SKY satellite
-// counts piggy-back on the next TPV.
+// "gps" virtual device. Each TPV report becomes one sample. Satellite count
+// comes from SKY when gpsd emits it, otherwise from UBX NAV-PVT on a raw
+// side channel (u-blox native binary mode often omits SKY).
 package gps
 
 import (
@@ -66,8 +67,11 @@ func (c *Client) LastFix() Fix {
 }
 
 // Run dials gpsd, watches for reports, and republishes them as live.Samples.
-// Reconnects every 2s on error until stop is closed.
+// Reconnects every 2s on error until stop is closed. Satellite count is
+// refreshed periodically from UBX NAV-PVT via brief gpsd polls when SKY is
+// absent (u-blox native binary mode).
 func (c *Client) Run(stop <-chan struct{}) {
+	go c.pollUBXSats(stop)
 	for {
 		select {
 		case <-stop:
@@ -104,13 +108,9 @@ func (c *Client) connectOnce(stop <-chan struct{}) {
 		if !ok {
 			return
 		}
-		used := 0
-		for _, sat := range rep.Satellites {
-			if sat.Used {
-				used++
-			}
+		if n := skySatsInUse(rep); n >= 0 {
+			c.sats.Store(int32(n))
 		}
-		c.sats.Store(int32(used))
 	})
 	done := s.Watch()
 	select {
@@ -194,5 +194,41 @@ func (c *Client) onTPV(r *gpsd.TPVReport) {
 	c.hub.Publish(sm)
 	if c.buf != nil {
 		c.buf.Append(sm)
+	}
+}
+
+// skySatsInUse returns satellites used in the navigation solution from a SKY
+// report, or -1 if the report carries no satellite list.
+func skySatsInUse(rep *gpsd.SKYReport) int {
+	if len(rep.Satellites) == 0 {
+		return -1
+	}
+	used := 0
+	for _, sat := range rep.Satellites {
+		if sat.Used {
+			used++
+		}
+	}
+	return used
+}
+
+const ubxPollInterval = 3 * time.Second
+
+func (c *Client) pollUBXSats(stop <-chan struct{}) {
+	// Seed once at startup so the first TPV isn't stuck at 0.
+	if n, ok := pollUBXNumSV(c.addr, 2*time.Second); ok {
+		c.sats.Store(int32(n))
+	}
+	t := time.NewTicker(ubxPollInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			if n, ok := pollUBXNumSV(c.addr, 2*time.Second); ok {
+				c.sats.Store(int32(n))
+			}
+		}
 	}
 }
