@@ -7,10 +7,13 @@
 //   - length / altitude: m
 //   - angles: deg (no suffix when the whole device is degrees)
 //   - angular rate: deg/s (column suffix _deg_s)
-//   - magnetic field: nT (geomag) or µT (pod mag, suffix _ut)
+//   - magnetic field: nT (geomag field_*_nt columns) or µT (IIO magn_*, pod mag_*_ut)
 package units
 
 import "math"
+
+// GaussToMicroTesla converts kernel IIO magnetometer readings (Gauss) to µT.
+const GaussToMicroTesla = 100.0
 
 // NormalizeIIO converts a raw IIO channel reading to canonical units.
 // Channel names are the Linux IIO channel ids (e.g. "pressure", "temp").
@@ -20,6 +23,8 @@ func NormalizeIIO(channel string, v float64) float64 {
 		return v * 1000 // driver reports kPa → Pa
 	case "temp":
 		return NormalizeTempC(v)
+	case "magn_x", "magn_y", "magn_z":
+		return v * GaussToMicroTesla // icm20948-mod etc.: Gauss → µT
 	default:
 		return v
 	}

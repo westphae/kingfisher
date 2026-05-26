@@ -23,6 +23,14 @@ func TestNormalizeTempC_alreadyC(t *testing.T) {
 	}
 }
 
+func TestNormalizeIIO_magnGaussToMicroTesla(t *testing.T) {
+	got := NormalizeIIO("magn_x", 0.49)
+	want := 49.0
+	if got != want {
+		t.Fatalf("got %v want %v", got, want)
+	}
+}
+
 func TestColumnForIIO(t *testing.T) {
 	if ColumnForIIO("pressure") != "pressure_pa" {
 		t.Fatal("pressure column")
