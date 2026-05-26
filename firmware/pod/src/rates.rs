@@ -12,6 +12,7 @@ use pod_wire::SensorId;
 use crate::cfg;
 use crate::link;
 
+/// Default sensor rates match [`crate::cfg::BASE_HZ`] (uplink / poll tick, 10 Hz).
 const DEFAULT_STATIC_HZ: u16 = 10;
 const DEFAULT_MAG_HZ: u16 = 10;
 const DEFAULT_AIRSPEED_HZ: u16 = 10;
@@ -20,9 +21,11 @@ const SAFE_HZ: u16 = 10;
 /// Per-sensor max reads when scheduled alone.
 const MAX_READS_PER_SENSOR: u32 = 3;
 
-/// Estimated microseconds of blocking I²C work per read.
-const US_PER_STATIC_READ: u32 = 30_000;
-const US_PER_MAG_READ: u32 = 2_000;
+/// BMP581 FIFO drain once per tick (count read + burst), excluding frame bytes.
+const US_PER_STATIC_DRAIN: u32 = 3_000;
+const US_PER_STATIC_FRAME: u32 = 400;
+/// Status poll + 7-byte XOUT burst (no per-sample IC0 write).
+const US_PER_MAG_READ: u32 = 1_200;
 const US_PER_AIR_READ: u32 = 5_000;
 
 /// Max I²C work per 100 ms poll tick (leave time for UDP / WiFi).
@@ -86,7 +89,7 @@ fn prev_atom(sensor: SensorId) -> &'static AtomicU16 {
 
 fn us_per_read(sensor: SensorId) -> u32 {
     match sensor {
-        SensorId::Static => US_PER_STATIC_READ,
+        SensorId::Static => US_PER_STATIC_DRAIN,
         SensorId::Mag => US_PER_MAG_READ,
         SensorId::Airspeed => US_PER_AIR_READ,
     }
@@ -145,9 +148,17 @@ fn reads_per_tick_capped(hz: u16) -> u64 {
     r.min(MAX_READS_PER_SENSOR as u64)
 }
 
-/// Estimated blocking time for one tick (BMP at full cadence; others capped).
+fn static_tick_work_us(hz: u16) -> u64 {
+    if hz == 0 {
+        return 0;
+    }
+    let frames = reads_per_tick(hz).max(1);
+    US_PER_STATIC_DRAIN as u64 + frames * US_PER_STATIC_FRAME as u64
+}
+
+/// Estimated blocking time for one tick (BMP FIFO drain; others capped).
 fn tick_work_us(static_hz: u16, mag_hz: u16, air_hz: u16) -> u64 {
-    reads_per_tick(static_hz) * US_PER_STATIC_READ as u64
+    static_tick_work_us(static_hz)
         + reads_per_tick_capped(mag_hz) * US_PER_MAG_READ as u64
         + reads_per_tick_capped(air_hz) * US_PER_AIR_READ as u64
 }

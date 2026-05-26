@@ -64,51 +64,159 @@ pub struct StampedReading {
 
 #[derive(Clone, Default)]
 pub struct LatestSamples {
+    /// Static readings queued since the last uplink (FIFO drain may add several).
+    pub pending_static: Vec<StampedReading, MAX_READINGS>,
+    /// Mag readings queued since the last uplink (multiple poll reads per tick).
+    pub pending_mag: Vec<StampedReading, MAX_READINGS>,
+    /// Airspeed readings queued since the last uplink (poll budget may add several).
+    pub pending_airspeed: Vec<StampedReading, MAX_READINGS>,
     pub static_sample: Option<StampedReading>,
     pub mag_sample: Option<StampedReading>,
     pub airspeed_sample: Option<StampedReading>,
 }
 
+fn age_us(pod_uptime_us: u64, captured_us: u64) -> u32 {
+    pod_uptime_us
+        .saturating_sub(captured_us)
+        .min(u32::MAX as u64) as u32
+}
+
 impl LatestSamples {
-    pub fn build_batch(&self, pod_uptime_us: u64, seq: u32) -> SampleBatch {
-        let mut samples: Vec<Reading, MAX_READINGS> = Vec::new();
-        if let Some(s) = &self.static_sample {
-            let age_us = pod_uptime_us.saturating_sub(s.captured_us);
-            if let Reading::Static { p_pa, temp_c, .. } = s.reading {
-                let _ = samples.push(Reading::Static {
-                    p_pa,
-                    temp_c,
-                    age_us: age_us.min(u32::MAX as u64) as u32,
-                });
-            }
+    fn enqueue_static(&mut self, stamped: StampedReading) {
+        self.static_sample = Some(stamped.clone());
+        if self.pending_static.len() >= MAX_READINGS {
+            println!("pod: warn: dropped static sample (pending full)");
+            return;
         }
-        if let Some(s) = &self.mag_sample {
-            let age_us = pod_uptime_us.saturating_sub(s.captured_us);
-            if let Reading::Mag {
+        let _ = self.pending_static.push(stamped);
+    }
+
+    fn enqueue_mag(&mut self, stamped: StampedReading) {
+        self.mag_sample = Some(stamped.clone());
+        if self.pending_mag.len() >= MAX_READINGS {
+            println!("pod: warn: dropped mag sample (pending full)");
+            return;
+        }
+        let _ = self.pending_mag.push(stamped);
+    }
+
+    fn enqueue_airspeed(&mut self, stamped: StampedReading) {
+        self.airspeed_sample = Some(stamped.clone());
+        if self.pending_airspeed.len() >= MAX_READINGS {
+            println!("pod: warn: dropped airspeed sample (pending full)");
+            return;
+        }
+        let _ = self.pending_airspeed.push(stamped);
+    }
+}
+
+fn push_to_batch(
+    samples: &mut Vec<Reading, MAX_READINGS>,
+    reading: Reading,
+    sensor: &'static str,
+) -> bool {
+    match samples.push(reading) {
+        Ok(()) => true,
+        Err(_) => {
+            println!("pod: warn: dropped {} sample (batch full)", sensor);
+            false
+        }
+    }
+}
+
+fn drain_static_pending(
+    samples: &mut Vec<Reading, MAX_READINGS>,
+    pending: &mut Vec<StampedReading, MAX_READINGS>,
+    pod_uptime_us: u64,
+) {
+    while !pending.is_empty() {
+        let s = pending[0].clone();
+        let age = age_us(pod_uptime_us, s.captured_us);
+        let wire = match s.reading {
+            Reading::Static { p_pa, temp_c, .. } => Reading::Static {
+                p_pa,
+                temp_c,
+                age_us: age,
+            },
+            _ => {
+                let _ = pending.remove(0);
+                continue;
+            }
+        };
+        if push_to_batch(samples, wire, "static") {
+            let _ = pending.remove(0);
+        } else {
+            break;
+        }
+    }
+}
+
+fn drain_mag_pending(
+    samples: &mut Vec<Reading, MAX_READINGS>,
+    pending: &mut Vec<StampedReading, MAX_READINGS>,
+    pod_uptime_us: u64,
+) {
+    while !pending.is_empty() {
+        let s = pending[0].clone();
+        let age = age_us(pod_uptime_us, s.captured_us);
+        let wire = match s.reading {
+            Reading::Mag {
                 x_ut,
                 y_ut,
                 z_ut,
                 ..
-            } = s.reading
-            {
-                let _ = samples.push(Reading::Mag {
-                    x_ut,
-                    y_ut,
-                    z_ut,
-                    age_us: age_us.min(u32::MAX as u64) as u32,
-                });
+            } => Reading::Mag {
+                x_ut,
+                y_ut,
+                z_ut,
+                age_us: age,
+            },
+            _ => {
+                let _ = pending.remove(0);
+                continue;
             }
+        };
+        if push_to_batch(samples, wire, "mag") {
+            let _ = pending.remove(0);
+        } else {
+            break;
         }
-        if let Some(s) = &self.airspeed_sample {
-            let age_us = pod_uptime_us.saturating_sub(s.captured_us);
-            if let Reading::Airspeed { dp_pa, temp_c, .. } = s.reading {
-                let _ = samples.push(Reading::Airspeed {
-                    dp_pa,
-                    temp_c,
-                    age_us: age_us.min(u32::MAX as u64) as u32,
-                });
+    }
+}
+
+fn drain_airspeed_pending(
+    samples: &mut Vec<Reading, MAX_READINGS>,
+    pending: &mut Vec<StampedReading, MAX_READINGS>,
+    pod_uptime_us: u64,
+) {
+    while !pending.is_empty() {
+        let s = pending[0].clone();
+        let age = age_us(pod_uptime_us, s.captured_us);
+        let wire = match s.reading {
+            Reading::Airspeed { dp_pa, temp_c, .. } => Reading::Airspeed {
+                dp_pa,
+                temp_c,
+                age_us: age,
+            },
+            _ => {
+                let _ = pending.remove(0);
+                continue;
             }
+        };
+        if push_to_batch(samples, wire, "airspeed") {
+            let _ = pending.remove(0);
+        } else {
+            break;
         }
+    }
+}
+
+impl LatestSamples {
+    pub fn build_batch(&mut self, pod_uptime_us: u64, seq: u32) -> SampleBatch {
+        let mut samples: Vec<Reading, MAX_READINGS> = Vec::new();
+        drain_static_pending(&mut samples, &mut self.pending_static, pod_uptime_us);
+        drain_mag_pending(&mut samples, &mut self.pending_mag, pod_uptime_us);
+        drain_airspeed_pending(&mut samples, &mut self.pending_airspeed, pod_uptime_us);
         SampleBatch {
             pod_uptime_us,
             seq,
@@ -118,49 +226,52 @@ impl LatestSamples {
 }
 
 const EMPTY_SAMPLES: LatestSamples = LatestSamples {
+    pending_static: Vec::new(),
+    pending_mag: Vec::new(),
+    pending_airspeed: Vec::new(),
     static_sample: None,
     mag_sample: None,
     airspeed_sample: None,
 };
 static SAMPLES: Mutex<RefCell<LatestSamples>> = Mutex::new(RefCell::new(EMPTY_SAMPLES));
 
-pub fn with_samples<R>(f: impl FnOnce(&LatestSamples) -> R) -> R {
-    critical_section::with(|cs| f(&SAMPLES.borrow(cs).borrow()))
+pub fn with_samples_mut<R>(f: impl FnOnce(&mut LatestSamples) -> R) -> R {
+    critical_section::with(|cs| f(&mut *SAMPLES.borrow(cs).borrow_mut()))
 }
 
-pub fn update_static(reading: Reading, captured_us: u64) {
+pub fn push_static(reading: Reading, captured_us: u64) {
     critical_section::with(|cs| {
         SAMPLES
             .borrow(cs)
             .borrow_mut()
-            .static_sample = Some(StampedReading {
-            reading,
-            captured_us,
-        });
+            .enqueue_static(StampedReading {
+                reading,
+                captured_us,
+            });
     });
 }
 
-pub fn update_mag(reading: Reading, captured_us: u64) {
+pub fn push_mag(reading: Reading, captured_us: u64) {
     critical_section::with(|cs| {
         SAMPLES
             .borrow(cs)
             .borrow_mut()
-            .mag_sample = Some(StampedReading {
-            reading,
-            captured_us,
-        });
+            .enqueue_mag(StampedReading {
+                reading,
+                captured_us,
+            });
     });
 }
 
-pub fn update_airspeed(reading: Reading, captured_us: u64) {
+pub fn push_airspeed(reading: Reading, captured_us: u64) {
     critical_section::with(|cs| {
         SAMPLES
             .borrow(cs)
             .borrow_mut()
-            .airspeed_sample = Some(StampedReading {
-            reading,
-            captured_us,
-        });
+            .enqueue_airspeed(StampedReading {
+                reading,
+                captured_us,
+            });
     });
 }
 
@@ -172,7 +283,7 @@ pub struct SensorBoard {
 }
 
 fn try_attach_bmp581(bus: &mut Bus) -> Option<Bmp581> {
-    let bmp581 = Bmp581::probe(bus)?;
+    let mut bmp581 = Bmp581::probe(bus)?;
     if bmp581.init(bus).is_ok() {
         println!("pod: bmp581 attached at 0x{:02x}", bmp581.addr());
         Some(bmp581)
@@ -183,7 +294,7 @@ fn try_attach_bmp581(bus: &mut Bus) -> Option<Bmp581> {
 }
 
 fn try_attach_mmc5983(bus: &mut Bus) -> Option<Mmc5983> {
-    let mmc5983 = Mmc5983::probe(bus)?;
+    let mut mmc5983 = Mmc5983::probe(bus)?;
     if mmc5983.init(bus).is_ok() {
         println!("pod: mmc5983 attached at 0x{:02x}", mmc5983::ADDR);
         Some(mmc5983)
@@ -262,32 +373,61 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
         ticker.next().await;
         let tick_start = Instant::now();
         rates::begin_tick();
-        let captured_us = tick_start.as_micros();
+        let _tick_us = tick_start.as_micros();
         let mut tick_failures = 0u8;
 
         // Cheap sensors first so mag/airspeed keep updating under BMP load.
-        if board.mmc5983.is_some() {
+        if let Some(ref mut mmc5983) = board.mmc5983 {
             let hz = rates::get(SensorId::Mag);
-            for _ in 0..rates::poll_budget(SensorId::Mag, hz) {
-                if let Some(ref mmc5983) = board.mmc5983 {
-                    match mmc5983.read(bus) {
-                        Ok(s) => {
+            if hz > 0 {
+                if mmc5983.ensure_cm_freq(bus, hz).is_err() {
+                    tick_failures = tick_failures.saturating_add(1);
+                    if rates::note_read_fail(SensorId::Mag) {
+                        need_recovery = true;
+                    }
+                } else {
+                    let budget = rates::poll_budget(SensorId::Mag, hz);
+                    let mut pushed = 0u32;
+                    for _ in 0..budget {
+                        let cap_us = Instant::now().as_micros();
+                        match mmc5983.read_when_ready(bus) {
+                            Ok(Some(s)) => {
+                                rates::note_read_ok(SensorId::Mag);
+                                pushed += 1;
+                                push_mag(
+                                    Reading::Mag {
+                                        x_ut: s.x_ut,
+                                        y_ut: s.y_ut,
+                                        z_ut: s.z_ut,
+                                        age_us: 0,
+                                    },
+                                    cap_us,
+                                );
+                            }
+                            Ok(None) => {}
+                            Err(()) => {
+                                tick_failures = tick_failures.saturating_add(1);
+                                if rates::note_read_fail(SensorId::Mag) {
+                                    need_recovery = true;
+                                }
+                            }
+                        }
+                    }
+                    // If status never flagged ready (e.g. first tick after ODR change),
+                    // still take one direct read so mag does not go dark.
+                    if pushed == 0 && budget > 0 {
+                        let cap_us = Instant::now().as_micros();
+                        if let Ok(s) = mmc5983.read_sample(bus) {
                             rates::note_read_ok(SensorId::Mag);
-                            update_mag(
+                            push_mag(
                                 Reading::Mag {
                                     x_ut: s.x_ut,
                                     y_ut: s.y_ut,
                                     z_ut: s.z_ut,
                                     age_us: 0,
                                 },
-                                captured_us,
+                                cap_us,
                             );
-                        }
-                        Err(()) => {
-                            tick_failures = tick_failures.saturating_add(1);
-                            if rates::note_read_fail(SensorId::Mag) {
-                                need_recovery = true;
-                            }
                         }
                     }
                 }
@@ -297,16 +437,17 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
             let hz = rates::get(SensorId::Airspeed);
             for _ in 0..rates::poll_budget(SensorId::Airspeed, hz) {
                 if let Some(ref ms4525) = board.ms4525 {
+                    let cap_us = Instant::now().as_micros();
                     match ms4525.read(bus) {
                         Ok(s) => {
                             rates::note_read_ok(SensorId::Airspeed);
-                            update_airspeed(
+                            push_airspeed(
                                 Reading::Airspeed {
                                     dp_pa: s.dp_pa,
                                     temp_c: s.temp_c,
                                     age_us: 0,
                                 },
-                                captured_us,
+                                cap_us,
                             );
                         }
                         Err(()) => {
@@ -319,21 +460,31 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
                 }
             }
         }
-        if board.bmp581.is_some() {
+        if let Some(ref mut bmp581) = board.bmp581 {
             let hz = rates::get(SensorId::Static);
-            for _ in 0..rates::poll_budget(SensorId::Static, hz) {
-                if let Some(ref bmp581) = board.bmp581 {
-                    match bmp581.read(bus) {
-                        Ok(s) => {
-                            rates::note_read_ok(SensorId::Static);
-                            update_static(
-                                Reading::Static {
-                                    p_pa: s.p_pa,
-                                    temp_c: s.temp_c,
-                                    age_us: 0,
-                                },
-                                captured_us,
-                            );
+            if hz > 0 {
+                if bmp581.ensure_odr(bus, hz).is_err() {
+                    tick_failures = tick_failures.saturating_add(1);
+                    if rates::note_read_fail(SensorId::Static) {
+                        need_recovery = true;
+                    }
+                } else {
+                    let drain_us = tick_start.as_micros();
+                    match bmp581.drain_fifo(bus, drain_us) {
+                        Ok(frames) => {
+                            if !frames.is_empty() {
+                                rates::note_read_ok(SensorId::Static);
+                            }
+                            for (s, cap_us) in frames {
+                                push_static(
+                                    Reading::Static {
+                                        p_pa: s.p_pa,
+                                        temp_c: s.temp_c,
+                                        age_us: 0,
+                                    },
+                                    cap_us,
+                                );
+                            }
                         }
                         Err(()) => {
                             tick_failures = tick_failures.saturating_add(1);

@@ -12,13 +12,13 @@ pub fn recover_bus(bus: &mut Bus, board: &mut SensorBoard) {
     println!("pod: i2c recovery");
     rates::set_safe_defaults();
 
-    if let Some(ref bmp) = board.bmp581 {
+    if let Some(ref mut bmp) = board.bmp581 {
         if bmp.init(bus).is_err() {
             println!("pod: bmp581 re-init failed; detaching");
             board.bmp581 = None;
         }
     }
-    if let Some(ref mmc) = board.mmc5983 {
+    if let Some(ref mut mmc) = board.mmc5983 {
         if mmc.init(bus).is_err() {
             println!("pod: mmc5983 re-init failed; detaching");
             board.mmc5983 = None;

@@ -214,7 +214,7 @@ async fn uplink_task(stack: Stack<'static>) {
                 }
 
                 seq = seq.wrapping_add(1);
-                let batch = sensors::with_samples(|s| s.build_batch(uptime_us, seq));
+                let batch = sensors::with_samples_mut(|s| s.build_batch(uptime_us, seq));
                 if !batch.samples.is_empty() {
                     let frame = Frame::Sample(batch);
                     if let Ok(bytes) = pod_wire::encode_to_slice(&frame, &mut frame_buf) {

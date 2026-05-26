@@ -17,7 +17,8 @@ pub fn last_rx_cmd_seq() -> u32 {
 /// Sensor rate limits advertised in Hello (must match `hello::cap` defaults).
 fn rate_ok(sensor: SensorId, hz: u16) -> bool {
     let (min, max) = match sensor {
-        SensorId::Static | SensorId::Mag | SensorId::Airspeed => (1, 50),
+        SensorId::Mag => (1, 100),
+        SensorId::Static | SensorId::Airspeed => (1, 50),
     };
     hz >= min && hz <= max
 }

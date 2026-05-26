@@ -1,10 +1,13 @@
 //! Bosch BMP581 static pressure + temperature (I²C).
 //!
-//! Register map and bring-up follow ESPHome `bmp581_base` (BSD-3-Clause), which
-//! tracks BST-BMP581-DS004.
+//! NORMAL mode + on-chip FIFO (PT frames). The sensor samples at the
+//! configured ODR; the poll loop drains all pending frames once per tick
+//! and assigns capture times from ODR and frame order.
 
 use esp_hal::delay::Delay;
 use esp_println::println;
+use heapless::Vec;
+use pod_wire::MAX_READINGS;
 
 use super::bus::Bus as I2cBus;
 
@@ -13,7 +16,10 @@ pub const ADDR_SECONDARY: u8 = 0x47;
 
 const REG_CHIP_ID: u8 = 0x01;
 const REG_INT_SOURCE: u8 = 0x15;
-const REG_MEASUREMENT: u8 = 0x1D;
+const REG_FIFO_CONFIG: u8 = 0x16;
+const REG_FIFO_COUNT: u8 = 0x17;
+const REG_FIFO_SEL: u8 = 0x18;
+const REG_FIFO_DATA: u8 = 0x29;
 const REG_INT_STATUS: u8 = 0x27;
 const REG_STATUS: u8 = 0x28;
 const REG_OSR: u8 = 0x36;
@@ -25,12 +31,19 @@ const CHIP_ID_BMP585: u8 = 0x51;
 const CMD_SOFT_RESET: u8 = 0xB6;
 
 const PWR_STANDBY: u8 = 0;
-const PWR_FORCED: u8 = 2;
+const PWR_NORMAL: u8 = 1;
 
 const OSR_TEMP_NONE: u8 = 0;
 const OSR_PRESS_NONE: u8 = 0;
 
-/// Pressure [Pa] and temperature [°C] from the latest forced conversion.
+/// FIFO frame: pressure + temperature (48 bit / 6 bytes).
+const FIFO_FRAME_SEL_PT: u8 = 0x03;
+const FIFO_FRAME_BYTES: usize = 6;
+const FIFO_FRAME_EMPTY: u8 = 0x7F;
+/// Max PT frames in FIFO (datasheet).
+const FIFO_MAX_FRAMES_PT: u8 = 16;
+
+/// Pressure [Pa] and temperature [°C].
 #[derive(Debug, Clone, Copy)]
 pub struct Sample {
     pub p_pa: f32,
@@ -39,6 +52,7 @@ pub struct Sample {
 
 pub struct Bmp581 {
     addr: u8,
+    active_hz: u16,
 }
 
 impl Bmp581 {
@@ -46,14 +60,16 @@ impl Bmp581 {
         self.addr
     }
 
-    /// SDO high → 0x47; SDO low → 0x46. Probe the strap you use first.
     pub fn probe(bus: &mut I2cBus) -> Option<Self> {
         for addr in [ADDR_SECONDARY, ADDR_PRIMARY] {
             match read_u8(bus, addr, REG_CHIP_ID) {
                 Ok(id) => {
                     println!("pod: i2c 0x{addr:02x} chip_id=0x{id:02x}");
                     if id == CHIP_ID_BMP581 || id == CHIP_ID_BMP585 {
-                        return Some(Self { addr });
+                        return Some(Self {
+                            addr,
+                            active_hz: 0,
+                        });
                     }
                 }
                 Err(e) => println!("pod: i2c 0x{addr:02x} chip_id read: {:?}", e),
@@ -62,8 +78,7 @@ impl Bmp581 {
         None
     }
 
-    pub fn init(&self, bus: &mut I2cBus) -> Result<(), ()> {
-        // ESPHome bring-up: soft reset → chip id → NVM status → enable DRDY.
+    pub fn init(&mut self, bus: &mut I2cBus) -> Result<(), ()> {
         self.soft_reset(bus)?;
         let id = read_u8(bus, self.addr, REG_CHIP_ID).map_err(|_| ())?;
         if id != CHIP_ID_BMP581 && id != CHIP_ID_BMP585 {
@@ -71,28 +86,81 @@ impl Bmp581 {
             return Err(());
         }
         self.wait_nvm_ready(bus)?;
-        write_u8(bus, self.addr, REG_INT_SOURCE, 0x01)?; // drdy_data_reg_en
-        // Temp + pressure, no oversampling (fastest forced reads).
-        let osr = (OSR_PRESS_NONE << 3) | (OSR_TEMP_NONE << 0) | (1 << 6);
-        write_u8(bus, self.addr, REG_OSR, osr)?;
-        write_u8(bus, self.addr, REG_ODR, PWR_STANDBY)?;
-        println!("pod: bmp581 init ok at 0x{:02x}", self.addr);
+        println!("pod: bmp581 init ok at 0x{:02x} (FIFO)", self.addr);
         Ok(())
     }
 
-    pub fn read(&self, bus: &mut I2cBus) -> Result<Sample, ()> {
-        write_u8(bus, self.addr, REG_ODR, PWR_FORCED)?;
-        // No OSR: ~3 ms conversion; use margin for bus + scheduling.
-        Delay::new().delay_micros(25_000);
-        if !self.data_ready(bus)? {
-            return Err(());
+    /// Ensure NORMAL+FIFO is running at `hz` (reconfigures from standby when Hz changes).
+    pub fn ensure_odr(&mut self, bus: &mut I2cBus, hz: u16) -> Result<(), ()> {
+        let hz = hz.max(1);
+        if self.active_hz == hz {
+            return Ok(());
         }
-        let mut data = [0u8; 6];
-        read_block(bus, self.addr, REG_MEASUREMENT, &mut data)?;
-        Ok(decode_sample(&data))
+        self.configure_fifo_normal(bus, hz)?;
+        self.active_hz = hz;
+        println!("pod: bmp581 ODR {hz} Hz");
+        Ok(())
     }
 
-    fn soft_reset(&self, bus: &mut I2cBus) -> Result<(), ()> {
+    /// Drain all FIFO frames; oldest frame first. `now_us` is the drain time on
+    /// the pod clock; capture times are reconstructed from `active_hz`.
+    pub fn drain_fifo(
+        &self,
+        bus: &mut I2cBus,
+        now_us: u64,
+    ) -> Result<Vec<(Sample, u64), MAX_READINGS>, ()> {
+        if self.active_hz == 0 {
+            return Ok(Vec::new());
+        }
+        let count = read_u8(bus, self.addr, REG_FIFO_COUNT).map_err(|_| ())?;
+        let n = (count & 0x1F).min(FIFO_MAX_FRAMES_PT) as usize;
+        if n == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut raw = [0u8; FIFO_MAX_FRAMES_PT as usize * FIFO_FRAME_BYTES];
+        let len = n * FIFO_FRAME_BYTES;
+        read_block(bus, self.addr, REG_FIFO_DATA, &mut raw[..len])?;
+
+        let period_us = 1_000_000u64 / self.active_hz as u64;
+        let mut out: Vec<(Sample, u64), MAX_READINGS> = Vec::new();
+        for i in 0..n {
+            let frame = &raw[i * FIFO_FRAME_BYTES..][..FIFO_FRAME_BYTES];
+            if frame[0] == FIFO_FRAME_EMPTY {
+                break;
+            }
+            let frame6: [u8; FIFO_FRAME_BYTES] = frame.try_into().map_err(|_| ())?;
+            let sample = decode_pt_frame(&frame6)?;
+            let age_frames = (n - 1 - i) as u64;
+            let captured_us = now_us.saturating_sub(age_frames.saturating_mul(period_us));
+            let _ = out.push((sample, captured_us));
+        }
+        Ok(out)
+    }
+
+    fn configure_fifo_normal(&self, bus: &mut I2cBus, hz: u16) -> Result<(), ()> {
+        let odr = odr_code_for_hz(hz).ok_or(())?;
+        self.enter_standby(bus)?;
+
+        write_u8(bus, self.addr, REG_INT_SOURCE, 0x01)?; // drdy_data_reg_en
+        let osr = (OSR_PRESS_NONE << 3) | (OSR_TEMP_NONE << 0) | (1 << 6); // press_en
+        write_u8(bus, self.addr, REG_OSR, osr)?;
+        // PT frames, no decimation, streaming FIFO, threshold off.
+        write_u8(bus, self.addr, REG_FIFO_SEL, FIFO_FRAME_SEL_PT)?;
+        write_u8(bus, self.addr, REG_FIFO_CONFIG, 0x00)?;
+        let odr_val = (PWR_NORMAL & 0x03) | (odr << 2);
+        write_u8(bus, self.addr, REG_ODR, odr_val)?;
+        Delay::new().delay_millis(5);
+        Ok(())
+    }
+
+    fn enter_standby(&self, bus: &mut I2cBus) -> Result<(), ()> {
+        write_u8(bus, self.addr, REG_ODR, PWR_STANDBY)?;
+        Delay::new().delay_millis(2);
+        Ok(())
+    }
+
+    fn soft_reset(&mut self, bus: &mut I2cBus) -> Result<(), ()> {
         write_u8(bus, self.addr, REG_CMD, CMD_SOFT_RESET)?;
         Delay::new().delay_micros(3_000);
         let st = read_u8(bus, self.addr, REG_INT_STATUS).map_err(|_| ())?;
@@ -100,6 +168,7 @@ impl Bmp581 {
             println!("pod: bmp581 reset: POR not set (int_status=0x{st:02x})");
             return Err(());
         }
+        self.active_hz = 0;
         Ok(())
     }
 
@@ -115,11 +184,51 @@ impl Bmp581 {
         println!("pod: bmp581 NVM not ready (status=0x{st:02x})");
         Err(())
     }
+}
 
-    fn data_ready(&self, bus: &mut I2cBus) -> Result<bool, ()> {
-        let st = read_u8(bus, self.addr, REG_INT_STATUS).map_err(|_| ())?;
-        Ok(st & 0x01 != 0)
+/// Map requested Hz to the highest supported NORMAL-mode ODR not above `hz`.
+fn odr_code_for_hz(hz: u16) -> Option<u8> {
+    const TABLE: &[(u16, u8)] = &[
+        (240, 0x00),
+        (218, 0x01),
+        (199, 0x02),
+        (179, 0x03),
+        (160, 0x04),
+        (149, 0x05),
+        (140, 0x06),
+        (129, 0x07),
+        (120, 0x08),
+        (110, 0x09),
+        (100, 0x0A),
+        (89, 0x0B),
+        (80, 0x0C),
+        (70, 0x0D),
+        (60, 0x0E),
+        (50, 0x0F),
+        (45, 0x10),
+        (40, 0x11),
+        (35, 0x12),
+        (30, 0x13),
+        (25, 0x14),
+        (20, 0x15),
+        (15, 0x16),
+        (10, 0x17),
+        (5, 0x18),
+        (4, 0x19),
+        (3, 0x1A),
+        (2, 0x1B),
+        (1, 0x1C),
+    ];
+    for &(h, code) in TABLE {
+        if h <= hz {
+            return Some(code);
+        }
     }
+    Some(0x1C)
+}
+
+fn decode_pt_frame(data: &[u8; FIFO_FRAME_BYTES]) -> Result<Sample, ()> {
+    Ok(decode_sample(data))
 }
 
 fn decode_sample(data: &[u8; 6]) -> Sample {
@@ -151,4 +260,22 @@ fn read_block(
     buf: &mut [u8],
 ) -> Result<(), ()> {
     bus.write_read(addr, &[reg], buf).map_err(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn odr_table_covers_defaults() {
+        assert_eq!(odr_code_for_hz(10), Some(0x17));
+        assert_eq!(odr_code_for_hz(50), Some(0x0F));
+    }
+
+    #[test]
+    fn decode_pt_matches_data_registers() {
+        let data = [0x00, 0x00, 0x00, 0x00, 0x40, 0x00];
+        let s = decode_pt_frame(&data).unwrap();
+        assert!(s.p_pa > 0.0);
+    }
 }

@@ -4,8 +4,13 @@ Rust no_std firmware for the wing-pod `ESP32-C3-Mini-1` (variant
 `ESP32-C3FH4`). The pod associates to the cabin Pi's WiFi AP and
 transmits postcard-encoded `Frame`s (defined in `pod_wire/`) over UDP.
 
-**Status: Phase 3c — all three I²C sensors coded.** Firmware polls each present
-sensor at 10 Hz and uplinks `static_*`, `mag_*`, and `airspeed_*` as available.
+**Status: Phase 3c — all three I²C sensors coded.** BMP581 uses NORMAL mode +
+on-chip FIFO (PT frames); the poll loop drains all pending frames each tick with
+per-sample capture times. Mag and airspeed use the tick poll loop with per-sensor
+pending queues (default **10 Hz** = uplink rate). Uplink ships up to
+`MAX_READINGS` readings total per datagram; firmware logs
+`dropped … (pending full)` or `(batch full)` when a queue or the wire batch
+overflows.
 **No sensor is required** at boot; missing devices are re-probed every 5 s.
 
 ## Bill of materials
@@ -67,6 +72,13 @@ USB-C connector with ESD protection is sufficient.
   is aligned with the airframe longitudinal axis when the pod is
   level. Axis corrections happen on the Pi (see the plan), so an
   approximate mount is fine — just keep it consistent.
+
+**TODO — MMC5983 data-ready `INT`:** Wire the breakout’s Qwiic **INT** pin (active-high,
+hi-Z until enabled) to a spare ESP32-C3 GPIO on the wing PCB (candidate **IO7** on the
+bench Pro Micro; document the net in the table above when fixed). Firmware already sets
+`INT_meas_done_en` and polls `Meas_M_Done` over I²C today; still to do: EXTI/GPIO
+interrupt handler, read the 7-byte `XOUT` burst on INT (no status polling in the hot
+path), and coordinate bus access with the existing async poll task.
 
 ### Power & current budget
 
@@ -177,7 +189,11 @@ over UDP after restart.
 
 ### Sampling rates and autonomic recovery (FW `0x0004_0002+`)
 
-BMP581 uses ~25 ms forced conversions; MMC5983 reads are much faster. The firmware
+BMP581 uses on-chip FIFO at the configured ODR; MMC5983 runs in **continuous mode**
+with **CM_Freq** matched to `SetRate` (1–100 Hz at BW=00). Each sample is a 7-byte
+burst from `XOUT` after checking `Meas_M_Done` over I²C (see **TODO** above for GPIO
+`INT`). Multiple mag readings per 100 ms tick are queued in the uplink batch like
+static FIFO frames; airspeed uses the same pending queue (default 10 Hz). The firmware
 enforces a **75 ms I²C work budget per 100 ms tick** and rejects unsustainable
 combinations at `SetRate` time (Ack `ok=false`). Example: **50 Hz static + 50 Hz
 mag is rejected**; **25 + 50** is OK. Hello **max Hz** shrinks when more sensors
