@@ -38,12 +38,16 @@ func DeclinationFromGPS(ctx context.Context, gpsc *gps.Client, hub *live.Hub, bu
 			if err != nil {
 				continue
 			}
+			x, y, z, _, _, _ := f.Ellipsoidal()
 			sm := live.Sample{
 				Device: "geo",
 				TsNs:   time.Now().UnixNano(),
 				Values: map[string]float64{
 					"declination": f.D(),
 					"inclination": f.I(),
+					"field_x_nt":  x,
+					"field_y_nt":  y,
+					"field_z_nt":  z,
 					"field_h_nt":  f.H(),
 					"field_f_nt":  f.F(),
 				},
