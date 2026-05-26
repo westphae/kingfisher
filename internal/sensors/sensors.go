@@ -1,7 +1,7 @@
 // Package sensors discovers IIO devices and runs one reader goroutine per
-// device. Each goroutine polls every enabled channel on its own ticker
-// (sample_hz from config) and publishes a live.Sample to both the live hub
-// and the store buffer.
+// device. Buffered capture (kernel FIFO + hrtimer) is the default when
+// scan_elements exist; otherwise each channel is polled on a ticker at
+// sample_hz. Samples go to the live hub and store buffer.
 package sensors
 
 import (
@@ -17,6 +17,7 @@ import (
 	"github.com/westphae/go-iio"
 	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/live"
+	"github.com/westphae/kingfisher/internal/location"
 	"github.com/westphae/kingfisher/internal/store"
 	"github.com/westphae/kingfisher/internal/units"
 )
@@ -123,6 +124,7 @@ func Open() ([]Reader, error) {
 	}
 	out := make([]Reader, 0, len(infos))
 	for _, info := range infos {
+		log.Printf("sensors: opening %s (%s)", info.Name, info.Path)
 		d, err := iio.OpenPath(info.Path)
 		if err != nil {
 			log.Printf("sensors: open %s (%s): %v", info.Name, info.Path, err)
@@ -159,6 +161,7 @@ func (a *nameAllocator) Next(base string) string {
 // snapshots at startup and on config reload. The registry, if non-nil,
 // receives the same snapshots so the web layer can read+write attrs.
 func Run(ctx context.Context, holder *config.Holder, readers []Reader, hub *live.Hub, buf *store.Buffer, st *store.Store, reg *Registry) {
+	cleanupKingfisherHRTimers()
 	alloc := newNameAllocator()
 	cfg := holder.Get()
 	var wg sync.WaitGroup
@@ -190,7 +193,7 @@ func Run(ctx context.Context, holder *config.Holder, readers []Reader, hub *live
 
 	for _, a := range active {
 		if reg != nil {
-			reg.Register(a.r, a.name)
+			reg.Register(a.r, a.name, location.Hub)
 		}
 		if err := applyConfiguredAttrs(a.r, cfg.DeviceOrDefault(a.r.Name(), 10)); err != nil {
 			log.Printf("sensors: %s attrs: %v", a.name, err)
@@ -199,7 +202,7 @@ func Run(ctx context.Context, holder *config.Holder, readers []Reader, hub *live
 		// configuration even if the user never touches the UI.
 		recs := SnapshotAttrs(a.r)
 		if st != nil {
-			if err := st.LogAttrs(a.r.Name(), recs); err != nil {
+			if err := st.LogAttrs(a.r.Name(), location.Hub, recs); err != nil {
 				log.Printf("sensors: %s log attrs: %v", a.name, err)
 			}
 		}
@@ -210,7 +213,11 @@ func Run(ctx context.Context, holder *config.Holder, readers []Reader, hub *live
 		go func(r Reader, name string) {
 			defer wg.Done()
 			defer r.Close()
-			runOne(ctx, r, name, holder, hub, buf, st, reg)
+			if ir, ok := r.(*iioReader); ok && cfg.DeviceOrDefault(r.Name(), 10).WantBuffer(len(ir.bufferChannels())) {
+				runBuffered(ctx, ir, name, holder, hub, buf, st, reg)
+			} else {
+				runOne(ctx, r, name, holder, hub, buf, st, reg)
+			}
 		}(a.r, a.name)
 	}
 	wg.Wait()
@@ -296,7 +303,7 @@ func runOne(ctx context.Context, r Reader, name string, holder *config.Holder, h
 			curr := SnapshotAttrs(r)
 			diff := DiffAttrs(prevAttrs, curr)
 			if len(diff) > 0 && st != nil {
-				if err := st.LogAttrs(r.Name(), diff); err != nil {
+				if err := st.LogAttrs(r.Name(), location.Hub, diff); err != nil {
 					log.Printf("sensors: %s log attr diff: %v", name, err)
 				}
 			}

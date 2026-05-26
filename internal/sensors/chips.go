@@ -27,6 +27,7 @@ type ChipAttr struct {
 //   - BMP280 datasheet rev 1.20, Table 5: pressure oversampling 1..16x.
 //     in_pressure_scale and in_temp_scale are derived from calibration
 //     registers and not user-tunable in the in-tree driver.
+//   - Max buffered sample_hz: internal/sensors/ratelimits.go.
 var chipFallbacks = map[string]map[string]map[string]ChipAttr{
 	"bmp280": {
 		"pressure": {

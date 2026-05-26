@@ -53,6 +53,7 @@ func main() {
 
 	hub := live.NewHub()
 
+	log.Printf("sensors: opening IIO devices…")
 	readers, err := sensors.Open()
 	if err != nil {
 		log.Printf("sensors: %v", err)
