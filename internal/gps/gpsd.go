@@ -27,7 +27,11 @@ type Fix struct {
 	Speed     float64 // m/s
 	Track     float64 // degrees true
 	Climb     float64 // m/s
-	HAcc      float64 // meters
+	HAcc      float64 // meters (gpsd eph, horizontal 2D)
+	VAcc      float64 // meters (gpsd epv)
+	GsAcc     float64 // m/s (gpsd eps)
+	VsAcc     float64 // m/s (gpsd epc)
+	TrackAcc  float64 // degrees (gpsd epd)
 	Mode      int
 	Sats      int
 	SatsInUse int
@@ -37,14 +41,20 @@ type Client struct {
 	addr string
 	hub  *live.Hub
 	buf  *store.Buffer
+	// rateHz returns the desired output rate in Hz. The receiver runs at a
+	// fixed (higher) rate; we decimate TPV reports down to this rate in
+	// software so the cockpit UI can switch between e.g. 5 and 10 Hz
+	// without reconfiguring a read-only gpsd. nil or <=0 means no decimation.
+	rateHz func() float64
 
-	mu   sync.RWMutex
-	fix  Fix
-	sats atomic.Int32 // running last-known SKY count
+	mu       sync.RWMutex
+	fix      Fix
+	sats     atomic.Int32 // running last-known SKY count
+	lastEmit time.Time    // last TPV passed through; only touched in onTPV
 }
 
-func New(addr string, hub *live.Hub, buf *store.Buffer) *Client {
-	return &Client{addr: addr, hub: hub, buf: buf}
+func New(addr string, hub *live.Hub, buf *store.Buffer, rateHz func() float64) *Client {
+	return &Client{addr: addr, hub: hub, buf: buf, rateHz: rateHz}
 }
 
 // LastFix returns the most recent fix; HasFix is false if no TPV has been
@@ -112,7 +122,31 @@ func (c *Client) connectOnce(stop <-chan struct{}) {
 	}
 }
 
+// skipForRate reports whether this TPV should be dropped to honor the
+// configured output rate. gpsd filters run on a single watcher goroutine,
+// so lastEmit needs no locking. We gate on 90% of the target period so
+// timing jitter in the incoming stream doesn't drop an otherwise-due fix.
+func (c *Client) skipForRate() bool {
+	if c.rateHz == nil {
+		return false
+	}
+	hz := c.rateHz()
+	if hz <= 0 {
+		return false
+	}
+	now := time.Now()
+	period := time.Duration(float64(time.Second) / hz)
+	if !c.lastEmit.IsZero() && now.Sub(c.lastEmit) < period*9/10 {
+		return true
+	}
+	c.lastEmit = now
+	return false
+}
+
 func (c *Client) onTPV(r *gpsd.TPVReport) {
+	if c.skipForRate() {
+		return
+	}
 	hasFix := r.Mode >= gpsd.Mode2D
 	c.mu.Lock()
 	c.fix = Fix{
@@ -125,6 +159,10 @@ func (c *Client) onTPV(r *gpsd.TPVReport) {
 		Track:     r.Track,
 		Climb:     r.Climb,
 		HAcc:      r.Eph,
+		VAcc:      r.Epv,
+		GsAcc:     r.Eps,
+		VsAcc:     r.Epc,
+		TrackAcc:  r.Epd,
 		Mode:      int(r.Mode),
 		SatsInUse: int(c.sats.Load()),
 		Sats:      int(c.sats.Load()),
@@ -132,15 +170,19 @@ func (c *Client) onTPV(r *gpsd.TPVReport) {
 	c.mu.Unlock()
 
 	values := map[string]float64{
-		"lat":     r.Lat,
-		"lon":     r.Lon,
-		"alt_msl": r.Alt,
-		"gs":      r.Speed,
-		"track":   r.Track,
-		"vs":      r.Climb,
-		"h_acc":   r.Eph,
-		"fix":     float64(r.Mode),
-		"sats":    float64(c.sats.Load()),
+		"lat":       r.Lat,
+		"lon":       r.Lon,
+		"alt_msl":   r.Alt,
+		"gs":        r.Speed,
+		"track":     r.Track,
+		"vs":        r.Climb,
+		"h_acc":     r.Eph,
+		"v_acc":     r.Epv,
+		"gs_acc":    r.Eps,
+		"vs_acc":    r.Epc,
+		"track_acc": r.Epd,
+		"fix":       float64(r.Mode),
+		"sats":      float64(c.sats.Load()),
 	}
 	// gpsd sometimes omits fields; drop NaN to avoid polluting SQLite.
 	for k, v := range values {

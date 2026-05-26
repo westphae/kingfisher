@@ -62,7 +62,7 @@ func main() {
 
 	registry := sensors.NewRegistry()
 
-	gpsClient := gps.New(cfg.GPSDAddr, hub, buf)
+	gpsClient := gps.New(cfg.GPSDAddr, hub, buf, func() float64 { return holder.Get().GPS.RateHz })
 
 	var podClient *pod.Client
 	podAddr := cfg.PodListenAddr()
