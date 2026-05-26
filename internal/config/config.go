@@ -39,7 +39,10 @@ type Channel struct {
 type Device struct {
 	Enabled   bool               `json:"enabled"`
 	SampleHz  float64            `json:"sample_hz"`
-	UseBuffer bool               `json:"use_buffer,omitempty"`
+	// UseBuffer selects kernel IIO buffered capture (hrtimer + /dev/iio:deviceN).
+	// Omitted or true: use buffer when the device has scan_elements. Explicit false:
+	// legacy per-channel sysfs poll in sensors.runOne.
+	UseBuffer *bool `json:"use_buffer,omitempty"`
 	Channels  map[string]Channel `json:"channels,omitempty"`
 	Attrs     map[string]string  `json:"attrs,omitempty"`
 }
@@ -118,7 +121,11 @@ func Defaults() *Config {
 			WiFiSSID:     "kingfisher",
 			WiFiPassword: "",
 		},
-		GPSFields: []string{"lat", "lon", "alt_msl", "alt_hae", "gs", "track", "vs", "h_acc", "fix", "sats"},
+		GPSFields: []string{
+			"lat", "lon", "alt_msl", "gs", "track", "vs",
+			"h_acc", "v_acc", "gs_acc", "vs_acc", "track_acc",
+			"fix", "sats",
+		},
 		Devices:   map[string]Device{},
 		GPS:       GPS{RateHz: 5},
 		AHRS:      AHRS{Enabled: true, RateHz: 20},
@@ -132,6 +139,18 @@ func (c *Config) DeviceOrDefault(name string, defaultHz float64) Device {
 		return d
 	}
 	return Device{Enabled: true, SampleHz: defaultHz}
+}
+
+// WantBuffer reports whether to use kernel IIO buffered capture for a device
+// with the given number of scannable channels.
+func (d Device) WantBuffer(scanChannels int) bool {
+	if scanChannels == 0 {
+		return false
+	}
+	if d.UseBuffer != nil {
+		return *d.UseBuffer
+	}
+	return true
 }
 
 // podUDPConfigAddr returns the configured pod.udp_addr (or legacy/default).
