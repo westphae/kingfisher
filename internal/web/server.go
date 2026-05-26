@@ -1,20 +1,23 @@
 // Package web serves the cockpit status UI and the JSON config API.
 // Routes:
-//   GET  /            — server-rendered index.html with the device list.
-//   GET  /ws          — WebSocket; pushes live.Hub snapshots every 100ms.
-//   GET  /api/config  — current config JSON.
-//   POST /api/config  — replace config; persists to disk + signals reload.
-//   GET  /api/status  — DB path, size, buffered rows, GPS fix state.
+//
+//	GET  /            — server-rendered index.html with the device list.
+//	GET  /ws          — WebSocket; pushes live.Hub snapshots every 100ms.
+//	GET  /api/config  — current config JSON.
+//	POST /api/config  — replace config; persists to disk + signals reload.
+//	GET  /api/status  — DB path, size, buffered rows, GPS fix state.
 package web
 
 import (
 	"context"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"io/fs"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +26,7 @@ import (
 	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/gps"
 	"github.com/westphae/kingfisher/internal/live"
+	"github.com/westphae/kingfisher/internal/location"
 	"github.com/westphae/kingfisher/internal/pod"
 	"github.com/westphae/kingfisher/internal/sensors"
 	"github.com/westphae/kingfisher/internal/store"
@@ -107,6 +111,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	snap := s.hub.SnapshotNow()
 	devs := make([]string, 0, len(snap.Devices))
 	for d := range snap.Devices {
+		if pod.HideLegacyTab(d) {
+			continue
+		}
 		devs = append(devs, d)
 	}
 	data := indexData{Aircraft: s.cfg.Get().Aircraft, Devices: devs}
@@ -217,14 +224,21 @@ func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
 	cfg := s.cfg.Get()
 	names := s.cfg.IIODeviceNames()
 	type deviceView struct {
-		Name     string  `json:"name"`
-		SampleHz float64 `json:"sample_hz"`
-		Enabled  bool    `json:"enabled"`
+		Name        string   `json:"name"`
+		SampleHz    float64  `json:"sample_hz"`
+		Enabled     bool     `json:"enabled"`
+		MaxSampleHz *float64 `json:"max_sample_hz,omitempty"`
 	}
 	out := make([]deviceView, 0, len(names))
 	for _, n := range names {
 		d := cfg.DeviceOrDefault(n, 10)
-		out = append(out, deviceView{Name: n, SampleHz: d.SampleHz, Enabled: d.Enabled})
+		v := deviceView{Name: n, SampleHz: d.SampleHz, Enabled: d.Enabled}
+		if s.reg != nil {
+			if max, ok := s.reg.MaxBufferedHzFor(n); ok && max > 0 {
+				v.MaxSampleHz = &max
+			}
+		}
+		out = append(out, v)
 	}
 	writeJSON(w, out)
 }
@@ -244,7 +258,7 @@ func (s *Server) handleDeviceSub(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, s.reg.Get(device))
+		writeJSON(w, s.deviceAttrsResponse(device))
 	case http.MethodPost:
 		var body struct {
 			Channel string `json:"channel"`
@@ -255,7 +269,26 @@ func (s *Server) handleDeviceSub(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		if device == gpsDeviceName && body.Attr == "rate_hz" {
+			if err := s.persistGPSRate(body.Value); err != nil {
+				log.Printf("web: gps rate_hz=%q: %v", body.Value, err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, s.deviceAttrsResponse(device))
+			return
+		}
+		if s.isIIODevice(device) && sensors.IsDeviceConfigAttr(body.Attr) {
+			if err := s.persistIIODeviceSetting(device, body.Attr, body.Value); err != nil {
+				log.Printf("web: %s %s=%q: %v", device, body.Attr, body.Value, err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, s.deviceAttrsResponse(device))
+			return
+		}
 		if err := s.reg.WriteAttr(device, body.Channel, body.Attr, body.Value); err != nil {
+			log.Printf("web: %s/%s %s=%q: %v", device, body.Channel, body.Attr, body.Value, err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -264,10 +297,126 @@ func (s *Server) handleDeviceSub(w http.ResponseWriter, r *http.Request) {
 		if err := s.persistAttrChange(device, body.Channel, body.Attr, body.Value); err != nil {
 			log.Printf("web: persist attr change: %v", err)
 		}
-		writeJSON(w, s.reg.Get(device))
+		if s.pod != nil {
+			s.pod.RefreshRegistryViews()
+		}
+		writeJSON(w, s.deviceAttrsResponse(device))
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+type deviceAttrsResponse struct {
+	Location string             `json:"location"`
+	Attrs    []sensors.AttrView `json:"attrs"`
+}
+
+func (s *Server) deviceAttrsResponse(device string) deviceAttrsResponse {
+	loc := location.Hub
+	if s.reg != nil {
+		if l := s.reg.Location(device); l != "" {
+			loc = l
+		} else if pod.IsTelemetryDevice(s.reg, device) {
+			loc = location.Pod
+		}
+	} else if pod.IsTelemetryDevice(nil, device) {
+		loc = location.Pod
+	}
+	return deviceAttrsResponse{Location: loc, Attrs: s.deviceAttrViews(device)}
+}
+
+func (s *Server) isIIODevice(name string) bool {
+	for _, n := range s.cfg.IIODeviceNames() {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// gpsDeviceName is the hub/UI device id for the gpsd source (see internal/gps).
+const gpsDeviceName = "gps"
+
+// gpsAttrViews exposes the recorded GPS rate as a settings dropdown. The
+// receiver runs at a fixed rate; internal/gps decimates to this value.
+func gpsAttrViews(rateHz float64) []sensors.AttrView {
+	if rateHz <= 0 {
+		rateHz = 10
+	}
+	return []sensors.AttrView{{
+		Attr:     "rate_hz",
+		Value:    strconv.FormatFloat(rateHz, 'f', -1, 64),
+		Writable: true,
+		Options:  []string{"5", "10"},
+	}}
+}
+
+// deviceAttrViews returns registry attrs plus config sample_hz/enabled for IIO tabs.
+func (s *Server) deviceAttrViews(device string) []sensors.AttrView {
+	if device == gpsDeviceName {
+		return gpsAttrViews(s.cfg.Get().GPS.RateHz)
+	}
+	var base []sensors.AttrView
+	if s.reg != nil {
+		base = s.reg.Get(device)
+	}
+	if !s.isIIODevice(device) {
+		return base
+	}
+	dev := s.cfg.Get().DeviceOrDefault(device, 10)
+	var max float64
+	if s.reg != nil {
+		max, _ = s.reg.MaxBufferedHzFor(device)
+	}
+	return append(sensors.ConfigAttrViews(dev, max), base...)
+}
+
+func (s *Server) persistIIODeviceSetting(device, attr, value string) error {
+	cur := s.cfg.Get()
+	cp := *cur
+	cp.Devices = make(map[string]config.Device, len(cur.Devices))
+	for k, v := range cur.Devices {
+		cp.Devices[k] = copyDevice(v)
+	}
+	d, exists := cp.Devices[device]
+	if !exists {
+		d = cur.DeviceOrDefault(device, 10)
+	}
+	switch attr {
+	case "sample_hz":
+		hz, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+		if err != nil || hz <= 0 {
+			return fmt.Errorf("sample_hz: invalid %q", value)
+		}
+		if s.reg != nil {
+			if max, ok := s.reg.MaxBufferedHzFor(device); ok && hz > max {
+				return fmt.Errorf("sample_hz %.0f exceeds max %.0f for device", hz, max)
+			}
+		}
+		d.SampleHz = hz
+	case "enabled":
+		v := strings.TrimSpace(strings.ToLower(value))
+		d.Enabled = v == "true" || v == "1"
+	default:
+		return fmt.Errorf("unknown device setting %q", attr)
+	}
+	cp.Devices[device] = d
+	s.cfg.Set(&cp)
+	return config.Save(s.cfg.Path(), &cp)
+}
+
+// persistGPSRate stores the recorded GPS rate (Hz) in config and persists it.
+// internal/gps reads cfg.GPS.RateHz live, so the change takes effect at once.
+func (s *Server) persistGPSRate(value string) error {
+	hz, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil || hz <= 0 {
+		return fmt.Errorf("rate_hz: invalid %q", value)
+	}
+	cur := s.cfg.Get()
+	cp := *cur
+	cp.GPS = config.GPS{RateHz: hz}
+	s.cfg.Set(&cp)
+	return config.Save(s.cfg.Path(), &cp)
 }
 
 // persistAttrChange merges one attribute write into the live config's
@@ -278,8 +427,11 @@ func (s *Server) persistAttrChange(device, channel, attr, value string) error {
 	cur := s.cfg.Get()
 	cp := *cur
 	key := sensors.JoinIIOAttr(channel, attr)
+	if channel == "" {
+		key = sensors.JoinIIOAttr(device, attr)
+	}
 
-	if device == config.PodDeviceName {
+	if pod.IsTelemetryDevice(s.reg, device) {
 		cp.Pod = copyPod(cur.Pod)
 		if cp.Pod.Attrs == nil {
 			cp.Pod.Attrs = make(map[string]string)
@@ -347,7 +499,11 @@ func (s *Server) handleRecording(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		s.buf.SetPaused(body.Paused)
+		if err := s.buf.SetPaused(body.Paused); err != nil {
+			log.Printf("web: recording pause: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		writeJSON(w, map[string]bool{"paused": body.Paused})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

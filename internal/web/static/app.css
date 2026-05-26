@@ -38,6 +38,32 @@ body {
   font-size: 1rem;
 }
 #hdr .brand { font-weight: 700; color: var(--accent); }
+#hdr .podStatus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  font-variant: tabular-nums;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+#hdr .podStatus.podStatus-ok {
+  background: rgba(92, 255, 163, 0.12);
+  border-color: var(--good);
+}
+#hdr .podStatus.podStatus-warn {
+  background: rgba(230, 192, 74, 0.12);
+  border-color: var(--warn);
+}
+#hdr .podStatus.podStatus-off {
+  background: rgba(255, 92, 92, 0.12);
+  border-color: var(--rec);
+}
+#hdr .podStatusItem .lbl { color: var(--dim); margin-right: 0.25rem; }
+#hdr .podStatusItem.rssi-good { color: var(--good); }
+#hdr .podStatusItem.rssi-warn { color: var(--warn); }
+#hdr .podStatusItem.rssi-bad  { color: var(--rec); }
 #hdr .tail  { flex: 1; font-variant: tabular-nums; }
 #hdr .rec   { color: var(--rec); font-weight: 600; }
 #hdr #recDot { animation: pulse 1.6s infinite; }
@@ -155,6 +181,14 @@ body {
 }
 .kv .k { color: var(--dim); }
 .kv .v { font-variant: tabular-nums; }
+.kv.kv-accuracy .k { font-style: italic; }
+.kv.kv-accuracy .v { color: var(--dim); font-size: 0.95rem; }
+.gpsFootnote {
+  padding: 0.5rem 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  border-bottom: 1px solid var(--border);
+}
 
 #ftr {
   display: flex;

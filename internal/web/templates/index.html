@@ -10,8 +10,8 @@
 <body>
   <header id="hdr">
     <div class="brand">Kingfisher</div>
+    <div id="podStatus" class="podStatus" hidden></div>
     <div class="tail">{{.Aircraft}}</div>
-    <span id="podTag" class="podTag pod-off" title="Pod ingest not running">POD</span>
     <button id="pauseBtn" class="pauseBtn" title="Pause recording">⏸</button>
     <div class="rec"><span id="recDot">●</span> <span id="recLabel">REC</span> <span id="dbSize">—</span></div>
   </header>
@@ -30,9 +30,6 @@
       <label>Aircraft <input id="cfgAircraft" /></label>
       <label>Notes <textarea id="cfgNotes" rows="3"></textarea></label>
       <label>Flush seconds <input id="cfgFlush" type="number" min="1" max="60" /></label>
-      <fieldset id="cfgDevices">
-        <legend>Sensors (Hz)</legend>
-      </fieldset>
       <div class="dlgRow">
         <button id="cfgSave" value="save">Save</button>
         <button value="cancel">Cancel</button>
@@ -41,6 +38,7 @@
   </dialog>
 
   <script>window.KF_INITIAL_DEVICES = {{.Devices}};</script>
+  <script src="/static/display.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>
