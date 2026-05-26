@@ -104,7 +104,7 @@ func main() {
 		go func() { defer wg.Done(); podClient.Run(stop) }()
 	}
 	wg.Add(1)
-	go func() { defer wg.Done(); derive.AltitudeFromHub(ctx, hub, buf) }()
+	go func() { defer wg.Done(); derive.AltitudeFromHub(ctx, holder, hub, buf, st) }()
 	wg.Add(1)
 	go func() { defer wg.Done(); derive.DeclinationFromGPS(ctx, gpsClient, hub, buf) }()
 	if cfg.AHRS.Enabled {

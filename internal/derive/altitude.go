@@ -6,12 +6,16 @@ package derive
 
 import (
 	"context"
+	"log"
 	"math"
+	"strconv"
 	"time"
 
 	"github.com/westphae/goflying/sensors/bmp280"
 
+	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/live"
+	"github.com/westphae/kingfisher/internal/location"
 	"github.com/westphae/kingfisher/internal/pod"
 	"github.com/westphae/kingfisher/internal/pod/wire"
 	"github.com/westphae/kingfisher/internal/store"
@@ -22,6 +26,9 @@ import (
 const (
 	PressureSourcePod   = 1 // wing pod static_pressure_pa (BMP581)
 	PressureSourceCabin = 2 // cabin IIO baro (e.g. bmp280)
+
+	pressAltDeviceName = "press_alt"
+	kollsmanAttrName   = "kollsman_inhg"
 )
 
 // AltitudeFromHub reads the latest pressure-bearing device snapshot every
@@ -29,13 +36,22 @@ const (
 // Wing pod static pressure is preferred over cabin IIO. Pressure is Pa;
 // pressure altitudes in ft and m. density_alt_ft uses the paired OAT when
 // available (pod static_temp_c or cabin temp_c).
-func AltitudeFromHub(ctx context.Context, hub *live.Hub, buf *store.Buffer) {
+func AltitudeFromHub(ctx context.Context, holder *config.Holder, hub *live.Hub, buf *store.Buffer, st *store.Store) {
 	t := time.NewTicker(200 * time.Millisecond)
 	defer t.Stop()
+	reload := holder.Subscribe()
+	kollsman := holder.Get().KollsmanInHg()
+	logPressAltAttrs(st, kollsman)
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-reload:
+			next := holder.Get().KollsmanInHg()
+			if math.Abs(next-kollsman) > 1e-9 {
+				kollsman = next
+				logPressAltAttrs(st, kollsman)
+			}
 		case <-t.C:
 			snap := hub.SnapshotNow()
 			pressPa, source, ok := findPressurePa(snap)
@@ -45,17 +61,22 @@ func AltitudeFromHub(ctx context.Context, hub *live.Hub, buf *store.Buffer) {
 			hPa := pressPa / 100.0
 			altFt := bmp280.CalcAltitude(hPa)
 			altM := altFt * 0.3048
+			indicatedFt := IndicatedAltFt(altFt, kollsman)
+			indicatedM := indicatedFt * 0.3048
 			vals := map[string]float64{
-				"pressure_pa":     pressPa,
-				"pressure_source": source,
-				"pressure_alt_ft": altFt,
-				"pressure_alt_m":  altM,
+				"pressure_pa":      pressPa,
+				"pressure_source":  source,
+				"pressure_alt_ft":  altFt,
+				"pressure_alt_m":   altM,
+				"indicated_alt_ft": indicatedFt,
+				"indicated_alt_m":  indicatedM,
+				kollsmanAttrName:   kollsman,
 			}
 			if tempC, ok := findOATC(snap, source); ok {
 				vals["density_alt_ft"] = DensityAltFt(altFt, tempC)
 			}
 			sm := live.Sample{
-				Device: "press_alt",
+				Device: pressAltDeviceName,
 				TsNs:   time.Now().UnixNano(),
 				Values: vals,
 			}
@@ -65,6 +86,12 @@ func AltitudeFromHub(ctx context.Context, hub *live.Hub, buf *store.Buffer) {
 			}
 		}
 	}
+}
+
+// IndicatedAltFt returns indicated altitude in feet for a pressure altitude
+// and altimeter setting in inches of mercury. Standard setting is 29.92 inHg.
+func IndicatedAltFt(pressureAltFt, kollsmanInHg float64) float64 {
+	return pressureAltFt + (kollsmanInHg-config.DefaultKollsmanInHg)*1000.0
 }
 
 // DensityAltFt returns density altitude in feet from pressure altitude (ft)
@@ -154,4 +181,16 @@ func validPressurePa(v float64) bool {
 
 func validTempC(v float64) bool {
 	return !math.IsNaN(v) && v > -100 && v < 200
+}
+
+func logPressAltAttrs(st *store.Store, kollsman float64) {
+	if st == nil {
+		return
+	}
+	if err := st.LogAttrs(pressAltDeviceName, location.Hub, []store.AttrRecord{{
+		Attr:  kollsmanAttrName,
+		Value: strconv.FormatFloat(kollsman, 'f', 2, 64),
+	}}); err != nil {
+		log.Printf("derive: log press_alt attrs: %v", err)
+	}
 }

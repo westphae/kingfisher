@@ -278,6 +278,15 @@ func (s *Server) handleDeviceSub(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, s.deviceAttrsResponse(device))
 			return
 		}
+		if device == pressAltDeviceName && body.Attr == "kollsman_inhg" {
+			if err := s.persistPressAltKollsman(body.Value); err != nil {
+				log.Printf("web: press_alt kollsman_inhg=%q: %v", body.Value, err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, s.deviceAttrsResponse(device))
+			return
+		}
 		if s.isIIODevice(device) && sensors.IsDeviceConfigAttr(body.Attr) {
 			if err := s.persistIIODeviceSetting(device, body.Attr, body.Value); err != nil {
 				log.Printf("web: %s %s=%q: %v", device, body.Attr, body.Value, err)
@@ -337,6 +346,9 @@ func (s *Server) isIIODevice(name string) bool {
 // gpsDeviceName is the hub/UI device id for the gpsd source (see internal/gps).
 const gpsDeviceName = "gps"
 
+// pressAltDeviceName is the derived pressure-altitude device id.
+const pressAltDeviceName = "press_alt"
+
 // gpsAttrViews exposes the recorded GPS rate as a settings dropdown. The
 // receiver runs at a fixed rate; internal/gps decimates to this value.
 func gpsAttrViews(rateHz float64) []sensors.AttrView {
@@ -351,10 +363,22 @@ func gpsAttrViews(rateHz float64) []sensors.AttrView {
 	}}
 }
 
+// pressAltAttrViews exposes the altimeter setting used to derive indicated altitude.
+func pressAltAttrViews(kollsmanInHg float64) []sensors.AttrView {
+	return []sensors.AttrView{{
+		Attr:     "kollsman_inhg",
+		Value:    strconv.FormatFloat(kollsmanInHg, 'f', 2, 64),
+		Writable: true,
+	}}
+}
+
 // deviceAttrViews returns registry attrs plus config sample_hz/enabled for IIO tabs.
 func (s *Server) deviceAttrViews(device string) []sensors.AttrView {
 	if device == gpsDeviceName {
 		return gpsAttrViews(s.cfg.Get().GPS.RateHz)
+	}
+	if device == pressAltDeviceName {
+		return pressAltAttrViews(s.cfg.Get().KollsmanInHg())
 	}
 	var base []sensors.AttrView
 	if s.reg != nil {
@@ -415,6 +439,19 @@ func (s *Server) persistGPSRate(value string) error {
 	cur := s.cfg.Get()
 	cp := *cur
 	cp.GPS = config.GPS{RateHz: hz}
+	s.cfg.Set(&cp)
+	return config.Save(s.cfg.Path(), &cp)
+}
+
+func (s *Server) persistPressAltKollsman(value string) error {
+	inhg, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil || inhg < 20 || inhg > 35 {
+		return fmt.Errorf("kollsman_inhg: invalid %q", value)
+	}
+	cur := s.cfg.Get()
+	cp := *cur
+	cp.PressAlt = cur.PressAlt
+	cp.PressAlt.KollsmanInHg = inhg
 	s.cfg.Set(&cp)
 	return config.Save(s.cfg.Path(), &cp)
 }

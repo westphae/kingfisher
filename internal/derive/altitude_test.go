@@ -86,6 +86,19 @@ func TestDensityAltFt_hotDayRaisesDA(t *testing.T) {
 	}
 }
 
+func TestIndicatedAltFt_usesKollsmanSetting(t *testing.T) {
+	const paFt = 5000.0
+	if got := IndicatedAltFt(paFt, 29.92); math.Abs(got-paFt) > 1e-9 {
+		t.Fatalf("standard: got %.2f want %.2f", got, paFt)
+	}
+	if got := IndicatedAltFt(paFt, 30.12); math.Abs(got-5200) > 1e-9 {
+		t.Fatalf("high setting: got %.2f want 5200", got)
+	}
+	if got := IndicatedAltFt(paFt, 29.42); math.Abs(got-4500) > 1e-9 {
+		t.Fatalf("low setting: got %.2f want 4500", got)
+	}
+}
+
 func TestFindOATC_pod(t *testing.T) {
 	snap := live.Snapshot{
 		Devices: map[string]live.Sample{

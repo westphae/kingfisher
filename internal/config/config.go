@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -37,12 +38,12 @@ type Channel struct {
 }
 
 type Device struct {
-	Enabled   bool               `json:"enabled"`
-	SampleHz  float64            `json:"sample_hz"`
+	Enabled  bool    `json:"enabled"`
+	SampleHz float64 `json:"sample_hz"`
 	// UseBuffer selects kernel IIO buffered capture (hrtimer + /dev/iio:deviceN).
 	// Omitted or true: use buffer when the device has scan_elements. Explicit false:
 	// legacy per-channel sysfs poll in sensors.runOne.
-	UseBuffer *bool `json:"use_buffer,omitempty"`
+	UseBuffer *bool              `json:"use_buffer,omitempty"`
 	Channels  map[string]Channel `json:"channels,omitempty"`
 	Attrs     map[string]string  `json:"attrs,omitempty"`
 }
@@ -51,10 +52,16 @@ type GPS struct {
 	RateHz float64 `json:"rate_hz"`
 }
 
+type PressAlt struct {
+	KollsmanInHg float64 `json:"kollsman_inhg"`
+}
+
 type AHRS struct {
 	Enabled bool    `json:"enabled"`
 	RateHz  float64 `json:"rate_hz"`
 }
+
+const DefaultKollsmanInHg = 29.92
 
 // Pod holds wing-pod WiFi/UDP settings and persisted sensor attrs in
 // config.json. Firmware build.rs reads wifi_ssid/password/udp_addr.
@@ -106,6 +113,7 @@ type Config struct {
 	GPSFields  []string          `json:"gps_fields,omitempty"`
 	Devices    map[string]Device `json:"devices,omitempty"`
 	GPS        GPS               `json:"gps"`
+	PressAlt   PressAlt          `json:"press_alt"`
 	AHRS       AHRS              `json:"ahrs"`
 }
 
@@ -126,9 +134,10 @@ func Defaults() *Config {
 			"h_acc", "v_acc", "gs_acc", "vs_acc", "track_acc",
 			"fix", "sats",
 		},
-		Devices:   map[string]Device{},
-		GPS:       GPS{RateHz: 5},
-		AHRS:      AHRS{Enabled: true, RateHz: 20},
+		Devices:  map[string]Device{},
+		GPS:      GPS{RateHz: 5},
+		PressAlt: PressAlt{KollsmanInHg: DefaultKollsmanInHg},
+		AHRS:     AHRS{Enabled: true, RateHz: 20},
 	}
 }
 
@@ -151,6 +160,15 @@ func (d Device) WantBuffer(scanChannels int) bool {
 		return *d.UseBuffer
 	}
 	return true
+}
+
+// KollsmanInHg returns the configured altimeter setting in inches of mercury,
+// falling back to the standard 29.92 when unset.
+func (c *Config) KollsmanInHg() float64 {
+	if c == nil || math.IsNaN(c.PressAlt.KollsmanInHg) || c.PressAlt.KollsmanInHg <= 0 {
+		return DefaultKollsmanInHg
+	}
+	return c.PressAlt.KollsmanInHg
 }
 
 // podUDPConfigAddr returns the configured pod.udp_addr (or legacy/default).

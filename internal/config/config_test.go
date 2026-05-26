@@ -61,3 +61,17 @@ func TestDefaults_pod(t *testing.T) {
 		t.Fatalf("PodListenAddr=%q", got)
 	}
 }
+
+func TestDefaults_kollsman(t *testing.T) {
+	c := Defaults()
+	if got := c.KollsmanInHg(); got != DefaultKollsmanInHg {
+		t.Fatalf("KollsmanInHg()=%v want %v", got, DefaultKollsmanInHg)
+	}
+}
+
+func TestKollsmanInHg_fallsBackWhenUnset(t *testing.T) {
+	c := &Config{}
+	if got := c.KollsmanInHg(); got != DefaultKollsmanInHg {
+		t.Fatalf("KollsmanInHg()=%v want %v", got, DefaultKollsmanInHg)
+	}
+}
