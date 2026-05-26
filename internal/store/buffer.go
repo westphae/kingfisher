@@ -26,9 +26,18 @@ type Buffer struct {
 
 // SetPaused toggles recording. While paused, Append drops incoming samples
 // (so the buffer doesn't grow unbounded) but the live hub still receives
-// them so the UI keeps showing fresh values. Rows queued before the pause
-// are still flushed on the normal cadence.
-func (b *Buffer) SetPaused(p bool) { b.paused.Store(p) }
+// them so the UI keeps showing fresh values. When pausing, pending rows are
+// flushed and the WAL is checkpointed into the main DB file.
+func (b *Buffer) SetPaused(p bool) error {
+	b.paused.Store(p)
+	if !p {
+		return nil
+	}
+	if err := b.Flush(); err != nil {
+		return err
+	}
+	return b.store.CheckpointWAL()
+}
 
 // Paused reports the current pause state.
 func (b *Buffer) Paused() bool { return b.paused.Load() }

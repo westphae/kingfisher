@@ -127,6 +127,34 @@ func TestStoreVolumeFreeBytes(t *testing.T) {
 	}
 }
 
+func TestStoreCheckpointWALTruncatesWal(t *testing.T) {
+	s := openTemp(t)
+	defer s.Close()
+	buf := NewBuffer(s, time.Hour)
+	buf.Append(live.Sample{
+		Device: "dev",
+		TsNs:   1,
+		Values: map[string]float64{"x": 1},
+	})
+	if err := buf.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	walPath := s.Path() + "-wal"
+	if err := s.CheckpointWAL(); err != nil {
+		t.Fatalf("checkpoint: %v", err)
+	}
+	fi, err := os.Stat(walPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			t.Fatalf("stat wal: %v", err)
+		}
+		return
+	}
+	if fi.Size() != 0 {
+		t.Fatalf("wal size after checkpoint: got %d, want 0", fi.Size())
+	}
+}
+
 func TestSanitize(t *testing.T) {
 	cases := map[string]string{
 		"accel_x":    "accel_x",

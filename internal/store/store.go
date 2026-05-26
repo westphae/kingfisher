@@ -85,6 +85,16 @@ func (s *Store) Close() error {
 	return err
 }
 
+// CheckpointWAL copies all WAL frames into the main DB file and truncates
+// the WAL. Call after flushing pending rows so a pause checkpoint is durable.
+func (s *Store) CheckpointWAL() error {
+	if s.db == nil {
+		return fmt.Errorf("store: closed")
+	}
+	_, err := s.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	return err
+}
+
 func (s *Store) bootstrap() error {
 	_, err := s.db.Exec(`
 CREATE TABLE IF NOT EXISTS metadata (
@@ -100,13 +110,43 @@ CREATE TABLE IF NOT EXISTS _session (
   version      TEXT
 );
 CREATE TABLE IF NOT EXISTS sensor_attrs (
-  ts_ns   INTEGER NOT NULL,
-  device  TEXT    NOT NULL,
-  channel TEXT,
-  attr    TEXT    NOT NULL,
-  value   TEXT
+  ts_ns     INTEGER NOT NULL,
+  device    TEXT    NOT NULL,
+  location  TEXT    NOT NULL DEFAULT 'hub',
+  channel   TEXT,
+  attr      TEXT    NOT NULL,
+  value     TEXT
 );
 CREATE INDEX IF NOT EXISTS sensor_attrs_dev_attr ON sensor_attrs(device, channel, attr);`)
+	if err != nil {
+		return err
+	}
+	return s.migrateSensorAttrsLocation()
+}
+
+func (s *Store) migrateSensorAttrsLocation() error {
+	rows, err := s.db.Query(`PRAGMA table_info(sensor_attrs)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	hasLoc := false
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "location" {
+			hasLoc = true
+		}
+	}
+	if hasLoc {
+		return rows.Err()
+	}
+	_, err = s.db.Exec(`ALTER TABLE sensor_attrs ADD COLUMN location TEXT NOT NULL DEFAULT 'hub'`)
 	return err
 }
 
@@ -118,26 +158,29 @@ type AttrRecord struct {
 	Value   string
 }
 
-// LogAttrs writes a snapshot of sensor attributes for `device`. Rows are
-// timestamped with the current wall clock. Pass only the attrs that have
-// actually changed (or all of them at session start) — there is no dedup
-// on the table.
-func (s *Store) LogAttrs(device string, recs []AttrRecord) error {
+// LogAttrs writes a snapshot of sensor attributes for `device`. location is
+// "hub" (cabin IIO) or "pod" (wing). Rows are timestamped with the current
+// wall clock. Pass only the attrs that have actually changed (or all of them
+// at session start) — there is no dedup on the table.
+func (s *Store) LogAttrs(device, location string, recs []AttrRecord) error {
 	if len(recs) == 0 {
 		return nil
+	}
+	if location == "" {
+		location = "hub"
 	}
 	ts := time.Now().UnixNano()
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
-	stmt, err := tx.Prepare(`INSERT INTO sensor_attrs(ts_ns,device,channel,attr,value) VALUES(?,?,?,?,?)`)
+	stmt, err := tx.Prepare(`INSERT INTO sensor_attrs(ts_ns,device,location,channel,attr,value) VALUES(?,?,?,?,?,?)`)
 	if err != nil {
 		tx.Rollback()
 		return err
 	}
 	for _, r := range recs {
-		if _, err := stmt.Exec(ts, device, r.Channel, r.Attr, r.Value); err != nil {
+		if _, err := stmt.Exec(ts, device, location, r.Channel, r.Attr, r.Value); err != nil {
 			stmt.Close()
 			tx.Rollback()
 			return err
