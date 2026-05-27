@@ -24,8 +24,10 @@ type Store struct {
 	path string
 }
 
-// Open creates the flight DB at <dir>/<rfc3339>_<tail>.db and initialises
-// the metadata + _session tables.
+// Open creates the flight DB at <dir>/<rfc3339>_<tail>.db and initialises the
+// metadata + _session tables. The filename timestamp is taken from the host
+// wall clock, so deployment should start kingfisher only after GNSS discipline
+// is healthy if cold-boot naming accuracy matters.
 func Open(dir, tail string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
@@ -160,8 +162,9 @@ type AttrRecord struct {
 
 // LogAttrs writes a snapshot of sensor attributes for `device`. location is
 // "hub" (cabin IIO) or "pod" (wing). Rows are timestamped with the current
-// wall clock. Pass only the attrs that have actually changed (or all of them
-// at session start) — there is no dedup on the table.
+// host wall clock, matching the same time base used for DB naming and session
+// start. Pass only the attrs that have actually changed (or all of them at
+// session start) — there is no dedup on the table.
 func (s *Store) LogAttrs(device, location string, recs []AttrRecord) error {
 	if len(recs) == 0 {
 		return nil
@@ -197,8 +200,10 @@ func (s *Store) SetMeta(key, value string) error {
 	return err
 }
 
-// WriteSession records the session header row. Caller should fill what's
-// known at startup; declination can be updated later via SetMeta.
+// WriteSession records the session header row. Caller should fill what's known
+// at startup; declination can be updated later via SetMeta. start_time is on
+// the host wall clock, after any external GNSS/chrony discipline already in
+// effect.
 func (s *Store) WriteSession(aircraft, aircraftName, notes, version string) error {
 	_, err := s.db.Exec(`INSERT INTO _session(start_time,aircraft,aircraft_name,notes,declination,version)
   VALUES(?,?,?,?,?,?)`,

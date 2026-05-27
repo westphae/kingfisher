@@ -56,8 +56,9 @@ After any change to types in `pod_wire/src/lib.rs`, regenerate `fixtures.txt` an
 `live.Sample` is the universal data unit: `{Device string, TsNs int64, Values map[string]float64}`. Every source produces it, every sink consumes it.
 
 - Local IIO sensors use kernel **buffered capture** (hrtimer trigger + `/dev/iio:deviceN` FIFO) when the device exposes `scan_elements`; timestamps come from the buffer `timestamp` channel when `current_timestamp_clock` is `realtime`. Set `"use_buffer": false` in config for the legacy sysfs poll path (`sensors.runOne`). Requires `iio-trig-hrtimer` and configfs access (see `go-iio` `EnsureHRTimer`).
-- Out-of-process sources (gps, pod) are push-driven: they receive an external event and publish directly to `hub`. Do **not** wire push sources through `sensors.runOne` — it overstamps timestamps with receive time, which corrupts cross-stream alignment.
-- The pod ingest stamps `TsNs` from each reading's `age_us` and pod uptime (EMA wall sync). See `internal/pod/pod.go::onBatch`.
+- GPS keeps the fix epoch in `gps.Fix.Time`, but the emitted `gps` sample `TsNs` stays on the Pi's wall clock so all stored streams share the same `CLOCK_REALTIME` base after GNSS discipline.
+- Out-of-process sources (gps, pod) are push-driven: they receive an external event and publish directly to `hub`. Do **not** wire push sources through `sensors.runOne` — it overwrites source timestamps with receive time, which corrupts cross-stream alignment.
+- The pod ingest stamps `TsNs` from each reading's `age_us` and pod uptime, mapped into Pi wall clock via the EMA offset in `internal/pod/pod.go::onBatch`.
 - Telemetry devices use chip names from pod `Hello` (e.g. `bmp581`, `mmc5983`, `ms4525`); `location` is `hub` (cabin IIO) or `pod` (wing) in UI and `sensor_attrs`. Legacy aggregate hub device `pod` is hidden from tabs.
 - BMP581 on the pod uses NORMAL+FIFO; drained frames are queued and uplinked with distinct `age_us` per sample (up to `MAX_READINGS` per datagram).
 
@@ -78,7 +79,7 @@ Plan files live under `~/.claude/plans/` outside the repo.
 - Channel names in `Values` maps are the SQLite column names (after `store.Sanitize`). Use SI-friendly names with unit suffixes where helpful: `pressure_pa`, `temp_c`, `airspeed_dp_pa`, `mag_x_ut`. Angles on derived devices are plain `roll`/`pitch`/`yaw` (degrees). See `internal/units`.
 - Virtual devices that synthesize data publish under a stable name (`gps`, `pod`, `ahrs`, `press_alt`, `geo`). Adding a new one only requires `hub.Publish` calls and (optionally) `Registry` registration.
 - `chips.go` holds per-chip fallback attr tables. Don't add fallback entries for the pod — its caps are advertised at runtime via `wire.Hello`.
-- Flight DB: `_session` is written at startup; `metadata` is unused for now (`internal/store/TODO.md`). `sensor_attrs` includes a `location` column (`hub`/`pod`) and logs attrs for all devices at startup/reload (`internal/pod/TODO.md` for future Hello chip-attr snapshot + `SetAttr` registers).
+- Flight DB: `_session` is written at startup; `metadata` now records startup clock-assessment keys such as `clock_startup_state`. `sensor_attrs` includes a `location` column (`hub`/`pod`) and logs attrs for all devices at startup/reload (`internal/pod/TODO.md` for future Hello chip-attr snapshot + `SetAttr` registers).
 
 ## Driver TODOs (sibling repos)
 

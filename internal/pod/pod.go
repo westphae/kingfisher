@@ -1,10 +1,12 @@
 // Package pod is the Pi-side ingest path for the wing-pod telemetry. It
 // owns a Transport (UDP today; ESP-NOW dongle later), decodes wire-format
-// frames, performs a small EMA time-sync between pod uptime and Pi wall
-// time, and republishes each Reading as a live.Sample under the device
-// name "pod". A podReader is registered with sensors.Registry purely so
-// the existing /api/devices UI can render and write per-sensor settings;
-// the data path does NOT go through sensors.runOne.
+// frames, performs a small EMA time-sync between pod uptime and Pi wall time,
+// and republishes each Reading as a live.Sample under the device name "pod".
+// The reconstructed TsNs lives on the same wall-clock base as buffered IIO,
+// GPS, and derived streams once the Pi clock is GNSS-disciplined. A podReader
+// is registered with sensors.Registry purely so the existing /api/devices UI
+// can render and write per-sensor settings; the data path does NOT go through
+// sensors.runOne.
 package pod
 
 import (
@@ -46,10 +48,10 @@ type Client struct {
 
 	loggedMu sync.Mutex
 	logged   map[string][]store.AttrRecord
-	cmdOut chan outboundCmd
+	cmdOut   chan outboundCmd
 
-	cmdSeq   atomic.Uint32
-	pending  map[uint32]pendingEntry
+	cmdSeq    atomic.Uint32
+	pending   map[uint32]pendingEntry
 	pendingMu sync.Mutex
 
 	lastRxNs atomic.Int64
@@ -62,10 +64,10 @@ type Client struct {
 	offsetInited atomic.Bool
 
 	// linkSeq tracks the highest seq we've observed; gaps indicate loss.
-	linkSeq    uint32
-	rxBatches  atomic.Uint64
-	rxDropped  atomic.Uint64
-	txPackets  atomic.Uint64
+	linkSeq   uint32
+	rxBatches atomic.Uint64
+	rxDropped atomic.Uint64
+	txPackets atomic.Uint64
 
 	lastStatusNs  atomic.Int64
 	statusRssi    atomic.Int32
@@ -266,8 +268,9 @@ func (c *Client) dispatch(frame wire.Frame, peer string) {
 	}
 }
 
-// onBatch handles a SampleBatch: update sticky cache, refresh time-sync
-// offset, and publish one live.Sample per Reading.
+// onBatch handles a SampleBatch: update sticky cache, refresh the pod->Pi wall
+// clock offset, and publish one live.Sample per Reading using reconstructed
+// measurement time on the shared host wall-clock base.
 func (c *Client) onBatch(b wire.SampleBatch) {
 	recvNs := time.Now().UnixNano()
 	podUptimeNs := int64(b.PodUptimeUs) * 1000

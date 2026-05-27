@@ -11,8 +11,10 @@ import (
 )
 
 // Sample is one reading from a named source. Values are SI-natural floats
-// keyed by channel/column name. TsNs is monotonic-ish wall-clock ns since
-// the unix epoch as written by the producer.
+// keyed by channel/column name. TsNs is the producer's measurement timestamp
+// on the shared unix-epoch wall-clock base: buffered IIO prefers kernel
+// realtime capture time, GPS uses disciplined host wall time, pod reconstructs
+// into host wall time, and derived streams use host wall time at compute time.
 type Sample struct {
 	Device string             `json:"device"`
 	TsNs   int64              `json:"ts_ns"`
