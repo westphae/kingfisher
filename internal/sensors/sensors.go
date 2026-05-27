@@ -113,6 +113,14 @@ func (r *iioReader) WritableAttr(ch, attr string) bool {
 	return info.Mode().Perm()&0o220 != 0
 }
 
+func (r *iioReader) hasPath(rel string) bool {
+	if r.path == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(r.path, rel))
+	return err == nil
+}
+
 // Open discovers everything iio.Discover sees and returns one Reader per
 // device. Errors opening individual devices are logged and skipped.
 // iio.OpenPath does not populate the device name on the handle (only Addr),

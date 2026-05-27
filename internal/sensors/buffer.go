@@ -22,7 +22,6 @@ const (
 	minBufferLength     = 8
 )
 
-
 func (r *iioReader) bufferChannels() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -163,16 +162,27 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		hz = 10
 	}
 	tname := triggerName(name)
-	trig, err := iio.EnsureHRTimer(tname, hz)
-	if err != nil {
-		log.Printf("sensors: %s: buffer trigger: %v — using polled reads", name, err)
-		runOne(ctx, r, name, holder, hub, buf, st, reg)
-		return
+	bindTrigger := r.hasPath("trigger/current_trigger")
+	var (
+		trig        *iio.HRTrigger
+		triggerName string
+		err         error
+	)
+	if bindTrigger {
+		trig, err = iio.EnsureHRTimer(tname, hz)
+		if err != nil {
+			log.Printf("sensors: %s: buffer trigger: %v — using polled reads", name, err)
+			runOne(ctx, r, name, holder, hub, buf, st, reg)
+			return
+		}
+		triggerName = trig.Name()
+		defer releaseHRTimer(trig)
+	} else {
+		log.Printf("sensors: %s: no trigger/current_trigger; trying device-native buffer", name)
 	}
-	defer releaseHRTimer(trig)
 
 	blen := bufferLengthForHz(effectiveHz)
-	iobuf, err := r.openIIOBuffer(chans, blen, trig.Name())
+	iobuf, err := r.openIIOBuffer(chans, blen, triggerName)
 	if err != nil {
 		log.Printf("sensors: %s: open buffer: %v — using polled reads", name, err)
 		runOne(ctx, r, name, holder, hub, buf, st, reg)
@@ -181,8 +191,12 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 	defer iobuf.Close()
 
 	clock := iobuf.TimestampClock()
+	triggerLabel := triggerName
+	if triggerLabel == "" {
+		triggerLabel = "device-native"
+	}
 	log.Printf("sensors: %s: IIO buffer %d frames @ %d Hz (trigger %s, clock %q, channels %v)",
-		name, blen, hz, tname, clock, chans)
+		name, blen, hz, triggerLabel, clock, chans)
 
 	reload := holder.Subscribe()
 	colMap := buildColumnMap(filterDataChannels(chans), dev.Channels)
@@ -192,7 +206,10 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 	readBatch := 1
 	recs := make([]iio.Record, readBatch)
 
-	var consecutiveStalls int
+	var (
+		consecutiveStalls int
+		fallbackToPolled  bool
+	)
 
 	restartCapture := func(newDev config.Device) bool {
 		_ = iobuf.Close()
@@ -208,13 +225,15 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		if newHz <= 0 {
 			newHz = 10
 		}
-		if err := trig.SetFrequency(newHz); err != nil {
-			log.Printf("sensors: %s: set trigger %d Hz: %v", name, newHz, err)
+		if trig != nil {
+			if err := trig.SetFrequency(newHz); err != nil {
+				log.Printf("sensors: %s: set trigger %d Hz: %v", name, newHz, err)
+			}
 		}
 		hz = newHz
 		blen = bufferLengthForHz(effectiveHz)
 		var err error
-		iobuf, err = r.openIIOBuffer(chans, blen, trig.Name())
+		iobuf, err = r.openIIOBuffer(chans, blen, triggerName)
 		if err != nil {
 			log.Printf("sensors: %s: reopen buffer @ %d Hz: %v", name, hz, err)
 			return false
@@ -233,6 +252,11 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		}
 		consecutiveStalls++
 		if consecutiveStalls >= 3 {
+			if !bindTrigger {
+				log.Printf("sensors: %s: device-native buffer stalled (%v) — using polled reads", name, err)
+				fallbackToPolled = true
+				return false, true
+			}
 			log.Printf("sensors: %s: buffer stalled (%v) — restarting capture", name, err)
 			consecutiveStalls = 0
 			return restartCapture(dev), false
@@ -293,6 +317,10 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 			if avail, aerr := r.bufferBytesAvailable(); aerr != nil || avail < frame {
 				retry, stop := handleStall(context.DeadlineExceeded)
 				if stop {
+					if fallbackToPolled {
+						_ = iobuf.Close()
+						runOne(ctx, r, name, holder, hub, buf, st, reg)
+					}
 					return
 				}
 				if retry {
@@ -308,6 +336,10 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		if err != nil {
 			retry, stop := handleStall(err)
 			if stop {
+				if fallbackToPolled {
+					_ = iobuf.Close()
+					runOne(ctx, r, name, holder, hub, buf, st, reg)
+				}
 				return
 			}
 			if retry {
@@ -341,6 +373,10 @@ func filterDataChannels(chans []string) []string {
 	return out
 }
 
+// sampleTimeNs preserves kernel capture time when the driver timestamps the
+// buffer on CLOCK_REALTIME. That is the preferred path once the Pi wall clock
+// is GNSS-disciplined. If the driver exposes only a raw timestamp counter, or
+// no timestamp at all, we fall back to that value or finally to time.Now().
 func sampleTimeNs(rec iio.Record, clock string) int64 {
 	if clock == "realtime" && !rec.Time.IsZero() {
 		return rec.Time.UnixNano()
@@ -350,4 +386,3 @@ func sampleTimeNs(rec iio.Record, clock string) int64 {
 	}
 	return time.Now().UnixNano()
 }
-
