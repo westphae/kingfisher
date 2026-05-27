@@ -1,0 +1,15 @@
+# /etc/default/gpsd example for kingfisher on Raspberry Pi 5.
+
+START_DAEMON="true"
+USBAUTO="false"
+
+# Pi 5 header UART on GPIO 14/15.
+DEVICES="/dev/ttyAMA0"
+
+# -n: start polling immediately so chrony can see time without a UI client.
+# -b: keep gpsd read-only so it does not reconfigure the M9N.
+# -s 115200: required when the receiver UART is saved at 115200; with -b gpsd
+# will not autobaud and otherwise defaults to 19200 (no fix, silent failure).
+GPSD_OPTIONS="-n -b -s 115200"
+
+GPSD_SOCKET="/var/run/gpsd.sock"

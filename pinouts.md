@@ -10,6 +10,7 @@ A Raspberry Pi-based project to gather sensor data for improving flight performa
 | 5 SCL (GPIO 3) | 6  GND           |
 | 7              | 8  TXD (GPIO 14) |
 | 9 GND          | 10 RXD (GPIO 15) |
+| 11             | 12 PPS (GPIO 18) |
 -------------------------------------
 
 ## GPS Pinout
@@ -25,6 +26,7 @@ A Raspberry Pi-based project to gather sensor data for improving flight performa
 
 ### Notes:
 * Enable UART0 (GPIO 14/15) on RPI5 with `/boot/firmware/config.txt: dtoverlay=uart0-pi5`
+* Reserve GPIO 18 (physical pin 12) as the preferred future PPS input with `dtoverlay=pps-gpio,gpiopin=18`
 
 ## ICM45686 Pinout
 -------

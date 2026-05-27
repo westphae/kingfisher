@@ -1,0 +1,22 @@
+# Kingfisher UART-only GNSS discipline example.
+# Merge this into /etc/chrony/chrony.conf or /etc/chrony.conf as appropriate.
+#
+# Boot policy: allow a few early steps, then slew only.
+makestep 1.0 3
+rtcsync
+
+# Optional: enable when the Pi has reliable internet and you want NTP as well.
+# While pool sources are reachable, chrony may ignore a mis-tuned GPS refclock.
+# For offline-first flight recording, leave this commented out.
+#pool pool.ntp.org iburst
+
+# gpsd serial-time SOCK for /dev/ttyAMA0.
+# Recent gpsd uses chrony.clk.<device>.sock for serial time and chrony.<pps>.sock
+# for PPS time.
+#
+# Tune offset with `chronyc sourcestats` after gpsd has a 3D fix: if GPS shows
+# about +440ms, try offset -0.44 (sign is added to the gpsd timestamp).
+refclock SOCK /run/chrony.clk.ttyAMA0.sock refid GPS precision 1e-1 offset -0.44 delay 0.1
+
+# Future PPS follow-on for GPIO 18 -> /dev/pps0:
+# refclock SOCK /run/chrony.pps0.sock refid PPS precision 1e-7 lock GPS

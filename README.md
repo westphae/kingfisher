@@ -27,6 +27,9 @@ side) for the implementation.
 The `NEO-M9N` is wired to the Pi 5's GPIO UART (GPIO 14/15, header pins
 8/10), enabled by `dtoverlay=uart0-pi5` in `/boot/firmware/config.txt`.
 
+Kingfisher assumes the host wall clock is already sane. For offline operation,
+discipline the Pi with `gpsd` + `chrony` first; see `docs/time-sync.md`.
+
 **Pi 5 gotcha:** that UART is `/dev/ttyAMA0`, *not* `/dev/serial0`. On a
 Pi 5 `/dev/serial0` points at the dedicated 3-pin debug-UART connector
 (`ttyAMA10`), so gpsd must be told to use `/dev/ttyAMA0`. In
@@ -34,14 +37,22 @@ Pi 5 `/dev/serial0` points at the dedicated 3-pin debug-UART connector
 
 ```
 DEVICES="/dev/ttyAMA0"
-GPSD_OPTIONS="-n -b"
+GPSD_OPTIONS="-n -b -s 115200"
 ```
 
-The `-b` (read-only) flag is deliberate. Left to manage the receiver,
+The `-b` (read-only) flag is deliberate. If you configured the M9N for 115200 baud
+(saved to flash), you must also pass `-s 115200`; with `-b`, gpsd will not autobaud
+and otherwise opens the port at 19200, which produces no fix and no TPV output. Left to manage the receiver,
 gpsd subscribes a heavy set of UBX messages (NAV-SAT/SIG/POSECEF/…) that
 saturate the link and drop the effective fix rate. Read-only keeps the
 lean NAV-PVT-only stream the receiver is configured to emit, so we get a
 clean 10 Hz.
+
+For time discipline, prefer chrony's SOCK integration over SHM and keep
+`chronyd` ahead of `gpsd` in the service order. The repo-owned examples live in
+`deploy/time-sync/`. For UART-only serial time, tune the chrony `offset` for
+your receiver; do not copy the large `0.9999` placeholder from old gpsd examples
+verbatim.
 
 The receiver itself is configured once with `ubxtool` and the settings
 are saved to its flash (they survive power-off). With gpsd running:
@@ -88,3 +99,8 @@ toolchain, and flashing steps.
 
 The cockpit UI is served on `:8080` by default. Configuration lives in
 `~/.config/kingfisher/config.json`.
+
+If you want DB filenames, session start times, and buffered IIO timestamps to be
+meaningful immediately after boot, start kingfisher only after GNSS time sync is
+healthy. `docs/time-sync.md` includes a `chronyc waitsync` systemd pattern and a
+verification checklist.
