@@ -10,6 +10,9 @@ const state = {
   deviceLocation: new Map(),   // name -> "hub" | "pod"
   iioDevices: new Set(),       // kernel IIO names (per-tab sample_hz in Settings)
   podLink: null,               // latest /api/status pod object
+  clock: null,                 // latest /api/status clock object
+  serverConnected: false,      // kingfisher reachable (ws or /api/status)
+  paused: false,
 };
 
 const tabsEl = document.getElementById('tabs');
@@ -249,6 +252,64 @@ function renderPodStatus() {
     `<span class="podStatusItem"><span class="lbl">Batt</span> ${escapeHtml(battText)}</span>`;
 }
 
+function clockStateLabel(clock) {
+  switch (clock?.state) {
+    case 'aligned': return 'Clock OK';
+    case 'offset_high': return 'Clock skew high';
+    case 'stale_fix': return 'GPS time stale';
+    case 'waiting_for_fix': return 'Waiting for GPS time';
+    default: return 'Clock unknown';
+  }
+}
+
+function formatClockOffset(ms) {
+  if (!Number.isFinite(ms)) return '—';
+  const sign = ms >= 0 ? '+' : '-';
+  const abs = Math.abs(ms);
+  if (abs >= 1000) return `${sign}${(abs / 1000).toFixed(2)} s`;
+  if (abs >= 100) return `${sign}${abs.toFixed(0)} ms`;
+  return `${sign}${abs.toFixed(1)} ms`;
+}
+
+function formatAgeSeconds(sec) {
+  if (!Number.isFinite(sec)) return '—';
+  if (sec >= 10) return `${sec.toFixed(0)} s`;
+  if (sec >= 1) return `${sec.toFixed(1)} s`;
+  return `${sec.toFixed(2)} s`;
+}
+
+function renderClockStatus() {
+  const el = document.getElementById('clockStatus');
+  if (!el) return;
+  const c = state.clock;
+  if (!c) {
+    el.hidden = true;
+    el.innerHTML = '';
+    return;
+  }
+  el.hidden = false;
+  const cls = c.disciplined && !c.startup_fallback
+    ? 'ok'
+    : (c.state === 'waiting_for_fix' ? 'off' : 'warn');
+  el.className = `clockStatus clockStatus-${cls}`;
+  const parts = [
+    `<span class="clockStatusItem"><span class="lbl">Clock</span> ${escapeHtml(clockStateLabel(c))}</span>`,
+  ];
+  if (Number.isFinite(c.skew_ms)) {
+    parts.push(`<span class="clockStatusItem"><span class="lbl">Skew</span> ${escapeHtml(formatClockOffset(c.skew_ms))}</span>`);
+  } else if (Number.isFinite(c.offset_ms)) {
+    parts.push(`<span class="clockStatusItem"><span class="lbl">Lag</span> ${escapeHtml(formatClockOffset(c.offset_ms))}</span>`);
+  }
+  if (Number.isFinite(c.fix_age_s)) {
+    parts.push(`<span class="clockStatusItem"><span class="lbl">Fix age</span> ${escapeHtml(formatAgeSeconds(c.fix_age_s))}</span>`);
+  }
+  if (c.startup_fallback) {
+    parts.push('<span class="clockStatusItem"><span class="lbl">Startup</span> local wall time</span>');
+  }
+  el.title = c.startup_reason || '';
+  el.innerHTML = parts.join('');
+}
+
 function renderActiveTab() {
   renderLiveValues();
   renderAttrs();
@@ -316,7 +377,12 @@ function fmt(v) {
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => {
+    setServerConnected(true);
+    refreshStatus();
+  };
   ws.onmessage = (ev) => {
+    setServerConnected(true);
     let snap;
     try { snap = JSON.parse(ev.data); } catch { return; }
     if (!snap || !snap.devices) return;
@@ -329,25 +395,60 @@ function connect() {
     }
     renderLiveValues();
   };
-  ws.onclose = () => setTimeout(connect, 1000);
+  ws.onerror = () => setServerConnected(false);
+  ws.onclose = () => {
+    setServerConnected(false);
+    setTimeout(connect, 1000);
+  };
 }
 
 const tailEl     = document.querySelector('#hdr .tail');
 const recDotEl   = document.getElementById('recDot');
 const recLabelEl = document.getElementById('recLabel');
+const recBlockEl = document.querySelector('#hdr .rec');
 const pauseBtn   = document.getElementById('pauseBtn');
+
+function setServerConnected(connected) {
+  if (state.serverConnected === connected) return;
+  state.serverConnected = connected;
+  updateRecordingUI();
+}
+
+function updateRecordingUI() {
+  if (!state.serverConnected) {
+    if (recBlockEl) recBlockEl.classList.add('rec-offline');
+    if (recDotEl) {
+      recDotEl.classList.remove('live', 'paused');
+      recDotEl.classList.add('offline');
+    }
+    if (recLabelEl) recLabelEl.textContent = 'OFFLINE';
+    if (pauseBtn) {
+      pauseBtn.disabled = true;
+      pauseBtn.title = 'Server unavailable';
+    }
+    return;
+  }
+  if (recBlockEl) recBlockEl.classList.remove('rec-offline');
+  if (recDotEl) recDotEl.classList.remove('offline');
+  if (pauseBtn) {
+    pauseBtn.disabled = false;
+    pauseBtn.textContent = state.paused ? '▶' : '⏸';
+    pauseBtn.title = state.paused ? 'Resume recording' : 'Pause recording';
+  }
+  if (recDotEl) {
+    recDotEl.classList.toggle('paused', state.paused);
+    recDotEl.classList.toggle('live', !state.paused);
+  }
+  if (recLabelEl) recLabelEl.textContent = state.paused ? 'PAUSED' : 'REC';
+}
 
 function setPausedUI(paused) {
   state.paused = paused;
-  if (recDotEl)   recDotEl.classList.toggle('paused', paused);
-  if (recLabelEl) recLabelEl.textContent = paused ? 'PAUSED' : 'REC';
-  if (pauseBtn) {
-    pauseBtn.textContent = paused ? '▶' : '⏸';
-    pauseBtn.title = paused ? 'Resume recording' : 'Pause recording';
-  }
+  updateRecordingUI();
 }
 
 pauseBtn.addEventListener('click', async () => {
+  if (!state.serverConnected) return;
   const next = !state.paused;
   try {
     const r = await fetch('/api/recording', {
@@ -373,7 +474,11 @@ function formatPodFooter(pod) {
 async function refreshStatus() {
   try {
     const r = await fetch('/api/status');
-    if (!r.ok) return;
+    if (!r.ok) {
+      setServerConnected(false);
+      return;
+    }
+    setServerConnected(true);
     const s = await r.json();
     if (s.db_size_bytes != null && dbEl) {
       let dbText = formatBytes(s.db_size_bytes);
@@ -393,8 +498,12 @@ async function refreshStatus() {
     if (s.aircraft && tailEl) tailEl.textContent = s.aircraft;
     if (typeof s.recording_paused === 'boolean') setPausedUI(s.recording_paused);
     state.podLink = s.pod || null;
+    state.clock = s.clock || null;
+    renderClockStatus();
     renderPodStatus();
-  } catch {}
+  } catch {
+    setServerConnected(false);
+  }
 }
 
 let locationsPreloaded = false;
@@ -465,6 +574,7 @@ document.getElementById('cfgSave').addEventListener('click', async (e) => {
 });
 
 (async function init() {
+  updateRecordingUI();
   if (window.KF_INITIAL_DEVICES) {
     for (const d of window.KF_INITIAL_DEVICES) ensureTab(d);
   }

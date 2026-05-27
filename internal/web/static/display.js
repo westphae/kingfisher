@@ -11,6 +11,7 @@ const KFDisplay = (function () {
   const GPS_ACCURACY = new Set(['h_acc', 'v_acc', 'gs_acc', 'vs_acc', 'track_acc']);
 
   const GPS_SORT = [
+    'fix_time_unix_s',
     'lat', 'lon', 'h_acc',
     'alt_msl', 'v_acc',
     'gs', 'gs_acc',
@@ -137,7 +138,23 @@ const KFDisplay = (function () {
     return { x: 'X', y: 'Y', z: 'Z' }[a] || a.toUpperCase();
   }
 
+  function fmtGpsTimeUTC(unixS) {
+    const d = new Date(unixS * 1000);
+    if (!Number.isFinite(unixS) || Number.isNaN(d.getTime())) return '—';
+    const y = d.getUTCFullYear();
+    const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    const h = String(d.getUTCHours()).padStart(2, '0');
+    const m = String(d.getUTCMinutes()).padStart(2, '0');
+    const s = String(d.getUTCSeconds()).padStart(2, '0');
+    return `${y}-${mo}-${day} ${h}:${m}:${s} UTC`;
+  }
+
   const GPS_SPECS = {
+    fix_time_unix_s: {
+      label: 'GPS time',
+      fmt(v) { return fmtGpsTimeUTC(v); },
+    },
     lat: {
       label: 'Latitude',
       fmt(v) { return `${v.toFixed(6)}°`; },

@@ -5,7 +5,7 @@
 //	GET  /ws          — WebSocket; pushes live.Hub snapshots every 100ms.
 //	GET  /api/config  — current config JSON.
 //	POST /api/config  — replace config; persists to disk + signals reload.
-//	GET  /api/status  — DB path, size, buffered rows, GPS fix state.
+//	GET  /api/status  — DB path, size, buffered rows, GPS fix state, clock health.
 package web
 
 import (
@@ -200,7 +200,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.gps != nil {
 		fix := s.gps.LastFix()
-		st["gps"] = map[string]any{
+		gpsView := map[string]any{
 			"has_fix": fix.HasFix,
 			"mode":    fix.Mode,
 			"sats":    fix.SatsInUse,
@@ -208,6 +208,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"lon":     fix.Lon,
 			"alt_msl": fix.AltMSL,
 		}
+		if !fix.Time.IsZero() {
+			gpsView["fix_time_utc"] = fix.Time.UTC().Format(time.RFC3339Nano)
+		}
+		st["gps"] = gpsView
+		st["clock"] = clockStatusView(s.gps.ClockStatus())
 	}
 	if s.pod != nil {
 		st["pod"] = s.pod.LinkStats()
@@ -552,4 +557,35 @@ func writeJSON(w http.ResponseWriter, v any) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(v)
+}
+
+func clockStatusView(st gps.ClockStatus) map[string]any {
+	out := map[string]any{
+		"state":            st.State,
+		"has_fix":          st.HasFix,
+		"fresh":            st.Fresh,
+		"disciplined":      st.Disciplined,
+		"startup_fallback": st.StartupCheck.Fallback,
+		"startup_state":    st.StartupCheck.State,
+	}
+	if !st.FixTime.IsZero() {
+		out["fix_time_utc"] = st.FixTime.UTC().Format(time.RFC3339Nano)
+		out["fix_age_s"] = st.FixAge.Seconds()
+		out["offset_ms"] = float64(st.Offset) / float64(time.Millisecond)
+		out["fix_epoch_lag_ms"] = float64(st.Offset) / float64(time.Millisecond)
+		if st.Baseline != 0 {
+			out["baseline_lag_ms"] = float64(st.Baseline) / float64(time.Millisecond)
+		}
+		out["skew_ms"] = float64(st.Skew) / float64(time.Millisecond)
+	}
+	if !st.StartupCheck.CheckedAt.IsZero() {
+		out["startup_checked_at_utc"] = st.StartupCheck.CheckedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if st.StartupCheck.Reason != "" {
+		out["startup_reason"] = st.StartupCheck.Reason
+	}
+	if st.StartupCheck.HasFix {
+		out["startup_offset_ms"] = float64(st.StartupCheck.Offset) / float64(time.Millisecond)
+	}
+	return out
 }
