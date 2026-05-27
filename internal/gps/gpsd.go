@@ -1,7 +1,12 @@
-// Package gps connects to gpsd over TCP and emits live.Samples on the
-// "gps" virtual device. Each TPV report becomes one sample. Satellite count
-// comes from SKY when gpsd emits it, otherwise from UBX NAV-PVT on a raw
-// side channel (u-blox native binary mode often omits SKY).
+// Package gps connects to gpsd over TCP and emits live.Samples on the "gps"
+// virtual device. Each TPV report becomes one sample. Satellite count comes
+// from SKY when gpsd emits it, otherwise from UBX NAV-PVT on a raw side
+// channel (u-blox native binary mode often omits SKY).
+//
+// Timestamp contract: gps.Fix.Time keeps the GNSS fix epoch reported by gpsd,
+// but emitted live.Sample TsNs stays on the host wall clock (`time.Now()`) so
+// GPS rows share the same disciplined CLOCK_REALTIME time base as buffered IIO,
+// pod-reconstructed samples, and derived streams.
 package gps
 
 import (
@@ -52,10 +57,15 @@ type Client struct {
 	fix      Fix
 	sats     atomic.Int32 // running last-known SKY count
 	lastEmit time.Time    // last TPV passed through; only touched in onTPV
+
+	lastTPVWall   time.Time
+	lastTPVOffset time.Duration
+	startupCheck  StartupClockCheck
+	offsetHist    offsetTracker
 }
 
-func New(addr string, hub *live.Hub, buf *store.Buffer, rateHz func() float64) *Client {
-	return &Client{addr: addr, hub: hub, buf: buf, rateHz: rateHz}
+func New(addr string, hub *live.Hub, buf *store.Buffer, rateHz func() float64, startup StartupClockCheck) *Client {
+	return &Client{addr: addr, hub: hub, buf: buf, rateHz: rateHz, startupCheck: startup}
 }
 
 // LastFix returns the most recent fix; HasFix is false if no TPV has been
@@ -64,6 +74,24 @@ func (c *Client) LastFix() Fix {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.fix
+}
+
+// ClockStatus returns the current Pi-vs-GPS wall-clock assessment used by the
+// cockpit header and /api/status. Offset is recv-time minus fix epoch (often
+// hundreds of ms from receiver/pipeline lag). Skew is offset minus a running
+// median baseline and reflects true wall-clock error once the baseline settles.
+func (c *Client) ClockStatus() ClockStatus {
+	c.mu.RLock()
+	fix := c.fix
+	lastTPVWall := c.lastTPVWall
+	lastTPVOffset := c.lastTPVOffset
+	startup := c.startupCheck
+	c.mu.RUnlock()
+
+	baseline, skew, ready := c.offsetHist.baselineAndSkew(lastTPVOffset)
+	st := classifyClock(fix.HasFix, fix.Time, lastTPVWall, lastTPVOffset, baseline, skew, ready)
+	st.StartupCheck = startup
+	return st
 }
 
 // Run dials gpsd, watches for reports, and republishes them as live.Samples.
@@ -147,6 +175,7 @@ func (c *Client) onTPV(r *gpsd.TPVReport) {
 	if c.skipForRate() {
 		return
 	}
+	recvWall := time.Now()
 	hasFix := r.Mode >= gpsd.Mode2D
 	c.mu.Lock()
 	c.fix = Fix{
@@ -167,6 +196,12 @@ func (c *Client) onTPV(r *gpsd.TPVReport) {
 		SatsInUse: int(c.sats.Load()),
 		Sats:      int(c.sats.Load()),
 	}
+	c.lastTPVWall = recvWall
+	c.lastTPVOffset = 0
+	if !r.Time.IsZero() {
+		c.lastTPVOffset = recvWall.Sub(r.Time)
+		c.offsetHist.add(c.lastTPVOffset)
+	}
 	c.mu.Unlock()
 
 	values := map[string]float64{
@@ -184,13 +219,17 @@ func (c *Client) onTPV(r *gpsd.TPVReport) {
 		"fix":       float64(r.Mode),
 		"sats":      float64(c.sats.Load()),
 	}
+	if !r.Time.IsZero() {
+		// GNSS fix epoch for display/logging; sample TsNs stays on host wall clock.
+		values["fix_time_unix_s"] = float64(r.Time.UnixNano()) / 1e9
+	}
 	// gpsd sometimes omits fields; drop NaN to avoid polluting SQLite.
 	for k, v := range values {
 		if math.IsNaN(v) {
 			delete(values, k)
 		}
 	}
-	sm := live.Sample{Device: "gps", TsNs: time.Now().UnixNano(), Values: values}
+	sm := live.Sample{Device: "gps", TsNs: recvWall.UnixNano(), Values: values}
 	c.hub.Publish(sm)
 	if c.buf != nil {
 		c.buf.Append(sm)

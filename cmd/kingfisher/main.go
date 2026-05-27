@@ -6,9 +6,11 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -35,12 +37,36 @@ func main() {
 	}
 	holder := config.NewHolder(*cfgPath, cfg)
 
+	startupClock := gps.ProbeStartupClock(context.Background(), cfg.GPSDAddr)
+	if startupClock.Fallback {
+		log.Printf("clock: startup fell back to local wall time: %s", startupClock.Summary())
+	} else {
+		log.Printf("clock: startup assessment: %s", startupClock.Summary())
+	}
+
 	st, err := store.Open(cfg.DBDir, cfg.Aircraft)
 	if err != nil {
 		log.Fatalf("store: %v", err)
 	}
 	defer st.Close()
 	log.Printf("kingfisher v%s flight DB: %s", version, st.Path())
+	if err := st.SetMeta("clock_startup_state", startupClock.State); err != nil {
+		log.Printf("store: clock_startup_state: %v", err)
+	}
+	if err := st.SetMeta("clock_startup_fallback", strconv.FormatBool(startupClock.Fallback)); err != nil {
+		log.Printf("store: clock_startup_fallback: %v", err)
+	}
+	if startupClock.Reason != "" {
+		if err := st.SetMeta("clock_startup_reason", startupClock.Reason); err != nil {
+			log.Printf("store: clock_startup_reason: %v", err)
+		}
+	}
+	if startupClock.HasFix {
+		offsetMs := fmt.Sprintf("%.1f", float64(startupClock.Offset)/float64(time.Millisecond))
+		if err := st.SetMeta("clock_startup_offset_ms", offsetMs); err != nil {
+			log.Printf("store: clock_startup_offset_ms: %v", err)
+		}
+	}
 	if err := st.WriteSession(cfg.Aircraft, cfg.AircraftName, cfg.Notes, version); err != nil {
 		log.Printf("store: write session: %v", err)
 	}
@@ -62,7 +88,7 @@ func main() {
 
 	registry := sensors.NewRegistry()
 
-	gpsClient := gps.New(cfg.GPSDAddr, hub, buf, func() float64 { return holder.Get().GPS.RateHz })
+	gpsClient := gps.New(cfg.GPSDAddr, hub, buf, func() float64 { return holder.Get().GPS.RateHz }, startupClock)
 
 	var podClient *pod.Client
 	podAddr := cfg.PodListenAddr()
