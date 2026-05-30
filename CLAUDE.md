@@ -15,7 +15,7 @@ The Pi this repo lives on is also the *deployment target*. Tests can hit real sy
 - `internal/sensors/` — IIO discovery + per-device polling. The `Reader` interface defined here is the contract; `Registry` is what the web `/api/devices/*/attrs` endpoint talks to.
 - `internal/gps/gpsd.go` — out-of-process TCP source publishing under virtual device name `gps`. The canonical pattern for any non-IIO data source.
 - `internal/pod/` — wing-pod ingest over UDP. Mirrors the `gps` shape but adds a `podReader` registered with `sensors.Registry` so the existing attr UI works. Data path bypasses `sensors.runOne` — Reader is a façade for the UI only.
-- `internal/derive/{altitude,declination,ahrs}.go` — virtual devices computed from hub snapshots. Each reads `hub.SnapshotNow()` and republishes a synthesized sample.
+- `internal/derive/{altitude,declination,ahrs,compass}.go` — virtual devices computed from hub snapshots. `compass` runs magkal's per-axis EKF on a selectable magnetometer, compares measured field to WMM `geo`, and publishes heading after align (manual or GPS track while taxiing 2–40 kt). For **pod mag + cabin IMU**, use `compass.align_method: "wmm"`: align maps pod `magCal` to the WMM field in the vehicle frame (cabin AHRS/accel attitude + magnetic heading). After align, measured `field_*_nt` / `inclination` use **WMM NED direction** (`geo`) with **magnitude** from the aligned mag so the compare table matches `geo` when calibration is good. Single-IMU setups keep `"accel"` (gravity + mag). Optional `pod_mount_r` is a fixed pod→fuselage rotation when the pod axis frame ≠ cabin (identity when unset).
 - `pod_wire/` — shared Rust no_std crate defining the pod ↔ Pi wire format (`postcard` + CRC32 framing). The Go side mirrors it in `internal/pod/wire/`.
 - `firmware/pod/` — ESP32-C3 firmware (Phase 4: optional I²C sensors, Cmd/Ack SetRate, Ping/Pong, gated Hello, dynamic caps, Status). Pod sampling rates persist in `config.json` (`pod.attrs`) and are reapplied by `internal/pod` on Pi restart / Hello.
 - `datasheets/` — gitignored local working files. Don't expect them in CI.
@@ -26,6 +26,7 @@ The Pi this repo lives on is also the *deployment target*. Tests can hit real sy
 replace github.com/westphae/go-iio => ../go-iio
 replace github.com/westphae/goflying => ../goflying
 replace github.com/westphae/geomag => ../geomag
+replace github.com/westphae/magkal => ../magkal
 ```
 
 These resolve to sibling directories at `$GOPATH/src/github.com/westphae/{go-iio,goflying,geomag}`. If you see import errors, those siblings are probably missing or unbuilt — fix the checkout, don't drop the replace.
@@ -77,7 +78,7 @@ Plan files live under `~/.claude/plans/` outside the repo.
 ## Project conventions worth knowing
 
 - Channel names in `Values` maps are the SQLite column names (after `store.Sanitize`). Use SI-friendly names with unit suffixes where helpful: `pressure_pa`, `temp_c`, `airspeed_dp_pa`, `mag_x_ut`. Angles on derived devices are plain `roll`/`pitch`/`yaw` (degrees). See `internal/units`.
-- Virtual devices that synthesize data publish under a stable name (`gps`, `pod`, `ahrs`, `press_alt`, `geo`). Adding a new one only requires `hub.Publish` calls and (optionally) `Registry` registration.
+- Virtual devices that synthesize data publish under a stable name (`gps`, `pod`, `ahrs`, `press_alt`, `geo`, `compass`). Adding a new one only requires `hub.Publish` calls and (optionally) `Registry` registration. The cockpit **compass** tab uses a custom panel (`static/compass.js`): SVG rose (needle length ∝ H), digital heading, model-vs-measured table alongside `geo`, and align method **WMM** vs **accel** in settings.
 - `chips.go` holds per-chip fallback attr tables. Don't add fallback entries for the pod — its caps are advertised at runtime via `wire.Hello`.
 - Flight DB: `_session` is written at startup; `metadata` now records startup clock-assessment keys such as `clock_startup_state`. `sensor_attrs` includes a `location` column (`hub`/`pod`) and logs attrs for all devices at startup/reload (`internal/pod/TODO.md` for future Hello chip-attr snapshot + `SetAttr` registers).
 
