@@ -37,7 +37,8 @@ body {
   border-bottom: 1px solid var(--border);
   font-size: 1rem;
 }
-#hdr .brand { font-weight: 700; color: var(--accent); }
+#hdr .brand { font-weight: 700; color: var(--accent); display: flex; align-items: center; gap: 0.45rem; }
+#hdr .brand-icon { display: block; flex-shrink: 0; }
 #hdr .clockStatus,
 #hdr .podStatus {
   display: flex;
@@ -328,3 +329,105 @@ dialog input, dialog textarea {
 .attrRow input:disabled { opacity: 0.5; }
 .attrRow .ro { color: var(--fg); font-variant: tabular-nums; }
 .dim { color: var(--dim); padding: 0.5rem 0.25rem; }
+
+/* Compass tab */
+.compass-instrument {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 0.5rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.compass-svg {
+  width: min(280px, 90vw);
+  height: auto;
+}
+.compass-dial {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 2;
+}
+.compass-tick {
+  stroke: var(--dim);
+  stroke-width: 1;
+}
+.compass-cardinal {
+  fill: var(--fg);
+  font-size: 14px;
+  font-weight: 600;
+}
+.compass-needle {
+  stroke: var(--rec);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.compass-needle-tail {
+  stroke: #8a9ab8;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+[data-compass-needle].compass-dim .compass-needle,
+[data-compass-needle].compass-dim .compass-needle-tail {
+  opacity: 0.55;
+}
+.compass-pivot {
+  fill: var(--accent);
+}
+.compass-digital {
+  text-align: center;
+  font-variant: tabular-nums;
+}
+.compass-heading-primary {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+.compass-heading-sub {
+  font-size: 0.95rem;
+  color: var(--dim);
+  margin-top: 0.25rem;
+}
+.compass-compare {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  font-variant: tabular-nums;
+  margin: 0.5rem 0;
+}
+.compass-compare th,
+.compass-compare td {
+  padding: 0.45rem 0.35rem;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+}
+.compass-compare th:first-child,
+.compass-compare td:first-child {
+  text-align: left;
+  color: var(--dim);
+  font-weight: normal;
+}
+.compass-compare thead th {
+  color: var(--dim);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.compass-compare .col-model { color: var(--fg); }
+.compass-compare .col-meas { color: var(--accent); }
+.compass-diag {
+  border-top: 1px solid var(--border);
+  margin-top: 0.5rem;
+  padding-top: 0.25rem;
+}
+#compassAlignMsg { min-height: 1.25rem; }
+.attrRow button {
+  background: var(--panel);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+  font: inherit;
+  cursor: pointer;
+}
+.attrRow button:active { opacity: 0.8; }

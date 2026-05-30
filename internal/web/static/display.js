@@ -38,6 +38,13 @@ const KFDisplay = (function () {
 
   const AHRS_SORT = ['roll', 'pitch', 'yaw', 'g_load', 'turn_rate_deg_s', 'slip_skid'];
 
+  const COMPASS_SORT = [
+    'heading_mag_deg', 'heading_true_deg', 'heading_sensor_deg',
+    'field_x_nt', 'field_y_nt', 'field_z_nt', 'field_h_nt', 'field_f_nt',
+    'declination', 'inclination',
+    'filter_mode', 'nis', 'converged', 'align_active',
+  ];
+
   const PRESS_ALT_SORT = [
     'pressure_alt_m', 'pressure_alt_ft',
     'indicated_alt_m', 'indicated_alt_ft',
@@ -347,6 +354,60 @@ const KFDisplay = (function () {
       turn_rate_deg_s: CHANNEL_SPECS.turn_rate_deg_s,
       g_load: CHANNEL_SPECS.g_load,
     },
+    compass: {
+      heading_mag_deg: {
+        label: 'Heading (magnetic)',
+        fmt(v) { return `${fmtNum(v, 1)}°`; },
+      },
+      heading_true_deg: {
+        label: 'Heading (true)',
+        fmt(v) { return `${fmtNum(v, 1)}°`; },
+      },
+      heading_sensor_deg: {
+        label: 'Heading (sensor)',
+        fmt(v) { return `${fmtNum(v, 1)}°`; },
+      },
+      field_x_nt: {
+        label: 'Field X (north)',
+        fmt(v) { return `${fmtNum(v / 1000, 2)} µT`; },
+      },
+      field_y_nt: {
+        label: 'Field Y (east)',
+        fmt(v) { return `${fmtNum(v / 1000, 2)} µT`; },
+      },
+      field_z_nt: {
+        label: 'Field Z (down)',
+        fmt(v) { return `${fmtNum(v / 1000, 2)} µT`; },
+      },
+      field_h_nt: {
+        label: 'Horizontal field',
+        fmt(v) { return `${fmtNum(v / 1000, 2)} µT`; },
+      },
+      field_f_nt: {
+        label: 'Total field',
+        fmt(v) { return `${fmtNum(v / 1000, 2)} µT`; },
+      },
+      inclination: {
+        label: 'Inclination (measured)',
+        fmt(v) { return `${fmtNum(v, 2)}°`; },
+      },
+      filter_mode: {
+        label: 'Filter mode',
+        fmt(v) { return Number(v) === 1 ? 'Locked' : 'Calibrating'; },
+      },
+      nis: {
+        label: 'NIS',
+        fmt(v) { return fmtNum(v, 3); },
+      },
+      converged: {
+        label: 'Converged',
+        fmt(v) { return Number(v) >= 1 ? 'yes' : 'no'; },
+      },
+      align_active: {
+        label: 'Aligned',
+        fmt(v) { return Number(v) >= 1 ? 'yes' : 'no'; },
+      },
+    },
     geo: {
       declination: {
         label: 'Magnetic declination',
@@ -548,6 +609,7 @@ const KFDisplay = (function () {
     if (device === 'gps') return sortWithOrder(keys, GPS_SORT);
     if (device === 'geo') return sortWithOrder(keys, GEO_SORT);
     if (device === 'ahrs') return sortWithOrder(keys, AHRS_SORT);
+    if (device === 'compass') return sortWithOrder(keys, COMPASS_SORT);
     if (device === 'press_alt') return sortWithOrder(keys, PRESS_ALT_SORT);
     const podOrder = POD_DEVICE_SORT[device];
     if (podOrder) return sortWithOrder(keys, podOrder);

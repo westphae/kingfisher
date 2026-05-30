@@ -13,6 +13,7 @@ const state = {
   clock: null,                 // latest /api/status clock object
   serverConnected: false,      // kingfisher reachable (ws or /api/status)
   paused: false,
+  config: null,                // last /api/config (compass settings)
 };
 
 const tabsEl = document.getElementById('tabs');
@@ -20,10 +21,12 @@ const panelEl = document.getElementById('panel');
 const bufEl   = document.getElementById('bufStat');
 const dbEl    = document.getElementById('dbSize');
 
-const DERIVED_DEVICES = ['ahrs', 'press_alt'];
+const DERIVED_DEVICES = ['ahrs', 'press_alt', 'compass'];
 // Wing-pod sensor tabs (matches pod.DefaultPodDeviceNames).
 const POD_TELEMETRY_DEVICES = new Set(['bmp581', 'mmc5983', 'ms4525']);
 const HUB_VIRTUAL_DEVICES = new Set(['gps', 'geo', ...DERIVED_DEVICES]);
+// Derived tabs use custom settings UI; skip /api/devices/.../attrs polling.
+const SKIP_ATTRS_FETCH = new Set(['compass', 'ahrs', 'geo', 'press_alt', 'gps']);
 
 function isPodTelemetry(name) {
   return state.deviceLocation.get(name) === 'pod';
@@ -100,10 +103,14 @@ function selectTab(name) {
     b.classList.toggle('active', b.dataset.tab === name);
   }
   // Reload pod/IIO attrs so rate fields stay current after edits or SetRate/ack.
-  if (isPodTelemetry(name) || state.iioDevices.has(name) || !state.attrs.has(name)) {
+  if (name === 'compass') {
+    if (!state.attrs.has('compass')) state.attrs.set('compass', []);
+  } else if (!SKIP_ATTRS_FETCH.has(name) &&
+    (isPodTelemetry(name) || state.iioDevices.has(name) || !state.attrs.has(name))) {
     loadAttrs(name);
   }
   renderActiveTab();
+  renderAttrs();
 }
 
 // Two-region panel: a live-values div (re-rendered on every WS tick) and
@@ -113,10 +120,12 @@ function selectTab(name) {
 function rebuildPanel() {
   panelEl.innerHTML =
     `<div id="liveKV"></div><div id="attrsBox"></div>`;
-  return {
+  const regions = {
     kv:    document.getElementById('liveKV'),
     attrs: document.getElementById('attrsBox'),
   };
+  regions.attrs.removeAttribute('data-compass-wired');
+  return regions;
 }
 let panelRegions = rebuildPanel();
 
@@ -149,6 +158,13 @@ function renderAttrs() {
   const loc = state.deviceLocation.get(name);
   const locLine = loc ? `<div class="dim">location: ${escapeHtml(loc)}</div>` : '';
   let html = `<section class="attrs"><h3>Settings</h3>${locLine}`;
+  if (name === 'compass') {
+    html += renderCompassSettings();
+    panelRegions.attrs.removeAttribute('data-compass-wired');
+    panelRegions.attrs.innerHTML = html + `</section>`;
+    wireCompassSettings();
+    return;
+  }
   if (!attrs) {
     html += `<div class="dim">(loading…)</div>`;
   } else if (attrs.length === 0) {
@@ -162,6 +178,143 @@ function renderAttrs() {
   html += `</section>`;
   panelRegions.attrs.innerHTML = html;
   wireAttrEdits(name);
+}
+
+function magDeviceOptions() {
+  const names = [...state.tabs].filter((n) => {
+    if (DERIVED_DEVICES.includes(n) || n === 'gps' || n === 'geo' || n === 'pod') return false;
+    const sm = state.devices.get(n);
+    if (!sm?.values) return false;
+    const keys = Object.keys(sm.values);
+    return keys.some((k) => /^magn_[xyz]$/.test(k) || /^mag_[xyz]_ut$/.test(k));
+  });
+  return names.sort();
+}
+
+function deviceHasAccelInState(name) {
+  if (!name) return false;
+  const v = state.devices.get(name)?.values;
+  if (!v) return false;
+  return v.accel_x != null && v.accel_y != null && v.accel_z != null;
+}
+
+function compassAlignMethodEffective() {
+  const cfg = state.config?.compass ?? {};
+  const sel = document.getElementById('compassAlignMethod');
+  const fromSel = sel?.value ?? '';
+  if (fromSel === 'wmm' || fromSel === 'accel') return fromSel;
+  if (cfg.align_method === 'wmm' || cfg.align_method === 'accel') return cfg.align_method;
+  const mag = cfg.magnetometer ?? '';
+  if (mag && !deviceHasAccelInState(mag)) return 'wmm';
+  return 'accel';
+}
+
+function compassAlignReadinessText(method) {
+  if (method === 'wmm') {
+    return 'WMM align needs GPS fix, geo field, and cabin AHRS or accel.';
+  }
+  return 'Accel align needs mag and accel on the same device (or set accel_device).';
+}
+
+function compassMountSummary() {
+  const cfg = state.config?.compass ?? {};
+  const mag = cfg.magnetometer ?? '';
+  if (!mag) return 'Sensor mount: auto (no fixed magnetometer selected)';
+  const map = cfg.sensor_mount_r ?? {};
+  if (map && map[mag]) return `Sensor mount (${mag}): from config sensor_mount_r`;
+  if (/^mmc5983/i.test(mag)) return `Sensor mount (${mag}): default provisional mmc5983 (z inverted)`;
+  return `Sensor mount (${mag}): default identity`;
+}
+
+function renderCompassSettings() {
+  const cfg = state.config?.compass ?? {};
+  const cur = cfg.magnetometer ?? '';
+  const alignCur = cfg.align_method ?? '';
+  const opts = magDeviceOptions();
+  let sel = `<option value="">(auto)</option>`;
+  for (const n of opts) {
+    sel += `<option value="${escapeAttr(n)}"${n === cur ? ' selected' : ''}>${escapeHtml(n)}</option>`;
+  }
+  const alignSel =
+    `<option value=""${alignCur === '' ? ' selected' : ''}>(auto)</option>` +
+    `<option value="wmm"${alignCur === 'wmm' ? ' selected' : ''}>WMM field + attitude</option>` +
+    `<option value="accel"${alignCur === 'accel' ? ' selected' : ''}>Gravity + mag (same IMU)</option>`;
+  const method = compassAlignMethodEffective();
+  return (
+    `<div class="attrRow"><div class="k">Magnetometer</div>` +
+    `<div class="v"><select id="compassMagSel">${sel}</select></div></div>` +
+    `<div class="attrRow"><div class="k">Align method</div>` +
+    `<div class="v"><select id="compassAlignMethod">${alignSel}</select></div></div>` +
+    `<div class="attrRow"><div class="k">Align</div><div class="v">` +
+    `<button type="button" id="compassAlignGps">GPS track (taxi)</button> ` +
+    `<button type="button" id="compassAlignManual">Manual °M</button> ` +
+    `<input id="compassManualHdg" type="number" step="0.1" min="-180" max="180" placeholder="°M" style="width:5em"/>` +
+    `</div></div>` +
+    `<div id="compassAlignHint" class="dim">${escapeHtml(compassAlignReadinessText(method))}</div>` +
+    `<div id="compassMountHint" class="dim">${escapeHtml(compassMountSummary())}</div>` +
+    `<div id="compassAlignMsg" class="dim"></div>`
+  );
+}
+
+function wireCompassSettings() {
+  if (panelRegions.attrs.dataset.compassWired === '1') return;
+  panelRegions.attrs.dataset.compassWired = '1';
+  const saveCompassCfg = async () => {
+    await loadConfig();
+    const cfg = state.config ?? {};
+    cfg.compass = cfg.compass ?? { enabled: true };
+    const magSel = document.getElementById('compassMagSel');
+    const alignSel = document.getElementById('compassAlignMethod');
+    if (magSel) cfg.compass.magnetometer = magSel.value;
+    if (alignSel) cfg.compass.align_method = alignSel.value;
+    const r = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg),
+    });
+    if (r.ok) state.config = await r.json();
+    const hint = document.getElementById('compassAlignHint');
+    if (hint) hint.textContent = compassAlignReadinessText(compassAlignMethodEffective());
+    const mountHint = document.getElementById('compassMountHint');
+    if (mountHint) mountHint.textContent = compassMountSummary();
+  };
+  const sel = document.getElementById('compassMagSel');
+  if (sel) sel.addEventListener('change', saveCompassCfg);
+  const alignMethodSel = document.getElementById('compassAlignMethod');
+  if (alignMethodSel) alignMethodSel.addEventListener('change', saveCompassCfg);
+  const gpsBtn = document.getElementById('compassAlignGps');
+  const manBtn = document.getElementById('compassAlignManual');
+  const msg = document.getElementById('compassAlignMsg');
+  const doAlign = async (body) => {
+    if (msg) msg.textContent = 'Aligning…';
+    const payload = { ...body, align_method: compassAlignMethodEffective() };
+    try {
+      const r = await fetch('/api/compass/align', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const t = await r.text();
+      if (!r.ok) throw new Error(t || r.statusText);
+      if (msg) msg.textContent = 'Alignment saved.';
+    } catch (e) {
+      if (msg) msg.textContent = String(e.message || e);
+    }
+  };
+  if (gpsBtn) {
+    gpsBtn.addEventListener('click', () => doAlign({ manual_heading_deg: null }));
+  }
+  if (manBtn) {
+    manBtn.addEventListener('click', () => {
+      const inp = document.getElementById('compassManualHdg');
+      const v = inp ? Number(inp.value) : NaN;
+      if (!Number.isFinite(v)) {
+        if (msg) msg.textContent = 'Enter a magnetic heading in degrees.';
+        return;
+      }
+      doAlign({ manual_heading_deg: v });
+    });
+  }
 }
 
 function attrLabel(device, a) {
@@ -311,8 +464,17 @@ function renderClockStatus() {
 }
 
 function renderActiveTab() {
-  renderLiveValues();
-  renderAttrs();
+  if (state.activeTab === 'compass') {
+    renderCompassPanel();
+  } else {
+    renderLiveValues();
+  }
+}
+
+function renderCompassPanel() {
+  const geo = state.devices.get('geo');
+  const compass = state.devices.get('compass');
+  KFCompass.renderPanel(panelRegions.kv, geo, compass, compassAlignMethodEffective());
 }
 
 function escapeAttr(s) { return String(s ?? '').replace(/"/g, '&quot;'); }
@@ -362,9 +524,13 @@ function applyAttrsResponse(name, body) {
 }
 
 async function loadAttrs(name) {
+  if (SKIP_ATTRS_FETCH.has(name)) return;
   try {
     const r = await fetch(`/api/devices/${encodeURIComponent(name)}/attrs`);
-    if (!r.ok) return;
+    if (!r.ok) {
+      state.attrs.set(name, []);
+      return;
+    }
     applyAttrsResponse(name, await r.json());
     if (state.activeTab === name) renderAttrs();
   } catch {}
@@ -389,11 +555,11 @@ function connect() {
     for (const [name, sample] of Object.entries(snap.devices)) {
       state.devices.set(name, sample);
       ensureTab(name);
-      if (state.activeTab === name && !state.attrs.has(name)) {
+      if (state.activeTab === name && !SKIP_ATTRS_FETCH.has(name) && !state.attrs.has(name)) {
         loadAttrs(name);
       }
     }
-    renderLiveValues();
+    renderActiveTab();
   };
   ws.onerror = () => setServerConnected(false);
   ws.onclose = () => {
@@ -573,8 +739,16 @@ document.getElementById('cfgSave').addEventListener('click', async (e) => {
   dlg.close();
 });
 
+async function loadConfig() {
+  try {
+    const r = await fetch('/api/config');
+    if (r.ok) state.config = await r.json();
+  } catch {}
+}
+
 (async function init() {
   updateRecordingUI();
+  await loadConfig();
   if (window.KF_INITIAL_DEVICES) {
     for (const d of window.KF_INITIAL_DEVICES) ensureTab(d);
   }

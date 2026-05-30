@@ -5,11 +5,12 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0b1320">
   <title>Kingfisher — {{.Aircraft}}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
   <header id="hdr">
-    <div class="brand">Kingfisher</div>
+    <div class="brand"><img class="brand-icon" src="/static/favicon.svg" width="22" height="22" alt=""> Kingfisher</div>
     <div id="clockStatus" class="clockStatus" hidden></div>
     <div id="podStatus" class="podStatus" hidden></div>
     <div class="tail">{{.Aircraft}}</div>
@@ -40,6 +41,7 @@
 
   <script>window.KF_INITIAL_DEVICES = {{.Devices}};</script>
   <script src="/static/display.js"></script>
+  <script src="/static/compass.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

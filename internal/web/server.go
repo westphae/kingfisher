@@ -6,6 +6,7 @@
 //	GET  /api/config  — current config JSON.
 //	POST /api/config  — replace config; persists to disk + signals reload.
 //	GET  /api/status  — DB path, size, buffered rows, GPS fix state, clock health.
+//	POST /api/compass/align — capture sensor→vehicle alignment (manual or GPS taxi).
 package web
 
 import (
@@ -24,6 +25,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/westphae/kingfisher/internal/config"
+	"github.com/westphae/kingfisher/internal/derive"
 	"github.com/westphae/kingfisher/internal/gps"
 	"github.com/westphae/kingfisher/internal/live"
 	"github.com/westphae/kingfisher/internal/location"
@@ -36,20 +38,21 @@ import (
 var assets embed.FS
 
 type Server struct {
-	cfg   *config.Holder
-	hub   *live.Hub
-	store *store.Store
-	buf   *store.Buffer
-	gps   *gps.Client
-	pod   *pod.Client
-	reg   *sensors.Registry
+	cfg     *config.Holder
+	hub     *live.Hub
+	store   *store.Store
+	buf     *store.Buffer
+	gps     *gps.Client
+	pod     *pod.Client
+	reg     *sensors.Registry
+	compass derive.CompassAligner
 
 	tpl     *template.Template
 	httpSrv *http.Server
 	up      websocket.Upgrader
 }
 
-func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, gpsc *gps.Client, podc *pod.Client, reg *sensors.Registry) (*Server, error) {
+func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, gpsc *gps.Client, podc *pod.Client, reg *sensors.Registry, compass derive.CompassAligner) (*Server, error) {
 	tpl, err := template.ParseFS(assets, "templates/*.html")
 	if err != nil {
 		return nil, err
@@ -61,9 +64,10 @@ func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, 
 		buf:   buf,
 		gps:   gpsc,
 		pod:   podc,
-		reg:   reg,
-		tpl:   tpl,
-		up:    websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
+		reg:     reg,
+		compass: compass,
+		tpl:     tpl,
+		up:      websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
 	}, nil
 }
 
@@ -77,6 +81,7 @@ func (s *Server) Run(addr string, stop <-chan struct{}) error {
 	mux.HandleFunc("/api/devices", s.handleDevices)
 	mux.HandleFunc("/api/devices/", s.handleDeviceSub)
 	mux.HandleFunc("/api/recording", s.handleRecording)
+	mux.HandleFunc("/api/compass/align", s.handleCompassAlign)
 
 	staticFS, err := fs.Sub(assets, "static")
 	if err != nil {
@@ -446,6 +451,35 @@ func (s *Server) persistGPSRate(value string) error {
 	cp.GPS = config.GPS{RateHz: hz}
 	s.cfg.Set(&cp)
 	return config.Save(s.cfg.Path(), &cp)
+}
+
+func (s *Server) handleCompassAlign(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.compass == nil {
+		http.Error(w, "compass not enabled", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		ManualHeadingDeg *float64 `json:"manual_heading_deg"`
+		AlignMethod      string   `json:"align_method,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	decl := 0.0
+	snap := s.hub.SnapshotNow()
+	if geo, ok := snap.Devices["geo"]; ok {
+		decl = geo.Values["declination"]
+	}
+	if err := s.compass.Align(body.ManualHeadingDeg, s.gps.LastFix(), decl, body.AlignMethod, snap); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
 }
 
 func (s *Server) persistPressAltKollsman(value string) error {
