@@ -102,11 +102,6 @@ func main() {
 		}
 	}
 
-	srv, err := web.New(holder, hub, st, buf, gpsClient, podClient, registry)
-	if err != nil {
-		log.Fatalf("web: %v", err)
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	stop := make(chan struct{})
 	go func() {
@@ -117,6 +112,16 @@ func main() {
 		cancel()
 		close(stop)
 	}()
+
+	var compassEngine *derive.Engine
+	if cfg.Compass.Enabled {
+		compassEngine = derive.CompassFromHub(ctx, holder, hub, gpsClient, buf)
+	}
+
+	srv, err := web.New(holder, hub, st, buf, gpsClient, podClient, registry, compassEngine)
+	if err != nil {
+		log.Fatalf("web: %v", err)
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(1)
