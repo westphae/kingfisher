@@ -8,12 +8,15 @@ replace github.com/westphae/goflying => ../goflying
 
 replace github.com/westphae/geomag => ../geomag
 
+replace github.com/westphae/magkal => ../magkal
+
 require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/stratoberry/go-gpsd v1.3.0
-	github.com/westphae/geomag v0.0.0-00010101000000-000000000000
+	github.com/westphae/geomag v1.2025.6
 	github.com/westphae/go-iio v0.2.0
-	github.com/westphae/goflying v0.0.0-00010101000000-000000000000
+	github.com/westphae/goflying v0.6.1
+	github.com/westphae/magkal v0.0.0-00010101000000-000000000000
 	modernc.org/sqlite v1.50.1
 )
 
