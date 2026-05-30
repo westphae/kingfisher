@@ -61,6 +61,106 @@ type AHRS struct {
 	RateHz  float64 `json:"rate_hz"`
 }
 
+// CompassKalman holds EKF parameters for magnetometer calibration (magkal).
+type CompassKalman struct {
+	SigmaK0      float64               `json:"sigma_k0,omitempty"`
+	SigmaK       float64               `json:"sigma_k,omitempty"`
+	SigmaM       float64               `json:"sigma_m,omitempty"`
+	MaxSigmaK    float64               `json:"max_sigma_k,omitempty"`
+	MaxSigmaL    float64               `json:"max_sigma_l,omitempty"`
+	StateMachine CompassStateMachine   `json:"state_machine,omitempty"`
+	// Debug enables magkal per-step EKF log lines (Innovation, Jacobian, gain, ...).
+	Debug bool `json:"debug,omitempty"`
+}
+
+// CompassStateMachine configures calibrate-then-lock (magkal).
+type CompassStateMachine struct {
+	Enabled        bool    `json:"enabled,omitempty"`
+	LockHysteresis int     `json:"lock_hysteresis,omitempty"`
+	NISWindow      int     `json:"nis_window,omitempty"`
+	NISThreshold   float64 `json:"nis_threshold,omitempty"`
+}
+
+// CompassCalibration persists k, l, and covariance from the EKF.
+type CompassCalibration struct {
+	K []float64   `json:"k,omitempty"`
+	L []float64   `json:"l,omitempty"`
+	P [][]float64 `json:"p,omitempty"`
+}
+
+// CompassAlign is the sensor→vehicle rotation captured at align time.
+type CompassAlign struct {
+	R                 [3][3]float64 `json:"r"`
+	AircraftToEarthR  [3][3]float64 `json:"aircraft_to_earth_r,omitempty"`
+	AlignHeadingDeg   float64       `json:"align_heading_deg"`
+	YawTrueDeg        float64       `json:"yaw_true_deg,omitempty"`
+}
+
+// Compass configures the derived compass virtual device.
+type Compass struct {
+	Enabled      bool               `json:"enabled"`
+	RateHz       float64            `json:"rate_hz"`
+	Magnetometer string             `json:"magnetometer,omitempty"`
+	AccelDevice  string             `json:"accel_device,omitempty"`
+	// AlignMethod is "wmm" (geomagnetic field + cabin attitude) or "accel"
+	// (gravity + mag on one device). Empty defaults from device layout at runtime.
+	AlignMethod string `json:"align_method,omitempty"`
+	// SensorMountR maps device name -> fixed sensor->aircraft rotation (FRD).
+	SensorMountR map[string][3][3]float64 `json:"sensor_mount_r,omitempty"`
+	// PodMountR is an optional fixed pod-sensor→fuselage rotation (identity when unset).
+	PodMountR    [3][3]float64         `json:"pod_mount_r,omitempty"`
+	N0Ut         float64               `json:"n0_ut,omitempty"`
+	TaxiMinKt    float64               `json:"taxi_min_kt,omitempty"`
+	TaxiMaxKt    float64               `json:"taxi_max_kt,omitempty"`
+	Kalman       CompassKalman         `json:"kalman,omitempty"`
+	Calibration  CompassCalibration    `json:"calibration,omitempty"`
+	Align        CompassAlign          `json:"align,omitempty"`
+}
+
+const (
+	DefaultCompassN0Ut     = 50.0
+	DefaultCompassTaxiMinKt = 2.0
+	DefaultCompassTaxiMaxKt = 40.0
+)
+
+// CompassKalmanDefaults returns simulation-tuned EKF defaults (µT-scale n0).
+func CompassKalmanDefaults() CompassKalman {
+	return CompassKalman{
+		SigmaK0:   0.25,
+		SigmaK:    1e-8,
+		SigmaM:    1e-3,
+		MaxSigmaK: 1e-2,
+		MaxSigmaL: 0.05, // 50 nT when n0 is in µT
+		StateMachine: CompassStateMachine{
+			Enabled:        false,
+			LockHysteresis: 10,
+			NISWindow:      100,
+			NISThreshold:   4.0,
+		},
+	}
+}
+
+func (c *Compass) TaxiMinKtOrDefault() float64 {
+	if c == nil || c.TaxiMinKt <= 0 {
+		return DefaultCompassTaxiMinKt
+	}
+	return c.TaxiMinKt
+}
+
+func (c *Compass) TaxiMaxKtOrDefault() float64 {
+	if c == nil || c.TaxiMaxKt <= 0 {
+		return DefaultCompassTaxiMaxKt
+	}
+	return c.TaxiMaxKt
+}
+
+func (c *Compass) N0UtOrDefault() float64 {
+	if c == nil || c.N0Ut <= 0 {
+		return DefaultCompassN0Ut
+	}
+	return c.N0Ut
+}
+
 const DefaultKollsmanInHg = 29.92
 
 // Pod holds wing-pod WiFi/UDP settings and persisted sensor attrs in
@@ -115,6 +215,7 @@ type Config struct {
 	GPS        GPS               `json:"gps"`
 	PressAlt   PressAlt          `json:"press_alt"`
 	AHRS       AHRS              `json:"ahrs"`
+	Compass    Compass           `json:"compass"`
 }
 
 func Defaults() *Config {
@@ -138,6 +239,13 @@ func Defaults() *Config {
 		GPS:      GPS{RateHz: 5},
 		PressAlt: PressAlt{KollsmanInHg: DefaultKollsmanInHg},
 		AHRS:     AHRS{Enabled: true, RateHz: 20},
+		Compass: Compass{
+			Enabled:      true,
+			RateHz:       10,
+			N0Ut:         DefaultCompassN0Ut,
+			Kalman:       CompassKalmanDefaults(),
+			SensorMountR: map[string][3][3]float64{},
+		},
 	}
 }
 
@@ -260,6 +368,9 @@ func Load(path string) (*Config, error) {
 		c.Devices = map[string]Device{}
 	}
 	migratePod(c)
+	MigrateCompassMounts(c)
+	ImportMagkalBestFit(&c.Compass)
+	MergeCompassKalman(&c.Compass.Kalman)
 	return c, nil
 }
 

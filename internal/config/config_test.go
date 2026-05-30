@@ -75,3 +75,32 @@ func TestKollsmanInHg_fallsBackWhenUnset(t *testing.T) {
 		t.Fatalf("KollsmanInHg()=%v want %v", got, DefaultKollsmanInHg)
 	}
 }
+
+func TestMigrateCompassMounts_FromLegacyPodMount(t *testing.T) {
+	c := Defaults()
+	c.Compass.Magnetometer = "mmc5983"
+	c.Compass.PodMountR = [3][3]float64{{1, 0, 0}, {0, 1, 0}, {0, 0, -1}}
+	c.Compass.SensorMountR = nil
+	MigrateCompassMounts(c)
+	got, ok := c.Compass.SensorMountR["mmc5983"]
+	if !ok {
+		t.Fatal("expected migrated sensor mount for mmc5983")
+	}
+	if got[2][2] != -1 {
+		t.Fatalf("migrated mount z,z=%v want -1", got[2][2])
+	}
+}
+
+func TestMigrateCompassMounts_DefaultForMagnetometer(t *testing.T) {
+	c := Defaults()
+	c.Compass.Magnetometer = "mmc5983"
+	c.Compass.SensorMountR = map[string][3][3]float64{}
+	MigrateCompassMounts(c)
+	got, ok := c.Compass.SensorMountR["mmc5983"]
+	if !ok {
+		t.Fatal("expected default sensor mount")
+	}
+	if got[2][2] != -1 {
+		t.Fatalf("default mmc5983 mount z,z=%v want -1", got[2][2])
+	}
+}
