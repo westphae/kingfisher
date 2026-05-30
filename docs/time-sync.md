@@ -8,77 +8,278 @@ derived-stream timestamps all assume the Pi wall clock is already sane.
 The intended deployment model is:
 
 1. `gpsd` reads the M9N on `/dev/ttyAMA0` in read-only mode.
-2. `chronyd` disciplines the Pi clock from gpsd over a Unix-domain SOCK refclock.
-3. Kingfisher starts after chrony is up, and reports live Pi-vs-GPS clock health.
+2. `chronyd` disciplines the Pi clock from gpsd over Unix-domain SOCK refclocks.
+3. With PPS wired, gpsd also feeds a PPS SOCK; chrony uses PPS for sub-second
+   discipline and the UART SOCK for time-of-day (`lock GPS`).
+4. Kingfisher starts after chrony is healthy and reports live Pi-vs-GPS clock
+   health in the cockpit header.
 
-## UART-Only Setup
+Repo-owned starting points live in `deploy/time-sync/`:
 
-Pi 5 UART wiring stays on GPIO 14/15 (`/dev/ttyAMA0`). Use the repo-owned
-examples in `deploy/time-sync/` as the starting point:
+- `deploy/time-sync/gpsd.default.example` → `/etc/default/gpsd`
+- `deploy/time-sync/chrony.conf.example` → `/etc/chrony/chrony.conf`
+- `deploy/time-sync/99-pps-chrony.rules` → only if using kernel `refclock PPS`
+  (not recommended here; see below)
+- `deploy/time-sync/verify.md` — post-install checklist
 
-- `deploy/time-sync/gpsd.default.example`
-- `deploy/time-sync/chrony.conf.example`
-- `deploy/time-sync/verify.md`
+## Hardware
 
-Install the services:
+| Signal | Pi 5 header | Device |
+|--------|-------------|--------|
+| M9N UART TX/RX | GPIO 14/15 | `/dev/ttyAMA0` |
+| M9N PPS out | GPIO 18 (physical pin 12) | `/dev/pps0` via `pps-gpio` overlay |
+
+PPS is optional for bring-up but recommended for flight recording accuracy.
+
+## 1. Install packages
 
 ```bash
 sudo apt install gpsd gpsd-clients chrony
+sudo apt install pps-tools    # optional; provides ppstest
 ```
 
-Copy the example gpsd defaults into `/etc/default/gpsd`, then ensure gpsd keeps
-the receiver read-only and opens the UART immediately:
+## 2. Configure gpsd
+
+Copy `deploy/time-sync/gpsd.default.example` into **`/etc/default/gpsd`**
+(or merge by hand):
 
 ```ini
-DEVICES="/dev/ttyAMA0"
-GPSD_OPTIONS="-n -b -s 115200"
+START_DAEMON="true"
 USBAUTO="false"
+
+# UART + PPS (omit /dev/pps0 for UART-only bring-up)
+DEVICES="/dev/ttyAMA0 /dev/pps0"
+
+GPSD_OPTIONS="-n -b -s 115200"
+GPSD_SOCKET="/var/run/gpsd.sock"
 ```
 
-- `-n` is important for time service; gpsd must be polling even when no client UI
-  is connected.
-- `-b` keeps gpsd from reconfiguring the receiver and preserves the lean
-  NAV-PVT stream used elsewhere in kingfisher.
-- `-s 115200` is required if the M9N UART baud was saved at 115200 (see README
+- **`-n`** — poll the receiver immediately (required for chrony without a UI client).
+- **`-b`** — read-only; preserves the lean u-blox binary stream kingfisher expects.
+- **`-s 115200`** — required when the M9N UART baud was saved at 115200 (see README
   GPS section). With `-b`, gpsd does not autobaud; without `-s` it stays at 19200
-  and you get no fix — `cgps` and kingfisher will look dead even though gpsd is running.
+  and fixes never arrive.
 
-For chrony, prefer the gpsd SOCK integration over SHM. Recent gpsd uses a
-dedicated serial-time socket named `chrony.clk.<device>.sock`; for the Pi 5 UART
-that means `chrony.clk.ttyAMA0.sock`.
+Enable **`gpsd.service`** at boot. Debian also installs `gpsd.socket`, which
+starts gpsd only when something connects to `/run/gpsd.sock` (e.g. `cgps`).
+Chrony refclocks need gpsd running continuously:
 
-Use a chrony refclock block like:
+```bash
+sudo systemctl enable --now gpsd.service
+```
+
+The shipped unit already has `After=chronyd.service`.
+
+## 3. PPS device tree (PPS setups only)
+
+Add to **`/boot/firmware/config.txt`** (Bookworm) or **`/boot/config.txt`**
+(older images), then **reboot**:
+
+```txt
+dtoverlay=pps-gpio,gpiopin=18
+```
+
+After reboot:
+
+```bash
+ls -l /dev/pps0
+sudo ppstest /dev/pps0    # one assert line per second; Ctrl-C to stop
+```
+
+Do not add PPS refclock lines to chrony until `/dev/pps0` exists.
+
+## 4. Configure chrony
+
+On Debian and Raspberry Pi OS, chrony config lives at
+**`/etc/chrony/chrony.conf`** (some distros use `/etc/chrony.conf`). Merge
+`deploy/time-sync/chrony.conf.example` or use the block below.
+
+Prefer gpsd **SOCK** refclocks over SHM. Recent gpsd creates:
+
+- `/run/chrony.clk.ttyAMA0.sock` — serial time-of-day from the UART
+- `/run/chrony.pps0.sock` — PPS timestamps (when `/dev/pps0` is in gpsd `DEVICES`)
+
+### UART-only (no PPS)
 
 ```conf
 makestep 1.0 3
 rtcsync
-# Offline-first: leave pool lines commented out (see below).
-refclock SOCK /run/chrony.clk.ttyAMA0.sock refid GPS precision 1e-1 offset -0.44 delay 0.1
+
+# Offline-first flight recording: leave pool commented out.
+#pool pool.ntp.org iburst
+
+refclock SOCK /run/chrony.clk.ttyAMA0.sock refid GPS precision 1e-1 offset 0.62 delay 0.1
 ```
 
-- `makestep 1.0 3` implements the boot policy from the plan: allow large steps
-  early at boot, then slew afterward.
-- Tune the GPS `offset` with `chronyc sourcestats` after a 3D fix. If GPS shows
-  about `+440ms`, try `offset -0.44` (seconds added to the gpsd SOCK timestamp).
-- The `0.9999` value shown in some gpsd examples is a placeholder, not a good
-  production default for UART-only discipline.
-- Start `chronyd` before `gpsd` so the socket exists before gpsd connects.
-- If `pool pool.ntp.org` is enabled and the Pi is online, chrony may prefer NTP
-  and mark the GPS refclock as `#x` (in error). That is fine on the bench with
-  internet, but for offline flight recording comment the pool line out.
+### UART + PPS (recommended)
 
-On systems that use `/var/run` or `/tmp` instead of `/run`, adjust the SOCK path
-to match what chronyd actually creates.
+```conf
+makestep 1.0 3
+rtcsync
 
-## Startup Ordering
+#pool pool.ntp.org iburst
 
-Kingfisher now performs a short startup assessment of Pi-vs-GPS time before it
-opens the flight DB, and it exposes that result in `/api/status` and the cockpit
-header. That is an assessment, not a hard block.
+refclock SOCK /run/chrony.clk.ttyAMA0.sock refid GPS precision 1e-1 offset 0.62 delay 0.1
+refclock SOCK /run/chrony.pps0.sock refid PPS precision 1e-7 lock GPS
+```
 
-To protect DB filenames and session start times on cold boot, the deployment
-should still order kingfisher after chrony is healthy. A practical systemd
-pattern is:
+Directive notes:
+
+- **`makestep 1.0 3`** — allow a few large steps early at boot, then slew only.
+- **`offset`** — added to the gpsd serial SOCK timestamp (see tuning section).
+- **`lock GPS`** — PPS steers the clock but needs the GPS refclock for which
+  UTC second each pulse belongs to.
+- **`pool`** — fine on the bench with internet; for offline recording, comment
+  it out so chrony selects GPS/PPS instead of NTP.
+
+Use **SOCK PPS** (above). Do **not** also add `refclock PPS /dev/pps0`: gpsd
+opens `/dev/pps0` when a GPS is present, and chrony cannot share the device.
+Kernel `refclock PPS` would need `deploy/time-sync/99-pps-chrony.rules` and a
+gpsd-free PPS path — not worth it on this deployment.
+
+On systems that use `/var/run` instead of `/run`, adjust SOCK paths to match
+what chronyd creates.
+
+## 5. Tune the GPS `offset`
+
+Chrony **adds** the `offset` value (seconds) to each gpsd serial-time sample.
+The correct value is **not** the `cgps` “time offset” display (see below).
+
+### Procedure (NTP cross-check)
+
+Use NTP as a trusted reference, measure the raw GPS SOCK error at `offset 0.0`,
+then apply the same sign in `chrony.conf`:
+
+1. In `/etc/chrony/chrony.conf`: set **`offset 0.0`**, enable **`pool
+   pool.ntp.org iburst`**, comment out the **PPS** refclock line.
+2. Restart in order:
+
+   ```bash
+   sudo systemctl restart chronyd
+   sleep 2
+   sudo systemctl restart gpsd
+   ```
+
+3. Wait for NTP and GPS samples (30–60 s after gpsd restart):
+
+   ```bash
+   chronyc waitsync 30 0.1
+   sleep 45
+   chronyc sourcestats | grep GPS
+   ```
+
+4. Read the GPS **`Offset`** column (e.g. `+620ms`). Set:
+
+   ```conf
+   offset 0.62
+   ```
+
+   **Same sign, value in seconds** — do **not** negate. Generic gpsd/chrony
+   examples often say to flip the sign; on this M9N + SOCK path that is wrong
+   (`offset -0.62` with a `+620ms` reading yields ~`+1.3 s` residual;
+   `offset +0.62` lands near zero).
+
+5. Restore offline config: comment **`pool`**, re-enable the **PPS** line if used,
+   restart **`chronyd`** then **`gpsd`**, verify:
+
+   ```bash
+   chronyc sourcestats | grep -E 'GPS|PPS'
+   chronyc sources -v | grep -E 'GPS|PPS'
+   ```
+
+   Target: GPS **`Offset`** within a few tens of ms; with PPS, expect **`#* PPS`**
+   (disciplining) and **`#- GPS`** (time-of-day via `lock GPS`).
+
+Re-tune if you change receiver baud, gpsd version, or move from UART-only to PPS.
+
+### Do not use `cgps` for this
+
+| Display | What it compares | Typical value here |
+|---------|------------------|-------------------|
+| **`cgps` time offset** | TPV fix epoch vs host clock | ~600–700 ms |
+| **`chronyc sourcestats` GPS** | gpsd serial SOCK vs host/NTP | ~+620 ms at `offset 0.0` |
+| **`gpsmon` `PPS offset:`** | PPS pulse vs host clock | sub-ms when PPS is healthy |
+
+These are three different pipelines. Tune chrony from **`sourcestats`**, not
+from `cgps`.
+
+## 6. Service restarts
+
+**Always restart in this order** after editing `chrony.conf`:
+
+```bash
+sudo systemctl restart chronyd
+sleep 2
+sudo systemctl restart gpsd
+```
+
+If you restart `chronyd` alone, gpsd keeps stale socket connections and logs
+`chrony_send(...) Transport endpoint is not connected` — GPS/PPS show **`#?`**
+with **Reach 0** until gpsd is restarted.
+
+Cold boot order is handled by systemd (`chronyd` before `gpsd`). After manual
+edits, you must restart both.
+
+## 7. Verification
+
+```bash
+systemctl is-active gpsd chronyd    # both active
+cgps -s                             # 3D fix on /dev/ttyAMA0
+gpsmon                              # PPS offset: near zero (PPS setups)
+chronyc tracking
+chronyc sources -v
+chronyc sourcestats
+```
+
+Healthy PPS deployment (pool commented out, offset tuned):
+
+- GPS and PPS **Reach** non-zero in `chronyc sources -v`
+- **`#* PPS`** — chrony disciplining from PPS
+- **`#- GPS`** — serial source providing time-of-day (`lock GPS`)
+- GPS **`sourcestats` Offset** near zero; PPS offset in µs
+
+See `deploy/time-sync/verify.md` for the kingfisher UI checks.
+
+## 8. Troubleshooting
+
+| Symptom | Likely cause |
+|---------|----------------|
+| GPS/PPS `#?`, Reach `0`, `sourcestats` NP `0` | `gpsd.service` not running — `systemctl enable --now gpsd.service` |
+| Reach `0` after editing chrony | Restart **`gpsd`** after **`chronyd`** |
+| gpsd log: `Transport endpoint is not connected` | Same — stale SOCK after chrony restart |
+| GPS `#?` / `#x`, large `sourcestats` Offset | Wrong **`offset` sign** (negated) or magnitude — re-run NTP tune |
+| NTP `*` instead of PPS `*` | **`pool`** enabled while online — comment out for offline |
+| PPS Reach `0` | `/dev/pps0` missing (no overlay/reboot), or not in gpsd **`DEVICES`** |
+| PPS samples OK but `#x`, GPS `#x` | GPS **`offset`** still wrong — PPS `lock GPS` needs serial within ~0.5 s |
+| `cgps` OK, chrony dead | Almost always gpsd not feeding SOCK — restart pair above |
+
+## 9. Expected accuracy
+
+**UART-only:** seconds-level discipline, sub-second alignment realistic, not
+sub-millisecond.
+
+**UART + PPS:** sub-millisecond clock discipline once `#* PPS`; UART still
+carries date/time.
+
+### Kingfisher clock badge vs chrony
+
+The cockpit header compares host wall time to the **fix epoch** in each gpsd TPV
+report. On this u-blox binary path that lag is often **600–700 ms** even when
+chrony and PPS are correct — receiver/pipeline delay, not a broken Pi clock.
+
+Kingfisher tracks:
+
+- **Fix epoch lag** — raw offset (often ~650 ms here)
+- **Skew** — offset minus a running median baseline (true clock error once settled)
+
+“Clock OK” means fresh fixes and skew under about 250 ms, not that fix-epoch lag
+is zero.
+
+## 10. Kingfisher startup ordering
+
+Kingfisher performs a short startup assessment of Pi-vs-GPS time before opening
+the flight DB (`/api/status` and cockpit header). To protect DB filenames and
+session start times on cold boot, order kingfisher after chrony is healthy:
 
 ```ini
 [Unit]
@@ -89,66 +290,5 @@ Wants=chronyd.service gpsd.service
 ExecStartPre=/usr/bin/chronyc waitsync 20 0.25
 ```
 
-That keeps the service from starting until chrony reports sync, while
-kingfisher's own status model still tells you whether the clock later drifted,
-went stale, or started unsynchronized anyway.
-
-## Expected Accuracy
-
-Without PPS, this is a coarse-but-useful wall-clock discipline path:
-
-- Seconds-level errors should disappear once chrony locks to gpsd.
-- Sub-second alignment is realistic.
-- Do not expect true sub-millisecond timestamp accuracy from UART-only time.
-
-### Kingfisher clock badge vs chrony
-
-The cockpit header compares host wall time to the **fix epoch** inside each gpsd
-TPV report. On this u-blox binary path that lag is often **600–700 ms** even when
-chrony and NTP are correct — it is receiver/pipeline delay, not a broken Pi
-clock.
-
-Kingfisher therefore tracks:
-
-- **Fix epoch lag** — raw offset (often ~650 ms here)
-- **Skew** — offset minus a running median baseline (true clock error once settled)
-
-"Clock OK" means fresh fixes and skew under about 250 ms, not that lag is zero.
-Use `chronyc tracking` and `chronyc sources -v` to confirm chrony is actually
-using the GPS refclock when offline.
-
-## Verification
-
-Use the checklist in `deploy/time-sync/verify.md`. The short version is:
-
-```bash
-cgps -s
-chronyc tracking
-chronyc sources -v
-```
-
-You want to see:
-
-- gpsd reporting valid TPV updates on `/dev/ttyAMA0`
-- chrony showing the GPS SOCK source reachable
-- the cockpit header's clock badge showing a fresh fix and a small offset
-
-## PPS Follow-On
-
-When PPS is wired in a later hardware revision, reserve **GPIO 18** (physical pin
-12) as the preferred input:
-
-```txt
-dtoverlay=pps-gpio,gpiopin=18
-```
-
-Then verify `/dev/pps0`, add a PPS SOCK refclock in chrony, and keep the GPS
-serial SOCK as the coarse lock source:
-
-```conf
-refclock SOCK /run/chrony.clk.ttyAMA0.sock refid GPS precision 1e-1 offset 0.2 delay 0.1
-refclock SOCK /run/chrony.pps0.sock refid PPS precision 1e-7 lock GPS
-```
-
-The serial source stays useful even after PPS lands; PPS sharpens the clock,
-while the UART stream supplies time-of-day.
+That waits for sync at startup; kingfisher's status model still reports if the
+clock later drifts or goes stale.

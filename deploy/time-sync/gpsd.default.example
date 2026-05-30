@@ -4,7 +4,8 @@ START_DAEMON="true"
 USBAUTO="false"
 
 # Pi 5 header UART on GPIO 14/15.
-DEVICES="/dev/ttyAMA0"
+# When PPS is wired (GPIO 18 -> /dev/pps0), add it here for chrony SOCK PPS.
+DEVICES="/dev/ttyAMA0 /dev/pps0"
 
 # -n: start polling immediately so chrony can see time without a UI client.
 # -b: keep gpsd read-only so it does not reconfigure the M9N.

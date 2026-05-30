@@ -14,9 +14,10 @@ rtcsync
 # Recent gpsd uses chrony.clk.<device>.sock for serial time and chrony.<pps>.sock
 # for PPS time.
 #
-# Tune offset with `chronyc sourcestats` after gpsd has a 3D fix: if GPS shows
-# about +440ms, try offset -0.44 (sign is added to the gpsd timestamp).
-refclock SOCK /run/chrony.clk.ttyAMA0.sock refid GPS precision 1e-1 offset -0.44 delay 0.1
+# Tune with chronyc sourcestats at offset 0.0 (NTP-synced): use the same sign
+# as the GPS Offset column in seconds (+620ms -> offset 0.62 on this M9N path).
+refclock SOCK /run/chrony.clk.ttyAMA0.sock refid GPS precision 1e-1 offset 0.62 delay 0.1
 
-# Future PPS follow-on for GPIO 18 -> /dev/pps0:
+# PPS follow-on (GPIO 18 -> /dev/pps0, also in gpsd DEVICES). Use SOCK PPS —
+# do not also enable refclock PPS /dev/pps0; gpsd holds the device.
 # refclock SOCK /run/chrony.pps0.sock refid PPS precision 1e-7 lock GPS

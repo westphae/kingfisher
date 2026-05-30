@@ -1,0 +1,2 @@
+# Allow chronyd (_chrony) to open kernel PPS devices for refclock PPS.
+KERNEL=="pps*", GROUP="_chrony", MODE="0660"
