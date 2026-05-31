@@ -21,6 +21,8 @@ pub const HEADER_LEN: usize = 2;
 pub const CRC_LEN: usize = 4;
 pub const FRAMING_OVERHEAD: usize = HEADER_LEN + CRC_LEN;
 
+// SampleBatch is large by design (heapless readings vec); boxing would need alloc.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Frame {
     Hello(Hello),
@@ -56,12 +58,9 @@ pub struct Capabilities {
 pub struct SensorDeviceName(pub [u8; MAX_DEVICE_NAME]);
 
 impl SensorDeviceName {
-    pub fn from_str(s: &str) -> Self {
-        let mut b = [0u8; MAX_DEVICE_NAME];
-        let bytes = s.as_bytes();
-        let n = bytes.len().min(MAX_DEVICE_NAME);
-        b[..n].copy_from_slice(&bytes[..n]);
-        Self(b)
+    /// Truncates to [`MAX_DEVICE_NAME`] bytes when `s` is longer.
+    pub fn new(s: &str) -> Self {
+        s.parse().unwrap_or(Self([0; MAX_DEVICE_NAME]))
     }
 
     pub fn as_str(&self) -> &str {
@@ -71,6 +70,18 @@ impl SensorDeviceName {
             .position(|&c| c == 0)
             .unwrap_or(MAX_DEVICE_NAME);
         core::str::from_utf8(&self.0[..n]).unwrap_or("unknown")
+    }
+}
+
+impl core::str::FromStr for SensorDeviceName {
+    type Err = core::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut b = [0u8; MAX_DEVICE_NAME];
+        let bytes = s.as_bytes();
+        let n = bytes.len().min(MAX_DEVICE_NAME);
+        b[..n].copy_from_slice(&bytes[..n]);
+        Ok(Self(b))
     }
 }
 
@@ -244,7 +255,7 @@ mod tests {
                 min_hz: 1,
                 max_hz: 50,
                 default_hz: 10,
-                device_name: SensorDeviceName::from_str("ms4525"),
+                device_name: SensorDeviceName::new("ms4525"),
             })
             .unwrap();
         sensors
@@ -253,7 +264,7 @@ mod tests {
                 min_hz: 1,
                 max_hz: 200,
                 default_hz: 50,
-                device_name: SensorDeviceName::from_str("mmc5983"),
+                device_name: SensorDeviceName::new("mmc5983"),
             })
             .unwrap();
         rt(&Frame::Hello(Hello {

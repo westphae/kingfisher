@@ -37,6 +37,6 @@ fn cap(id: SensorId, name: &str, min_hz: u16, max_hz: u16, default_hz: u16) -> S
         min_hz,
         max_hz,
         default_hz,
-        device_name: SensorDeviceName::from_str(name),
+        device_name: SensorDeviceName::new(name),
     }
 }
