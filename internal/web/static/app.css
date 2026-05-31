@@ -146,14 +146,48 @@ body {
 }
 .pauseBtn:disabled:hover { background: transparent; }
 
-#tabs {
+#tabBar {
   display: flex;
-  overflow-x: auto;
-  gap: 0.25rem;
-  padding: 0.5rem;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.5rem 0.5rem 0.5rem 0.75rem;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
+.tabGroupFilter {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 0.15rem;
+  font-size: 0.7rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tabGroupFilterLbl { line-height: 1; }
+.tabGroupFilter select {
+  min-height: 40px;
+  padding: 0.35rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 0.95rem;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+#tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  overflow-x: auto;
+  gap: 0.25rem;
+  padding: 0;
+  background: transparent;
+  border-bottom: none;
+}
+#tabs button[hidden] { display: none; }
 #tabs button {
   background: transparent;
   color: var(--dim);

@@ -14,9 +14,11 @@ const state = {
   serverConnected: false,      // kingfisher reachable (ws or /api/status)
   paused: false,
   config: null,                // last /api/config (compass settings)
+  tabGroup: 'all',             // tab filter: all | hub | pod | calc
 };
 
 const tabsEl = document.getElementById('tabs');
+const tabGroupFilterEl = document.getElementById('tabGroupFilter');
 const panelEl = document.getElementById('panel');
 const bufEl   = document.getElementById('bufStat');
 const dbEl    = document.getElementById('dbSize');
@@ -31,14 +33,34 @@ const HUB_VIRTUAL_DEVICES = new Set(['gps', ...CALC_DEVICES]);
 const SKIP_ATTRS_FETCH = new Set(['compass', 'ahrs', 'geo', 'press_alt', 'gps', 'airspeed']);
 
 function isPodTelemetry(name) {
-  return state.deviceLocation.get(name) === 'pod';
+  return deviceTabGroup(name) === 'pod';
 }
 
 function inferDeviceLocation(name) {
   if (CALC_DEVICES.has(name)) return 'calc';
+  if (name === 'gps') return 'hub';
   if (POD_TELEMETRY_DEVICES.has(name)) return 'pod';
   if (state.iioDevices.has(name)) return 'hub';
   return null;
+}
+
+function deviceTabGroup(name) {
+  const loc = state.deviceLocation.get(name) || inferDeviceLocation(name);
+  return loc || 'hub';
+}
+
+function tabMatchesGroup(name) {
+  return state.tabGroup === 'all' || deviceTabGroup(name) === state.tabGroup;
+}
+
+function visibleTabNames() {
+  return sortedTabNames().filter(tabMatchesGroup);
+}
+
+function tabLabel(name) {
+  if (state.tabGroup !== 'all') return name;
+  const loc = state.deviceLocation.get(name) || inferDeviceLocation(name);
+  return loc ? `${name} (${loc})` : name;
 }
 
 function applyDeviceLocation(name, loc) {
@@ -48,30 +70,46 @@ function applyDeviceLocation(name, loc) {
   if (prev === loc) return;
   state.deviceLocation.set(name, loc);
   const btn = tabsEl.querySelector(`button[data-tab="${name}"]`);
-  if (btn) btn.textContent = tabLabel(name);
+  if (btn) {
+    btn.textContent = tabLabel(name);
+    btn.hidden = !tabMatchesGroup(name);
+  }
 }
 
-function tabLabel(name) {
-  const loc = state.deviceLocation.get(name);
-  return loc ? `${name} (${loc})` : name;
+function applyTabGroupFilter() {
+  for (const b of tabsEl.querySelectorAll('button')) {
+    const name = b.dataset.tab;
+    b.hidden = !tabMatchesGroup(name);
+    b.textContent = tabLabel(name);
+  }
+  reorderTabs();
+  if (state.activeTab && !tabMatchesGroup(state.activeTab)) {
+    const vis = visibleTabNames();
+    if (vis.length) selectTab(vis[0]);
+    else state.activeTab = null;
+  }
 }
 
-function tabRank(name) {
-  if (state.iioDevices.has(name)) return 0;
-  if (isPodTelemetry(name)) return 1;
-  if (DERIVED_DEVICES.includes(name)) return 2;
-  return 3; // gps, geo, other virtual
-}
+const TAB_GROUP_ORDER = { hub: 0, pod: 1, calc: 2 };
 
 function compareTabNames(a, b) {
-  const ra = tabRank(a);
-  const rb = tabRank(b);
-  if (ra !== rb) return ra - rb;
+  if (state.tabGroup === 'all') {
+    const ga = TAB_GROUP_ORDER[deviceTabGroup(a)] ?? 9;
+    const gb = TAB_GROUP_ORDER[deviceTabGroup(b)] ?? 9;
+    if (ga !== gb) return ga - gb;
+  }
   return a.localeCompare(b);
 }
 
 function sortedTabNames() {
   return [...state.tabs].sort(compareTabNames);
+}
+
+function reorderTabs() {
+  for (const name of sortedTabNames()) {
+    const btn = tabsEl.querySelector(`button[data-tab="${name}"]`);
+    if (btn) tabsEl.appendChild(btn);
+  }
 }
 
 function insertTabButton(btn, name) {
@@ -95,9 +133,14 @@ function ensureTab(name) {
   const btn = document.createElement('button');
   btn.textContent = tabLabel(name);
   btn.dataset.tab = name;
+  btn.hidden = !tabMatchesGroup(name);
   btn.addEventListener('click', () => selectTab(name));
   insertTabButton(btn, name);
-  if (!state.activeTab) selectTab(sortedTabNames()[0]);
+  reorderTabs();
+  if (!state.activeTab) {
+    const vis = visibleTabNames();
+    if (vis.length) selectTab(vis[0]);
+  }
 }
 
 function selectTab(name) {
@@ -983,6 +1026,10 @@ async function loadConfig() {
 
 (async function init() {
   updateRecordingUI();
+  tabGroupFilterEl?.addEventListener('change', () => {
+    state.tabGroup = tabGroupFilterEl.value;
+    applyTabGroupFilter();
+  });
   await loadConfig();
   if (window.KF_INITIAL_DEVICES) {
     for (const d of window.KF_INITIAL_DEVICES) ensureTab(d);
@@ -990,6 +1037,7 @@ async function loadConfig() {
   await loadIIODevices();
   for (const d of POD_TELEMETRY_DEVICES) ensureTab(d);
   await preloadDeviceLocations();
+  applyTabGroupFilter();
   connect();
   refreshStatus();
 })();

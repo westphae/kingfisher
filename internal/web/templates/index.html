@@ -18,7 +18,18 @@
     <div class="rec"><span id="recDot">●</span> <span id="recLabel">REC</span> <span id="dbSize">—</span></div>
   </header>
 
-  <nav id="tabs"></nav>
+  <nav id="tabBar" aria-label="Sensor tabs">
+    <label class="tabGroupFilter" for="tabGroupFilter">
+      <span class="tabGroupFilterLbl">Group</span>
+      <select id="tabGroupFilter" title="Filter sensor tabs by location">
+        <option value="all" selected>All</option>
+        <option value="hub">Hub</option>
+        <option value="pod">Pod</option>
+        <option value="calc">Calc</option>
+      </select>
+    </label>
+    <div id="tabs" role="tablist"></div>
+  </nav>
   <main id="panel"></main>
 
   <footer id="ftr">
