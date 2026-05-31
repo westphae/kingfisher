@@ -1,0 +1,18 @@
+# Kingfisher reverse proxy (install to /etc/caddy/Caddyfile).
+# Terminates TLS with Caddy's internal CA; kingfisher stays on :8080.
+#
+# Edit the host/IP list for your LAN, then:
+#   sudo caddy validate --config /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy
+#   sudo caddy trust
+#
+# Other devices: install root.crt (see README).
+
+https://kingfisher.lan, https://kingfisher, https://192.168.10.1, https://192.168.86.151, https://127.0.0.1 {
+	tls internal
+	reverse_proxy localhost:8080
+}
+
+http://kingfisher.lan, http://kingfisher, http://192.168.10.1, http://192.168.86.151, http://127.0.0.1 {
+	redir https://{host}{uri} permanent
+}

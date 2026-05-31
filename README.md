@@ -127,8 +127,77 @@ toolchain, and flashing steps.
 ./kingfisher
 ```
 
-The cockpit UI is served on `:8080` by default. Configuration lives in
+Kingfisher listens on **`http_addr`** (default **`:8080`**) and is meant to sit
+behind a reverse proxy on the aircraft LAN. Configuration lives in
 `~/.config/kingfisher/config.json`.
+
+### HTTPS with Caddy (recommended)
+
+[Caddy](https://caddyserver.com/) terminates TLS on port **443**, redirects HTTP
+port **80** to HTTPS, and reverse-proxies to kingfisher on `localhost:8080`
+(including WebSocket traffic for the live cockpit and `/terminal`).
+
+Example Caddyfile (also in **`deploy/caddy/Caddyfile`**). Adjust the hostname and
+LAN IP for your Pi:
+
+```caddyfile
+https://kingfisher.lan, https://kingfisher, https://192.168.10.1, https://192.168.86.151, https://127.0.0.1 {
+    tls internal
+    reverse_proxy localhost:8080
+}
+
+http://kingfisher.lan, http://kingfisher, http://192.168.10.1, http://192.168.86.151, http://127.0.0.1 {
+    redir https://{host}{uri} permanent
+}
+```
+
+`tls internal` uses a **local certificate authority** managed by Caddy — fine for
+a private LAN; not a public-trusted cert.
+
+**Install on Debian / Raspberry Pi OS** (official apt repo):
+
+```bash
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+  | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+  | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
+  /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update && sudo apt install -y caddy
+sudo cp deploy/caddy/Caddyfile /etc/caddy/Caddyfile
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl enable --now caddy
+```
+
+Keep kingfisher on the loopback port only:
+
+```json
+"http_addr": ":8080"
+```
+
+**Trust the CA**
+
+On the Pi (so curl and local browsers trust HTTPS):
+
+```bash
+sudo caddy trust
+```
+
+On laptops, phones, and tablets, install Caddy's root certificate once. After
+Caddy has started at least once, the file is usually:
+
+```text
+/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+```
+
+Copy it to the device and add it to the system/browser trust store (or use
+`sudo caddy trust` on each Linux machine). Until then, browsers show a
+certificate warning — you can proceed for testing, but trusting the CA removes
+the nag and enables secure-context APIs (clipboard, etc.) over HTTPS.
+
+Open the cockpit at **`https://<pi-hostname-or-ip>/`** (port 443; HTTP on port 80
+redirects automatically).
 
 ### Browser terminal (optional)
 
@@ -159,9 +228,10 @@ never sent. Set `"allow_password": true` to keep PAM login as a fallback.
 kingfisher runs as that user; logging in as a different user requires root or
 `cap_setuid` on the kingfisher binary.
 
-**Security:** without public-key auth, the default HTTP server sends passwords in
-cleartext. Use HTTPS or an SSH tunnel in front of `:8080` if password login is
-enabled.
+**Security:** with Caddy **`tls internal`** in front (see above), terminal traffic
+including WebSockets is encrypted on the LAN. Without HTTPS, password login sends
+credentials in cleartext; public-key login avoids sending passwords but session
+cookies and shell I/O are still visible on the wire.
 
 Building on Linux requires **`libpam0g-dev`** for CGO (`apt install libpam0g-dev`).
 
