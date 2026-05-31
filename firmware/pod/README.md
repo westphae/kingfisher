@@ -21,7 +21,8 @@ overflows.
 | MS4525DO-DS5AI001DP           | Airspeed (differential pressure), I²C 0x28      |
 | BMP581                        | Static pressure, I²C 0x46 (or 0x47 if SDO tied) |
 | MMC5983MA                     | Magnetometer, I²C 0x30                          |
-| LiPo cell, 3.7 V nominal      | Power                                           |
+| SparkFun Battery Babysitter   | BQ27441 fuel gauge, I²C 0x55 (optional)         |
+| LiPo cell, 3.7 V nominal      | Power (via Battery Babysitter or direct)        |
 | 3.3 V LDO (≥250 mA)           | Regulator, e.g. AP2112-3.3 or MCP1700           |
 | 2× 4.7 kΩ                     | I²C pull-ups (SDA / SCL → 3V3)                  |
 | Pitot/static plumbing tubing  | Routes airflow to MS4525DO and BMP581           |
@@ -41,10 +42,12 @@ ship 2.2 kΩ — cut **I2C** on one board if the bus misbehaves when daisy-chain
 
 | ESP32-C3 pin | Net     | To                                    |
 | ------------ | ------- | ------------------------------------- |
-| `IO5`        | `SDA`   | Qwiic / MS4525DO, BMP581, MMC5983MA  |
-| `IO6`        | `SCL`   | Qwiic / MS4525DO, BMP581, MMC5983MA  |
+| `IO5`        | `SDA`   | Qwiic / MS4525DO, BMP581, MMC5983MA, BQ27441 |
+| `IO6`        | `SCL`   | Qwiic / MS4525DO, BMP581, MMC5983MA, BQ27441 |
 
 Desk bench with [SparkFun Pro Micro ESP32-C3](https://docs.sparkfun.com/SparkFun_Pro_Micro-ESP32C3/hardware_overview/) + Qwiic cable: firmware uses **IO5/IO6** (matches SparkFun `pins_arduino.h`). A plug-in Qwiic BMP581 (SEN-20170, default **0x47**) needs no extra wiring.
+
+**Battery Babysitter (PRT-13777):** connect the Qwiic port to the same bus. Tie **VPU** to **3.3 V** (ESP `3V3`). A LiPo must be plugged into the Babysitter for the BQ27441 to respond. Design capacity (mAh) is baked into firmware at build time from `pod.battery_capacity_mah` in kingfisher config (default **850**); the gauge is programmed on first power-up after battery insert (`ITPOR`).
 
 Planned wing pod PCB may move the bus to **IO4/IO5**; update `main.rs` when that layout is fixed.
 | `IO8`        | `LED`   | Status LED (active-low, with 1 kΩ)    |
@@ -137,7 +140,8 @@ See [`config.example.json`](../../config.example.json) for the `pod` block shape
 "pod": {
   "wifi_ssid": "kingfisher",
   "wifi_password": "",
-  "udp_addr": "192.168.10.1:47808"
+  "udp_addr": "192.168.10.1:47808",
+  "battery_capacity_mah": 850
 }
 ```
 

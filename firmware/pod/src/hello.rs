@@ -20,6 +20,10 @@ pub fn build(mask: u8) -> Frame {
         let max = crate::rates::hello_max_hz(SensorId::Airspeed, mask);
         let _ = sensors.push(cap(SensorId::Airspeed, "ms4525", 1, max, 10));
     }
+    if mask & sensors::BATTERY_BIT != 0 {
+        let max = crate::rates::hello_max_hz(SensorId::Battery, mask);
+        let _ = sensors.push(cap(SensorId::Battery, "bq27441", 1, max, 1));
+    }
     Frame::Hello(Hello {
         fw_version: cfg::FW_VERSION,
         proto_version: PROTO_VERSION,

@@ -2,8 +2,9 @@
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use pod_wire::{Ack, Cmd, CmdEnvelope, Frame, SensorId};
+use pod_wire::{Ack, AttrKey, Cmd, CmdEnvelope, Frame, SensorId};
 
+use crate::battery_cfg;
 use crate::link;
 use crate::rates;
 use crate::sensors;
@@ -17,8 +18,9 @@ pub fn last_rx_cmd_seq() -> u32 {
 /// Sensor rate limits advertised in Hello (must match `hello::cap` defaults).
 fn rate_ok(sensor: SensorId, hz: u16) -> bool {
     let (min, max) = match sensor {
-        SensorId::Mag => (1, 100),
         SensorId::Static | SensorId::Airspeed => (1, 50),
+        SensorId::Mag => (1, 100),
+        SensorId::Battery => (1, 2),
     };
     hz >= min && hz <= max
 }
@@ -37,7 +39,16 @@ pub fn handle(envelope: CmdEnvelope) -> Ack {
                 rates::try_set(sensor, hz)
             }
         }
-        Cmd::SetAttr { .. } => false,
+        Cmd::SetAttr { sensor, key, value } => match (sensor, key) {
+            (SensorId::Battery, AttrKey::DesignCapacity) => {
+                if !sensor_attached(SensorId::Battery) {
+                    false
+                } else {
+                    battery_cfg::request_design_mah(value as u16)
+                }
+            }
+            _ => false,
+        },
         Cmd::Ping => true,
         Cmd::Reboot => false,
     };
@@ -50,6 +61,7 @@ fn sensor_attached(sensor: SensorId) -> bool {
         SensorId::Static => mask & sensors::BMP_BIT != 0,
         SensorId::Mag => mask & sensors::MMC_BIT != 0,
         SensorId::Airspeed => mask & sensors::MS4525_BIT != 0,
+        SensorId::Battery => mask & sensors::BATTERY_BIT != 0,
     }
 }
 

@@ -3,7 +3,7 @@
 use esp_println::println;
 
 use super::bus::Bus;
-use super::{SensorBoard, BMP_BIT, MMC_BIT, MS4525_BIT};
+use super::{SensorBoard, BATTERY_BIT, BMP_BIT, MMC_BIT, MS4525_BIT};
 use crate::link;
 use crate::rates;
 
@@ -30,6 +30,12 @@ pub fn recover_bus(bus: &mut Bus, board: &mut SensorBoard) {
             board.ms4525 = None;
         }
     }
+    if let Some(ref mut bq) = board.bq27441 {
+        if bq.init(bus).is_err() {
+            println!("pod: bq27441 re-init failed; detaching");
+            board.bq27441 = None;
+        }
+    }
 
     let mut mask = 0u8;
     if board.bmp581.is_some() {
@@ -40,6 +46,9 @@ pub fn recover_bus(bus: &mut Bus, board: &mut SensorBoard) {
     }
     if board.ms4525.is_some() {
         mask |= MS4525_BIT;
+    }
+    if board.bq27441.is_some() {
+        mask |= BATTERY_BIT;
     }
     super::sync_attached_mask(mask);
     link::request_hello();

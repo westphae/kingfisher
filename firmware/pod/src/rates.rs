@@ -16,7 +16,9 @@ use crate::link;
 const DEFAULT_STATIC_HZ: u16 = 10;
 const DEFAULT_MAG_HZ: u16 = 10;
 const DEFAULT_AIRSPEED_HZ: u16 = 10;
+const DEFAULT_BATTERY_HZ: u16 = 1;
 const SAFE_HZ: u16 = 10;
+const SAFE_BATTERY_HZ: u16 = 1;
 
 /// Per-sensor max reads when scheduled alone.
 const MAX_READS_PER_SENSOR: u32 = 3;
@@ -27,6 +29,7 @@ const US_PER_STATIC_FRAME: u32 = 400;
 /// Status poll + 7-byte XOUT burst (no per-sample IC0 write).
 const US_PER_MAG_READ: u32 = 1_200;
 const US_PER_AIR_READ: u32 = 5_000;
+const US_PER_BATTERY_READ: u32 = 3_000;
 
 /// Max I²C work per 100 ms poll tick (leave time for UDP / WiFi).
 const MAX_TICK_WORK_US: u32 = 100_000;
@@ -37,19 +40,23 @@ const OVERRUN_BACKOFF_THRESHOLD: u8 = 2;
 static STATIC_HZ: AtomicU16 = AtomicU16::new(DEFAULT_STATIC_HZ);
 static MAG_HZ: AtomicU16 = AtomicU16::new(DEFAULT_MAG_HZ);
 static AIRSPEED_HZ: AtomicU16 = AtomicU16::new(DEFAULT_AIRSPEED_HZ);
+static BATTERY_HZ: AtomicU16 = AtomicU16::new(DEFAULT_BATTERY_HZ);
 
 static STATIC_REM: AtomicU32 = AtomicU32::new(0);
 static MAG_REM: AtomicU32 = AtomicU32::new(0);
 static AIRSPEED_REM: AtomicU32 = AtomicU32::new(0);
+static BATTERY_REM: AtomicU32 = AtomicU32::new(0);
 
 static STATIC_FAIL: AtomicU8 = AtomicU8::new(0);
 static MAG_FAIL: AtomicU8 = AtomicU8::new(0);
 static AIRSPEED_FAIL: AtomicU8 = AtomicU8::new(0);
+static BATTERY_FAIL: AtomicU8 = AtomicU8::new(0);
 
 /// Hz before the most recent successful SetRate (for backoff).
 static STATIC_PREV: AtomicU16 = AtomicU16::new(DEFAULT_STATIC_HZ);
 static MAG_PREV: AtomicU16 = AtomicU16::new(DEFAULT_MAG_HZ);
 static AIRSPEED_PREV: AtomicU16 = AtomicU16::new(DEFAULT_AIRSPEED_HZ);
+static BATTERY_PREV: AtomicU16 = AtomicU16::new(DEFAULT_BATTERY_HZ);
 
 static LAST_CHANGED: AtomicU8 = AtomicU8::new(0xff);
 static OVERRUN_STREAK: AtomicU8 = AtomicU8::new(0);
@@ -60,6 +67,7 @@ fn hz_atom(sensor: SensorId) -> &'static AtomicU16 {
         SensorId::Static => &STATIC_HZ,
         SensorId::Mag => &MAG_HZ,
         SensorId::Airspeed => &AIRSPEED_HZ,
+        SensorId::Battery => &BATTERY_HZ,
     }
 }
 
@@ -68,6 +76,7 @@ fn rem_atom(sensor: SensorId) -> &'static AtomicU32 {
         SensorId::Static => &STATIC_REM,
         SensorId::Mag => &MAG_REM,
         SensorId::Airspeed => &AIRSPEED_REM,
+        SensorId::Battery => &BATTERY_REM,
     }
 }
 
@@ -76,6 +85,7 @@ fn fail_atom(sensor: SensorId) -> &'static AtomicU8 {
         SensorId::Static => &STATIC_FAIL,
         SensorId::Mag => &MAG_FAIL,
         SensorId::Airspeed => &AIRSPEED_FAIL,
+        SensorId::Battery => &BATTERY_FAIL,
     }
 }
 
@@ -84,6 +94,7 @@ fn prev_atom(sensor: SensorId) -> &'static AtomicU16 {
         SensorId::Static => &STATIC_PREV,
         SensorId::Mag => &MAG_PREV,
         SensorId::Airspeed => &AIRSPEED_PREV,
+        SensorId::Battery => &BATTERY_PREV,
     }
 }
 
@@ -92,6 +103,7 @@ fn us_per_read(sensor: SensorId) -> u32 {
         SensorId::Static => US_PER_STATIC_DRAIN,
         SensorId::Mag => US_PER_MAG_READ,
         SensorId::Airspeed => US_PER_AIR_READ,
+        SensorId::Battery => US_PER_BATTERY_READ,
     }
 }
 
@@ -100,6 +112,7 @@ fn sensor_from_tag(tag: u8) -> Option<SensorId> {
         0 => Some(SensorId::Static),
         1 => Some(SensorId::Mag),
         2 => Some(SensorId::Airspeed),
+        3 => Some(SensorId::Battery),
         _ => None,
     }
 }
@@ -109,6 +122,7 @@ fn tag_from_sensor(sensor: SensorId) -> u8 {
         SensorId::Static => 0,
         SensorId::Mag => 1,
         SensorId::Airspeed => 2,
+        SensorId::Battery => 3,
     }
 }
 
@@ -157,25 +171,47 @@ fn static_tick_work_us(hz: u16) -> u64 {
 }
 
 /// Estimated blocking time for one tick (BMP FIFO drain; others capped).
-fn tick_work_us(static_hz: u16, mag_hz: u16, air_hz: u16) -> u64 {
+fn tick_work_us(static_hz: u16, mag_hz: u16, air_hz: u16, battery_hz: u16) -> u64 {
     static_tick_work_us(static_hz)
         + reads_per_tick_capped(mag_hz) * US_PER_MAG_READ as u64
         + reads_per_tick_capped(air_hz) * US_PER_AIR_READ as u64
+        + reads_per_tick_capped(battery_hz) * US_PER_BATTERY_READ as u64
 }
 
 /// Whether these rates fit the shared bus time budget (before accepting SetRate).
-pub fn sustainable(static_hz: u16, mag_hz: u16, air_hz: u16) -> bool {
-    tick_work_us(static_hz, mag_hz, air_hz) <= MAX_TICK_WORK_US as u64
+pub fn sustainable(static_hz: u16, mag_hz: u16, air_hz: u16, battery_hz: u16) -> bool {
+    tick_work_us(static_hz, mag_hz, air_hz, battery_hz) <= MAX_TICK_WORK_US as u64
 }
 
 /// Apply SetRate if the combined schedule is sustainable; records previous Hz.
 pub fn try_set(sensor: SensorId, hz: u16) -> bool {
-    let (s, m, a) = match sensor {
-        SensorId::Static => (hz, get(SensorId::Mag), get(SensorId::Airspeed)),
-        SensorId::Mag => (get(SensorId::Static), hz, get(SensorId::Airspeed)),
-        SensorId::Airspeed => (get(SensorId::Static), get(SensorId::Mag), hz),
+    let (s, m, a, b) = match sensor {
+        SensorId::Static => (
+            hz,
+            get(SensorId::Mag),
+            get(SensorId::Airspeed),
+            get(SensorId::Battery),
+        ),
+        SensorId::Mag => (
+            get(SensorId::Static),
+            hz,
+            get(SensorId::Airspeed),
+            get(SensorId::Battery),
+        ),
+        SensorId::Airspeed => (
+            get(SensorId::Static),
+            get(SensorId::Mag),
+            hz,
+            get(SensorId::Battery),
+        ),
+        SensorId::Battery => (
+            get(SensorId::Static),
+            get(SensorId::Mag),
+            get(SensorId::Airspeed),
+            hz,
+        ),
     };
-    if !sustainable(s, m, a) {
+    if !sustainable(s, m, a, b) {
         return false;
     }
     prev_atom(sensor).store(get(sensor), Ordering::Relaxed);
@@ -189,7 +225,13 @@ pub fn set_safe_defaults() {
     store_hz(SensorId::Static, SAFE_HZ);
     store_hz(SensorId::Mag, SAFE_HZ);
     store_hz(SensorId::Airspeed, SAFE_HZ);
-    for s in [SensorId::Static, SensorId::Mag, SensorId::Airspeed] {
+    store_hz(SensorId::Battery, SAFE_BATTERY_HZ);
+    for s in [
+        SensorId::Static,
+        SensorId::Mag,
+        SensorId::Airspeed,
+        SensorId::Battery,
+    ] {
         rem_atom(s).store(0, Ordering::Relaxed);
         fail_atom(s).store(0, Ordering::Relaxed);
     }
@@ -199,7 +241,7 @@ pub fn set_safe_defaults() {
 
 /// Max Hz to advertise in Hello for a sensor given what else is attached.
 pub fn hello_max_hz(sensor: SensorId, attached: u8) -> u16 {
-    use crate::sensors::{BMP_BIT, MMC_BIT, MS4525_BIT};
+    use crate::sensors::{BATTERY_BIT, BMP_BIT, MMC_BIT, MS4525_BIT};
     let mut s = if attached & BMP_BIT != 0 {
         get(SensorId::Static)
     } else {
@@ -215,25 +257,37 @@ pub fn hello_max_hz(sensor: SensorId, attached: u8) -> u16 {
     } else {
         0
     };
+    let mut b = if attached & BATTERY_BIT != 0 {
+        get(SensorId::Battery)
+    } else {
+        0
+    };
     match sensor {
         SensorId::Static => s = 50,
         SensorId::Mag => m = 50,
         SensorId::Airspeed => a = 50,
+        SensorId::Battery => b = 2,
     }
-    // Walk down from 50 until the trio is sustainable.
-    let mut cap = 50u16;
+    let mut cap = match sensor {
+        SensorId::Battery => 2u16,
+        _ => 50u16,
+    };
     while cap > 0 {
-        let (ts, tm, ta) = match sensor {
-            SensorId::Static => (cap, m, a),
-            SensorId::Mag => (s, cap, a),
-            SensorId::Airspeed => (s, m, cap),
+        let (ts, tm, ta, tb) = match sensor {
+            SensorId::Static => (cap, m, a, b),
+            SensorId::Mag => (s, cap, a, b),
+            SensorId::Airspeed => (s, m, cap, b),
+            SensorId::Battery => (s, m, a, cap),
         };
-        if sustainable(ts, tm, ta) {
+        if sustainable(ts, tm, ta, tb) {
             return cap;
         }
-        cap = cap.saturating_sub(5);
+        cap = cap.saturating_sub(1);
     }
-    SAFE_HZ
+    match sensor {
+        SensorId::Battery => SAFE_BATTERY_HZ,
+        _ => SAFE_HZ,
+    }
 }
 
 /// Start of each poll tick: reset the shared microsecond work pool.
@@ -299,7 +353,10 @@ fn backoff(sensor: SensorId) {
     let next = if prev > 0 && prev < cur {
         prev
     } else {
-        (cur / 2).max(SAFE_HZ)
+        match sensor {
+            SensorId::Battery => (cur / 2).max(SAFE_BATTERY_HZ),
+            _ => (cur / 2).max(SAFE_HZ),
+        }
     };
     println!(
         "pod: backing off {:?} {} -> {} Hz",

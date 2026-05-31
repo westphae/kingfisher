@@ -25,6 +25,12 @@ struct PodSection {
     wifi_password: String,
     #[serde(default, rename = "udp_addr")]
     udp_addr: String,
+    #[serde(default = "default_battery_capacity", rename = "battery_capacity_mah")]
+    battery_capacity_mah: u16,
+}
+
+fn default_battery_capacity() -> u16 {
+    850
 }
 
 fn main() {
@@ -70,6 +76,10 @@ fn main() {
     println!("cargo:rustc-env=SSID={ssid}");
     println!("cargo:rustc-env=PASSWORD={}", cfg.pod.wifi_password);
     println!("cargo:rustc-env=PI_ADDR={udp_addr}");
+    println!(
+        "cargo:rustc-env=BATTERY_CAPACITY_MAH={}",
+        cfg.pod.battery_capacity_mah
+    );
 }
 
 fn resolve_config_path() -> PathBuf {

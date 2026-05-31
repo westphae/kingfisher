@@ -4,6 +4,7 @@
 #![no_std]
 #![no_main]
 
+mod battery_cfg;
 mod cfg;
 mod cmd;
 mod hello;
@@ -115,6 +116,7 @@ async fn main(spawner: Spawner) -> ! {
 
 #[embassy_executor::task]
 async fn sensor_bringup_task(bus: &'static mut sensors::bus::Bus) {
+    crate::battery_cfg::init();
     let board = sensors::bringup_board(bus);
     sensors::run_sensor_poll(bus, board).await;
 }
@@ -229,7 +231,7 @@ async fn uplink_task(stack: Stack<'static>) {
                     next_status = now + Duration::from_secs(5);
                     let status = Frame::Status(Status {
                         pod_uptime_us: uptime_us,
-                        battery_v: 0.0,
+                        battery_v: sensors::latest_battery_v(),
                         rssi_dbm: link::wifi_rssi_dbm(),
                         tx_seq: seq,
                         rx_seq_last: cmd::last_rx_cmd_seq(),

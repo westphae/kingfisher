@@ -28,6 +28,9 @@ pub fn scan(bus: &mut Bus) {
     found += probe_reg(bus, 0x47, 0x01, &mut seen);
     found += probe_reg(bus, 0x46, 0x01, &mut seen);
     found += probe_reg(bus, 0x30, 0x2f, &mut seen);
+    if !seen[super::bq27441::ADDR as usize] {
+        found += probe_reg(bus, super::bq27441::ADDR, 0x04, &mut seen);
+    }
     if !seen[super::ms4525::ADDR as usize] {
         found += super::ms4525::Ms4525::scan_line(bus);
         seen[super::ms4525::ADDR as usize] = true;

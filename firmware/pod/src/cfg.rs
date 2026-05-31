@@ -27,6 +27,28 @@ pub const TICK_MS: u64 = 100;
 /// Scheduler rate derived from [`TICK_MS`] (100 ms → 10 Hz).
 pub const BASE_HZ: u16 = (1000 / TICK_MS) as u16;
 
+/// LiPo design capacity (mAh) for BQ27441 gauge configuration at build time.
+pub const BATTERY_CAPACITY_MAH: u16 = parse_env_u16(env!("BATTERY_CAPACITY_MAH"));
+
+/// Parse decimal u16 at compile time from env string.
+const fn parse_env_u16(s: &str) -> u16 {
+    let bytes = s.as_bytes();
+    let mut i = 0usize;
+    let mut n = 0u16;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b < b'0' || b > b'9' {
+            panic!("BATTERY_CAPACITY_MAH must be decimal");
+        }
+        n = n * 10 + (b - b'0') as u16;
+        i += 1;
+    }
+    if n == 0 {
+        panic!("BATTERY_CAPACITY_MAH must be > 0");
+    }
+    n
+}
+
 /// Parse `a.b.c.d:port` at compile time (same source as `env!("PI_ADDR")`).
 const fn parse_pi_addr(s: &[u8]) -> ([u8; 4], u16) {
     let mut colon = s.len();
