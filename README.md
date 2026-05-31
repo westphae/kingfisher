@@ -130,6 +130,41 @@ toolchain, and flashing steps.
 The cockpit UI is served on `:8080` by default. Configuration lives in
 `~/.config/kingfisher/config.json`.
 
+### Browser terminal (optional)
+
+Kingfisher can expose a full-screen web terminal at **`/terminal`** (footer link
+on the cockpit page). It is **disabled by default**; enable in `config.json`:
+
+```json
+"terminal": {
+  "enabled": true,
+  "user": "eric",
+  "authorized_keys": [
+    "ssh-ed25519 AAAA... kingfisher-terminal"
+  ],
+  "allow_password": false,
+  "session_timeout_min": 480,
+  "max_sessions": 2
+}
+```
+
+**Public-key login (recommended):** put one or more OpenSSH `authorized_keys` lines in
+`authorized_keys` and set `user` to the Unix account the shell should run as. The
+browser signs a one-time challenge with a private key stored locally (generate in
+the terminal UI, or import an unencrypted Ed25519 `id_ed25519`). Your password is
+never sent. Set `"allow_password": true` to keep PAM login as a fallback.
+
+**Password login:** when `authorized_keys` is omitted, login uses **Linux PAM**
+(same username/password as SSH). The shell runs as the authenticated user when
+kingfisher runs as that user; logging in as a different user requires root or
+`cap_setuid` on the kingfisher binary.
+
+**Security:** without public-key auth, the default HTTP server sends passwords in
+cleartext. Use HTTPS or an SSH tunnel in front of `:8080` if password login is
+enabled.
+
+Building on Linux requires **`libpam0g-dev`** for CGO (`apt install libpam0g-dev`).
+
 If you want DB filenames, session start times, and buffered IIO timestamps to be
 meaningful immediately after boot, start kingfisher only after GNSS time sync is
 healthy. `docs/time-sync.md` includes a `chronyc waitsync` systemd pattern and a

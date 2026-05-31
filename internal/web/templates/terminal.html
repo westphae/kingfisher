@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b1320">
+  <title>Kingfisher — Terminal</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/xterm/xterm.css">
+  <link rel="stylesheet" href="/static/terminal.css">
+</head>
+<body>
+  <header id="termHdr">
+    <a class="back" href="/">← Cockpit</a>
+    <span class="title">Terminal</span>
+    <span id="termUser" class="user" hidden></span>
+    <button id="termLogout" type="button" hidden>Logout</button>
+  </header>
+
+  <section id="loginBox" class="loginBox">
+    <div id="pubkeyPanel">
+      <p class="hint">Sign in with an Ed25519 key. Your private key stays in this browser; only a signature is sent.</p>
+      <p id="pubkeyUser" class="hint"></p>
+      <button type="button" id="pubkeyLoginBtn" class="primary" hidden>Sign in</button>
+      <details id="keySetup" class="keySetup" open>
+        <summary>Key setup</summary>
+        <p id="keySetupHint" class="hint">Add the public key below to <code>terminal.authorized_keys</code>, set <code>terminal.user</code> to your Unix username, then reload this page.</p>
+        <button type="button" id="genKeyBtn">Generate browser key</button>
+        <label class="fileLabel">Import unencrypted <code>id_ed25519</code>
+          <input type="file" id="importKeyFile" accept=".pem,.key,text/plain">
+        </label>
+        <pre id="pubkeyLine" class="pubkeyLine" hidden></pre>
+        <button type="button" id="copyPubkeyBtn" hidden>Copy public key</button>
+        <button type="button" id="clearKeyBtn" class="danger" hidden>Remove browser key</button>
+      </details>
+    </div>
+
+    <form id="passwordForm" hidden>
+      <p class="warn">Password login sends your password over the network unless you use HTTPS or an SSH tunnel.</p>
+      <label>Username <input id="loginUser" name="username" autocomplete="username"></label>
+      <label>Password <input id="loginPass" name="password" type="password" autocomplete="current-password"></label>
+      <button type="submit">Login with password</button>
+    </form>
+
+    <p id="loginErr" class="err" hidden></p>
+  </section>
+
+  <div id="terminal" hidden></div>
+
+  <script src="/static/xterm/xterm.js"></script>
+  <script src="/static/xterm/addon-fit.js"></script>
+  <script src="/static/tweetnacl.min.js"></script>
+  <script src="/static/terminal-key.js"></script>
+  <script src="/static/terminal.js"></script>
+</body>
+</html>

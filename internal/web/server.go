@@ -8,6 +8,11 @@
 //	GET  /api/status  — DB path, size, buffered rows, GPS fix state, clock health.
 //	POST /api/compass/align — capture sensor→vehicle alignment (manual or GPS taxi).
 //	POST /api/airspeed/zero — average pitot ΔP over 15s and save as zero offset.
+//	GET  /terminal — browser shell (opt-in via config terminal.enabled).
+//	GET  /api/terminal/auth — login methods (pubkey / password).
+//	GET  /api/terminal/challenge — one-time challenge for pubkey login.
+//	POST /api/terminal/login — pubkey signature or PAM password login.
+//	GET  /api/terminal/ws — WebSocket PTY (requires session cookie).
 package web
 
 import (
@@ -34,6 +39,7 @@ import (
 	"github.com/westphae/kingfisher/internal/pod"
 	"github.com/westphae/kingfisher/internal/sensors"
 	"github.com/westphae/kingfisher/internal/store"
+	"github.com/westphae/kingfisher/internal/web/terminal"
 )
 
 //go:embed templates/*.html static/*
@@ -52,6 +58,7 @@ type Server struct {
 	tpl     *template.Template
 	httpSrv *http.Server
 	up      websocket.Upgrader
+	term    *terminal.Handler
 }
 
 func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, gpsc *gps.Client, podc *pod.Client, reg *sensors.Registry, compass derive.CompassAligner) (*Server, error) {
@@ -70,6 +77,7 @@ func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, 
 		compass: compass,
 		tpl:     tpl,
 		up:      websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
+		term: terminal.New(func() config.Terminal { return cfg.Get().Terminal }, tpl),
 	}, nil
 }
 
@@ -85,6 +93,7 @@ func (s *Server) Run(addr string, stop <-chan struct{}) error {
 	mux.HandleFunc("/api/recording", s.handleRecording)
 	mux.HandleFunc("/api/compass/align", s.handleCompassAlign)
 	mux.HandleFunc("/api/airspeed/zero", s.handleAirspeedZero)
+	s.term.Register(mux)
 
 	staticFS, err := fs.Sub(assets, "static")
 	if err != nil {

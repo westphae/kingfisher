@@ -1,0 +1,198 @@
+:root {
+  --bg: #0b1320;
+  --fg: #d6deec;
+  --dim: #7d8aa5;
+  --panel: #121b2e;
+  --accent: #4cb4ff;
+  --rec: #ff5c5c;
+  --border: #1f2a44;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+#termHdr {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.65rem 1rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+#termHdr .back {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+#termHdr .title { font-weight: 700; }
+#termHdr .user { color: var(--dim); flex: 1; text-align: right; }
+
+#termHdr button {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-height: 36px;
+  padding: 0 0.75rem;
+  cursor: pointer;
+}
+
+.loginBox {
+  max-width: 24rem;
+  margin: 2rem auto;
+  padding: 1.25rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.loginBox .warn {
+  font-size: 0.85rem;
+  color: var(--dim);
+  margin: 0 0 1rem;
+}
+
+.loginBox .hint {
+  font-size: 0.85rem;
+  color: var(--dim);
+  margin: 0 0 0.75rem;
+  line-height: 1.45;
+}
+
+.loginBox code {
+  font-size: 0.82rem;
+}
+
+.loginBox button.primary,
+.loginBox button[type="submit"] {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 0.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #051125;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.loginBox button.primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.loginBox button.danger {
+  margin-top: 0.5rem;
+  width: 100%;
+  min-height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--rec);
+  background: transparent;
+  color: var(--rec);
+  cursor: pointer;
+}
+
+.keySetup {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+
+.keySetup summary {
+  cursor: pointer;
+  color: var(--accent);
+  margin-bottom: 0.5rem;
+}
+
+.keySetup button {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  margin-top: 0.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.fileLabel {
+  display: block;
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.fileLabel input[type="file"] {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--dim);
+}
+
+.pubkeyLine {
+  margin: 0.75rem 0 0;
+  padding: 0.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: all;
+}
+
+.loginBox label {
+  display: block;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.loginBox input {
+  display: block;
+  width: 100%;
+  margin-top: 0.35rem;
+  min-height: 40px;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 1rem;
+}
+
+.loginBox .err {
+  color: var(--rec);
+  font-size: 0.9rem;
+  margin: 0.5rem 0 0;
+}
+
+#terminal {
+  flex: 1 1 auto;
+  min-height: 50vh;
+  padding: 0.5rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+#terminal .xterm {
+  flex: 1;
+  width: 100%;
+}

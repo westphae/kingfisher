@@ -992,6 +992,10 @@ function formatBytes(n) {
 // Settings dialog (aircraft / notes / flush only — IIO rates live on each sensor tab)
 const dlg = document.getElementById('settingsDlg');
 
+document.getElementById('terminalBtn')?.addEventListener('click', () => {
+  location.href = '/terminal';
+});
+
 document.getElementById('settingsBtn').addEventListener('click', async () => {
   const cfgR = await fetch('/api/config');
   const cfg = await cfgR.json();

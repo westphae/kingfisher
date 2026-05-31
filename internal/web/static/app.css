@@ -287,15 +287,31 @@ body {
   border-top: 1px solid var(--border);
   font-size: 0.9rem;
 }
-#ftr button {
+#ftr .ftrActions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+#ftr button {
   min-height: 40px;
   padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+#ftr #terminalBtn {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border);
+}
+#ftr #terminalBtn:hover {
+  background: var(--border);
+}
+#ftr #settingsBtn {
   background: var(--accent);
   color: #051125;
   border: 0;
-  border-radius: 8px;
-  font-weight: 600;
 }
 
 dialog {

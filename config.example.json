@@ -3,6 +3,16 @@
   "aircraft_name": "Bonanza V35B",
   "http_addr": ":8080",
   "gpsd_addr": "localhost:2947",
+  "terminal": {
+    "enabled": false,
+    "user": "pi",
+    "authorized_keys": [
+      "ssh-ed25519 AAAA... kingfisher-terminal"
+    ],
+    "allow_password": false,
+    "session_timeout_min": 480,
+    "max_sessions": 2
+  },
   "pod": {
     "wifi_ssid": "kingfisher",
     "wifi_password": "",

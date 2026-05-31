@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // DefaultPath resolves to $XDG_CONFIG_HOME/kingfisher/config.json (typically
@@ -286,6 +287,55 @@ type Config struct {
 	Airspeed   Airspeed          `json:"airspeed"`
 	AHRS       AHRS              `json:"ahrs"`
 	Compass    Compass           `json:"compass"`
+	Terminal   Terminal          `json:"terminal,omitempty"`
+}
+
+// Terminal configures the optional browser shell (/terminal).
+type Terminal struct {
+	Enabled           bool     `json:"enabled"`
+	User              string   `json:"user,omitempty"`            // Unix account for shell (required with authorized_keys)
+	AuthorizedKeys    []string `json:"authorized_keys,omitempty"` // OpenSSH authorized_keys lines (Ed25519/RSA/ECDSA)
+	AllowPassword     bool     `json:"allow_password,omitempty"`  // PAM login when authorized_keys is set
+	SessionTimeoutMin int      `json:"session_timeout_min"`
+	MaxSessions       int      `json:"max_sessions"`
+}
+
+// PubkeyAuth reports whether SSH public-key challenge login is configured.
+func (t Terminal) PubkeyAuth() bool {
+	if strings.TrimSpace(t.User) == "" {
+		return false
+	}
+	for _, line := range t.AuthorizedKeys {
+		s := strings.TrimSpace(line)
+		if s != "" && !strings.HasPrefix(s, "#") {
+			return true
+		}
+	}
+	return false
+}
+
+// PasswordAuth reports whether PAM username/password login is allowed.
+func (t Terminal) PasswordAuth() bool {
+	if t.PubkeyAuth() {
+		return t.AllowPassword
+	}
+	return true
+}
+
+// SessionTimeout returns how long a terminal login session stays valid.
+func (t Terminal) SessionTimeout() time.Duration {
+	if t.SessionTimeoutMin <= 0 {
+		return 8 * time.Hour
+	}
+	return time.Duration(t.SessionTimeoutMin) * time.Minute
+}
+
+// SessionCap returns the concurrent terminal login cap (0 = default 2).
+func (t Terminal) SessionCap() int {
+	if t.MaxSessions <= 0 {
+		return 2
+	}
+	return t.MaxSessions
 }
 
 func Defaults() *Config {
@@ -321,6 +371,11 @@ func Defaults() *Config {
 			N0Ut:         DefaultCompassN0Ut,
 			Kalman:       CompassKalmanDefaults(),
 			SensorMountR: map[string][3][3]float64{},
+		},
+		Terminal: Terminal{
+			Enabled:           false,
+			SessionTimeoutMin: 480,
+			MaxSessions:       2,
 		},
 	}
 }
