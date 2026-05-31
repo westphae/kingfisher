@@ -81,6 +81,36 @@ stream in software (`internal/gps`), publishing/recording every fix at
 10 Hz or every other fix at 5 Hz. The setting persists in
 `config.json` under `gps.rate_hz`.
 
+### Timestamps (`ts_ns` vs fix time)
+
+Each row in the `gps` table (and every other sensor table) has **`ts_ns`**: nanoseconds
+on the Pi's disciplined wall clock. For GPS, **`ts_ns` is not the fix epoch** — it
+is when kingfisher **received** the gpsd report. The receiver's fix time is stored
+separately as the **`fix_time_unix_s`** column (typically **~600–700 ms earlier**
+than `ts_ns` on this M9N + gpsd setup; that gap is receiver/pipeline lag, not clock
+error).
+
+For sensor fusion: align GPS with cabin IMU and pod data on **`ts_ns`**; use
+**`fix_time_unix_s`** when you need GNSS solution time. Full per-source semantics
+(buffered IIO, pod reconstruction, derived devices, fusion checklist) are in
+**[`docs/timestamps.md`](docs/timestamps.md)**.
+
+## Timestamps
+
+All flight DB sensor tables store **`ts_ns`** (nanoseconds, Unix epoch) on the
+Pi host wall clock (`CLOCK_REALTIME`), ideally GNSS-disciplined before recording.
+
+| Source | `ts_ns` meaning (summary) |
+|--------|---------------------------|
+| Buffered IIO (ICM45686, …) | Kernel capture time when `current_timestamp_clock == realtime` |
+| Polled IIO | Time when the periodic sysfs read completed |
+| GPS | Pi time when the TPV was **received**; fix epoch is **`fix_time_unix_s`** |
+| Pod (BMP581, MS4525, MMC5983) | Sample time reconstructed onto Pi clock from pod uptime + `age_us` |
+| Derived (AHRS, press_alt, geo, compass) | Time when the value was **computed** (inputs may be slightly older) |
+
+See **[`docs/timestamps.md`](docs/timestamps.md)** for measurement error vs true
+sample time, GPS fusion guidance, and implementation references.
+
 ## Building
 
 ```
@@ -103,4 +133,5 @@ The cockpit UI is served on `:8080` by default. Configuration lives in
 If you want DB filenames, session start times, and buffered IIO timestamps to be
 meaningful immediately after boot, start kingfisher only after GNSS time sync is
 healthy. `docs/time-sync.md` includes a `chronyc waitsync` systemd pattern and a
-verification checklist.
+verification checklist. Per-table **`ts_ns`** semantics and sensor-fusion usage
+(including GPS **`fix_time_unix_s`**) are documented in **`docs/timestamps.md`**.

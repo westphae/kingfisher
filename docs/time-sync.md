@@ -5,6 +5,9 @@ flight DB filename, `_session.start_time`, buffered IIO timestamps on
 `current_timestamp_clock == realtime`, pod wall-clock reconstruction, and
 derived-stream timestamps all assume the Pi wall clock is already sane.
 
+Per-table **`ts_ns`** semantics, GPS **`fix_time_unix_s`** vs row time, and
+sensor-fusion guidance: **`docs/timestamps.md`**.
+
 The intended deployment model is:
 
 1. `gpsd` reads the M9N on `/dev/ttyAMA0` in read-only mode.
@@ -261,19 +264,25 @@ sub-millisecond.
 **UART + PPS:** sub-millisecond clock discipline once `#* PPS`; UART still
 carries date/time.
 
-### Kingfisher clock badge vs chrony
+### Kingfisher clock badge
 
-The cockpit header compares host wall time to the **fix epoch** in each gpsd TPV
-report. On this u-blox binary path that lag is often **600–700 ms** even when
-chrony and PPS are correct — receiver/pipeline delay, not a broken Pi clock.
+The cockpit header shows **Pi time** discipline from chrony when available:
 
-Kingfisher tracks:
+- **PPS synced** + **Correction** — chrony is steering from PPS; the correction
+  is chrony's last offset (typically nanoseconds).
+- **GPS synced** — UART serial time only (seconds-level accuracy).
+- **PPS wired, idle** — `/dev/pps0` exists but chrony is not selecting PPS
+  (check `refclock SOCK /run/chrony.pps0.sock` in `chrony.conf`).
+- **GPS data** — age of the last gpsd fix epoch used for cross-check.
+- **Est. error** — kingfisher-only fallback when chrony is unavailable; compares
+  host wall time to the fix epoch after subtracting typical receiver lag.
 
-- **Fix epoch lag** — raw offset (often ~650 ms here)
-- **Skew** — offset minus a running median baseline (true clock error once settled)
+Hover the badge for a full tooltip. This is complementary to `chronyc tracking`:
+the header answers "what steers the Pi clock and by how much?" while the GPS
+cross-check catches gpsd outages or gross wall-clock drift.
 
-“Clock OK” means fresh fixes and skew under about 250 ms, not that fix-epoch lag
-is zero.
+For what each flight DB **`ts_ns`** column means (including GPS row time vs
+**`fix_time_unix_s`**), see **`docs/timestamps.md`**.
 
 ## 10. Kingfisher startup ordering
 
