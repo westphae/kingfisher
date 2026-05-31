@@ -12,7 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTO_VERSION: u8 = 2;
+pub const PROTO_VERSION: u8 = 3;
 pub const MAX_DEVICE_NAME: usize = 12;
 pub const MAX_READINGS: usize = 8;
 pub const MAX_SENSORS: usize = 4;
@@ -88,6 +88,7 @@ pub enum SensorId {
     Airspeed,
     Static,
     Mag,
+    Battery,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -124,6 +125,16 @@ pub enum Reading {
         z_ut: f32,
         age_us: u32,
     },
+    Battery {
+        voltage_v: f32,
+        current_a: f32,
+        power_w: f32,
+        capacity_remain_mah: f32,
+        capacity_full_mah: f32,
+        soc_pct: f32,
+        time_remain_s: f32,
+        age_us: u32,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -138,6 +149,7 @@ pub enum Cmd {
 pub enum AttrKey {
     Oversampling,
     IirFilter,
+    DesignCapacity,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -274,6 +286,18 @@ mod tests {
                 y_ut: -4.1,
                 z_ut: 42.8,
                 age_us: 0,
+            })
+            .unwrap();
+        samples
+            .push(Reading::Battery {
+                voltage_v: 3.85,
+                current_a: -0.12,
+                power_w: 0.46,
+                capacity_remain_mah: 610.0,
+                capacity_full_mah: 850.0,
+                soc_pct: 72.0,
+                time_remain_s: 15_120.0,
+                age_us: 50,
             })
             .unwrap();
         rt(&Frame::Sample(SampleBatch {

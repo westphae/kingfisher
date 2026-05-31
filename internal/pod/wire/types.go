@@ -5,7 +5,7 @@
 package wire
 
 const (
-	ProtoVersion     = 2
+	ProtoVersion     = 3
 	MaxDeviceNameLen = 12
 	MaxReadings      = 8
 	MaxSensors       = 4
@@ -38,6 +38,7 @@ const (
 	readingAirspeed byte = 0
 	readingStatic   byte = 1
 	readingMag      byte = 2
+	readingBattery  byte = 3
 )
 
 // Frame is the top-level message envelope.
@@ -91,6 +92,7 @@ const (
 	SensorAirspeed SensorID = 0
 	SensorStatic   SensorID = 1
 	SensorMag      SensorID = 2
+	SensorBattery  SensorID = 3
 )
 
 func (s SensorID) String() string {
@@ -101,6 +103,8 @@ func (s SensorID) String() string {
 		return "static"
 	case SensorMag:
 		return "mag"
+	case SensorBattery:
+		return "battery"
 	default:
 		return "unknown"
 	}
@@ -162,6 +166,20 @@ type MagReading struct {
 func (MagReading) isReading()         {}
 func (r MagReading) AgeMicros() uint32 { return r.AgeUs }
 
+type BatteryReading struct {
+	VoltageV          float32
+	CurrentA          float32
+	PowerW            float32
+	CapacityRemainMah float32
+	CapacityFullMah   float32
+	SocPct            float32
+	TimeRemainS       float32
+	AgeUs             uint32
+}
+
+func (BatteryReading) isReading()         {}
+func (r BatteryReading) AgeMicros() uint32 { return r.AgeUs }
+
 // Cmd is the Pi -> pod control message. It is wrapped in CmdFrame for
 // transmission as a Frame::Cmd variant.
 type Cmd interface {
@@ -202,8 +220,9 @@ func (CmdReboot) isCmd() {}
 type AttrKey uint8
 
 const (
-	AttrOversampling AttrKey = 0
-	AttrIirFilter    AttrKey = 1
+	AttrOversampling    AttrKey = 0
+	AttrIirFilter       AttrKey = 1
+	AttrDesignCapacity  AttrKey = 2
 )
 
 // Ack acknowledges a Cmd by its outbound seq number.

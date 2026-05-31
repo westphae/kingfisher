@@ -31,6 +31,11 @@ func TestRustFixtures(t *testing.T) {
 				AirspeedReading{DpPa: 102.5, TempC: 18.3, AgeUs: 250},
 				StaticReading{PPa: 98_765.0, TempC: 18.4, AgeUs: 100},
 				MagReading{XUt: 21.3, YUt: -4.1, ZUt: 42.8, AgeUs: 0},
+				BatteryReading{
+					VoltageV: 3.85, CurrentA: -0.12, PowerW: 0.46,
+					CapacityRemainMah: 610, CapacityFullMah: 850,
+					SocPct: 72, TimeRemainS: 15_120, AgeUs: 50,
+				},
 			},
 		},
 		"cmd_set_rate": CmdFrame{Seq: 1, Cmd: CmdSetRate{Sensor: SensorMag, Hz: 50}},
@@ -112,6 +117,11 @@ func TestRoundTrip(t *testing.T) {
 		Status{PodUptimeUs: 99, BatteryV: 4.10, RssiDBm: -42, TxSeq: 1, RxSeqLast: 0},
 		SampleBatch{PodUptimeUs: 12345, Seq: 1, Samples: []Reading{
 			MagReading{XUt: 1, YUt: 2, ZUt: 3, AgeUs: 10},
+			BatteryReading{
+				VoltageV: 4.1, CurrentA: -0.05, PowerW: 0.2,
+				CapacityRemainMah: 400, CapacityFullMah: 850,
+				SocPct: 47, TimeRemainS: 28_800, AgeUs: 5,
+			},
 		}},
 		CmdFrame{Seq: 10, Cmd: CmdSetRate{Sensor: SensorMag, Hz: 100}},
 		CmdFrame{Seq: 11, Cmd: CmdReboot{}},

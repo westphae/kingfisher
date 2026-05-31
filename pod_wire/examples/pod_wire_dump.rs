@@ -65,6 +65,18 @@ fn main() {
             age_us: 0,
         })
         .unwrap();
+    samples
+        .push(Reading::Battery {
+            voltage_v: 3.85,
+            current_a: -0.12,
+            power_w: 0.46,
+            capacity_remain_mah: 610.0,
+            capacity_full_mah: 850.0,
+            soc_pct: 72.0,
+            time_remain_s: 15_120.0,
+            age_us: 50,
+        })
+        .unwrap();
     dump(
         "sample_batch",
         &Frame::Sample(SampleBatch {

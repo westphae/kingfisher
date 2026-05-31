@@ -331,6 +331,49 @@ func (d *decoder) decodeReading(disc byte) (Reading, error) {
 			return nil, err
 		}
 		return MagReading{XUt: x, YUt: y, ZUt: z, AgeUs: uint32(age)}, nil
+	case readingBattery:
+		voltage, err := d.f32()
+		if err != nil {
+			return nil, err
+		}
+		current, err := d.f32()
+		if err != nil {
+			return nil, err
+		}
+		power, err := d.f32()
+		if err != nil {
+			return nil, err
+		}
+		capRemain, err := d.f32()
+		if err != nil {
+			return nil, err
+		}
+		capFull, err := d.f32()
+		if err != nil {
+			return nil, err
+		}
+		soc, err := d.f32()
+		if err != nil {
+			return nil, err
+		}
+		timeRemain, err := d.f32()
+		if err != nil {
+			return nil, err
+		}
+		age, err := d.uvarint()
+		if err != nil {
+			return nil, err
+		}
+		return BatteryReading{
+			VoltageV:          voltage,
+			CurrentA:          current,
+			PowerW:            power,
+			CapacityRemainMah: capRemain,
+			CapacityFullMah:   capFull,
+			SocPct:            soc,
+			TimeRemainS:       timeRemain,
+			AgeUs:             uint32(age),
+		}, nil
 	default:
 		return nil, fmt.Errorf("%w: reading=%d", ErrUnknownVariant, disc)
 	}
@@ -561,6 +604,8 @@ func defaultCapDeviceName(id SensorID) DeviceName {
 		return NewDeviceName("mmc5983")
 	case SensorAirspeed:
 		return NewDeviceName("ms4525")
+	case SensorBattery:
+		return NewDeviceName("bq27441")
 	default:
 		return DeviceName{}
 	}
@@ -635,6 +680,32 @@ func (e *encoder) encodeReading(r Reading) error {
 			return err
 		}
 		if err := e.f32(v.ZUt); err != nil {
+			return err
+		}
+		return e.uvarint(uint64(v.AgeUs))
+	case BatteryReading:
+		if err := e.uvarint(uint64(readingBattery)); err != nil {
+			return err
+		}
+		if err := e.f32(v.VoltageV); err != nil {
+			return err
+		}
+		if err := e.f32(v.CurrentA); err != nil {
+			return err
+		}
+		if err := e.f32(v.PowerW); err != nil {
+			return err
+		}
+		if err := e.f32(v.CapacityRemainMah); err != nil {
+			return err
+		}
+		if err := e.f32(v.CapacityFullMah); err != nil {
+			return err
+		}
+		if err := e.f32(v.SocPct); err != nil {
+			return err
+		}
+		if err := e.f32(v.TimeRemainS); err != nil {
 			return err
 		}
 		return e.uvarint(uint64(v.AgeUs))
