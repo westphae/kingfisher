@@ -57,10 +57,11 @@ type ClockStatus struct {
 	Disciplined  bool
 	FixTime      time.Time
 	FixAge       time.Duration
-	Offset       time.Duration // recv wall minus fix epoch (includes receiver/pipeline lag)
-	Baseline     time.Duration // median fix-epoch lag once enough samples exist
-	Skew         time.Duration // Offset - Baseline; true wall-clock error indicator
-	StartupCheck StartupClockCheck
+	Offset        time.Duration // recv wall minus fix epoch (includes receiver/pipeline lag)
+	Baseline      time.Duration // median fix-epoch lag once enough samples exist
+	Skew          time.Duration // Offset - Baseline; true wall-clock error indicator
+	BaselineReady bool
+	StartupCheck  StartupClockCheck
 }
 
 type offsetTracker struct {
@@ -170,11 +171,12 @@ func ProbeStartupClock(ctx context.Context, addr string) StartupClockCheck {
 
 func classifyClock(hasFix bool, fixTime, recvWall time.Time, offset, baseline, skew time.Duration, baselineReady bool) ClockStatus {
 	out := ClockStatus{
-		State:    ClockStateWaiting,
-		FixTime:  fixTime,
-		Offset:   offset,
-		Baseline: baseline,
-		Skew:     skew,
+		State:         ClockStateWaiting,
+		FixTime:       fixTime,
+		Offset:        offset,
+		Baseline:      baseline,
+		Skew:          skew,
+		BaselineReady: baselineReady,
 	}
 	if !hasFix || fixTime.IsZero() || recvWall.IsZero() {
 		return out
