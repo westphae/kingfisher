@@ -57,7 +57,18 @@ const KFDisplay = (function () {
     bmp280: ['pressure_pa', 'temp_c'],
     mmc5983: ['mag_x_ut', 'mag_y_ut', 'mag_z_ut'],
     ms4525: ['airspeed_dp_pa', 'airspeed_temp_c'],
+    bq27441: [
+      'battery_voltage_v',
+      'battery_soc_pct',
+      'battery_current_a',
+      'battery_power_w',
+      'battery_capacity_remain_mah',
+      'battery_capacity_full_mah',
+      'battery_time_remain_s',
+    ],
   };
+
+  const BQ27441_HIDDEN = new Set(['battery_gauge_learned']);
 
   const PRESSURE_SOURCE_LABEL = {
     1: 'Wing pod (BMP581)',
@@ -334,6 +345,14 @@ const KFDisplay = (function () {
       label: 'G load',
       fmt(v) { return `${fmtNum(v, 2)} G`; },
     },
+    ias_kt: {
+      label: 'Indicated airspeed',
+      fmt(v) { return `${fmtNum(v, 1)} kt`; },
+    },
+    tas_kt: {
+      label: 'True airspeed',
+      fmt(v) { return `${fmtNum(v, 1)} kt`; },
+    },
   };
 
   const DEVICE_SPECS = {
@@ -456,6 +475,56 @@ const KFDisplay = (function () {
       airspeed_dp_pa: CHANNEL_SPECS.airspeed_dp_pa,
       airspeed_temp_c: CHANNEL_SPECS.airspeed_temp_c,
     },
+    bq27441: {
+      battery_voltage_v: {
+        label: 'Voltage',
+        fmt(v) { return `${fmtNum(v, 2)} V`; },
+      },
+      battery_soc_pct: {
+        label: 'State of charge',
+        fmt(v) { return `${fmtNum(v, 0)}%`; },
+      },
+      battery_current_a: {
+        label: 'Current',
+        fmt(v) {
+          const ma = Number(v) * 1000;
+          if (!Number.isFinite(ma)) return String(v);
+          const sign = ma >= 0 ? '+' : '−';
+          return `${sign}${fmtNum(Math.abs(ma), 0)} mA`;
+        },
+      },
+      battery_power_w: {
+        label: 'Power',
+        fmt(v) { return `${fmtNum(v, 2)} W`; },
+      },
+      battery_capacity_remain_mah: {
+        label: 'Remaining capacity',
+        fmt(v) { return `${fmtNum(v, 0)} mAh`; },
+      },
+      battery_capacity_full_mah: {
+        label: 'Full capacity',
+        fmt(v) { return `${fmtNum(v, 0)} mAh`; },
+      },
+      battery_time_remain_s: {
+        label: 'Time remaining',
+        fmt(v) {
+          const sec = Number(v);
+          if (!Number.isFinite(sec) || sec < 0) return '—';
+          if (sec >= 3600) return `${fmtNum(sec / 3600, 1)} h`;
+          if (sec >= 60) return `${fmtNum(sec / 60, 0)} min`;
+          return `${fmtNum(sec, 0)} s`;
+        },
+      },
+    },
+    airspeed: {
+      ias_kt: CHANNEL_SPECS.ias_kt,
+      tas_kt: CHANNEL_SPECS.tas_kt,
+      airspeed_dp_pa: CHANNEL_SPECS.airspeed_dp_pa,
+      airspeed_dp_cal_pa: CHANNEL_SPECS.airspeed_dp_pa,
+      airspeed_temp_c: CHANNEL_SPECS.airspeed_temp_c,
+      static_pressure_pa: CHANNEL_SPECS.static_pressure_pa,
+      static_temp_c: CHANNEL_SPECS.static_temp_c,
+    },
     // IMU device tabs use pattern rules; explicit entries for temp only
     icm20948: { temp_c: CHANNEL_SPECS.temp_c, temp: CHANNEL_SPECS.temp },
     icm45686: { temp_c: CHANNEL_SPECS.temp_c, temp: CHANNEL_SPECS.temp },
@@ -548,6 +617,9 @@ const KFDisplay = (function () {
     if (device === 'press_alt') {
       keys = keys.filter((k) => k !== 'kollsman_inhg');
     }
+    if (device === 'bq27441') {
+      keys = keys.filter((k) => !BQ27441_HIDDEN.has(k));
+    }
     return keys;
   }
 
@@ -569,7 +641,18 @@ const KFDisplay = (function () {
     return channel;
   }
 
-  function formatValue(device, channel, value) {
+  function bq27441UnlearnedField(channel, values) {
+    if (!values || values.battery_gauge_learned !== 0) return false;
+    return channel === 'battery_soc_pct'
+      || channel === 'battery_capacity_remain_mah'
+      || channel === 'battery_capacity_full_mah'
+      || channel === 'battery_time_remain_s';
+  }
+
+  function formatValue(device, channel, value, allValues) {
+    if (device === 'bq27441' && bq27441UnlearnedField(channel, allValues)) {
+      return { text: '—' };
+    }
     if (typeof value !== 'number' || !Number.isFinite(value)) return { text: value };
     const spec = channelSpec(device, channel);
     if (spec && spec.fmt) {
@@ -629,12 +712,18 @@ const KFDisplay = (function () {
     return '<div class="gpsFootnote dim">Error estimates from gpsd; ~95% confidence, receiver-dependent.</div>';
   }
 
+  function bq27441Footnote(values) {
+    if (!values || values.battery_gauge_learned !== 0) return '';
+    return '<div class="gaugeFootnote dim">Fuel gauge not learned — state of charge and capacity are unavailable until the BQ27441 completes a charge/discharge learning cycle. Design capacity is set under Settings.</div>';
+  }
+
   return {
     channelLabel,
     formatValue,
     sortKeys,
     rowClass,
     gpsFootnote,
+    bq27441Footnote,
     fmtDefault,
   };
 })();

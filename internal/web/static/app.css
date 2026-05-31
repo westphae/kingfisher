@@ -76,9 +76,25 @@ body {
 }
 #hdr .clockStatusItem .lbl,
 #hdr .podStatusItem .lbl { color: var(--dim); margin-right: 0.25rem; }
+#hdr .clockStatusItem.clockHint { color: var(--dim); }
+#hdr .clockStatusItem.clockWarn { color: var(--warn); }
+.clockSource {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.clockSource-pps { color: var(--good); border-color: var(--good); }
+.clockSource-gps { color: var(--warn); border-color: var(--warn); }
+.clockSource-ntp { color: var(--accent); border-color: var(--accent); }
+.clockSource-local,
+.clockSource-unknown { color: var(--rec); border-color: var(--rec); }
 #hdr .podStatusItem.rssi-good { color: var(--good); }
 #hdr .podStatusItem.rssi-warn { color: var(--warn); }
 #hdr .podStatusItem.rssi-bad  { color: var(--rec); }
+#hdr .podStatusItem.batt-warn { color: var(--warn); }
+#hdr .podStatusItem.batt-bad  { color: var(--rec); }
 #hdr .tail  { flex: 1; font-variant: tabular-nums; }
 #hdr .rec   { color: var(--rec); font-weight: 600; }
 #hdr .rec.rec-offline { color: var(--dim); font-weight: 500; }
@@ -219,6 +235,13 @@ body {
   font-size: 0.8rem;
   line-height: 1.35;
   border-bottom: 1px solid var(--border);
+}
+.gaugeFootnote {
+  padding: 0.5rem 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  border-bottom: 1px solid var(--border);
+  color: var(--warn, #c9a227);
 }
 
 #ftr {
@@ -421,6 +444,59 @@ dialog input, dialog textarea {
   padding-top: 0.25rem;
 }
 #compassAlignMsg { min-height: 1.25rem; }
+
+/* Airspeed (calc) tab */
+.airspeed-hero {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  padding: 1.25rem 0.5rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.airspeed-speed-block {
+  text-align: center;
+  font-variant: tabular-nums;
+  min-width: 7rem;
+}
+.airspeed-speed-label {
+  font-size: 0.85rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.35rem;
+}
+.airspeed-speed-value {
+  font-size: 2.25rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+.airspeed-inputs {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  font-variant: tabular-nums;
+  margin: 0.5rem 0;
+}
+.airspeed-inputs th,
+.airspeed-inputs td {
+  padding: 0.45rem 0.35rem;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+}
+.airspeed-inputs th:first-child,
+.airspeed-inputs td:first-child {
+  text-align: left;
+  color: var(--dim);
+  font-weight: normal;
+}
+.airspeed-inputs thead th {
+  color: var(--dim);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.airspeed-inputs .col-val { color: var(--fg); }
+
 .attrRow button {
   background: var(--panel);
   color: var(--accent);

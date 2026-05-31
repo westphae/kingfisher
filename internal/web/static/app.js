@@ -21,19 +21,21 @@ const panelEl = document.getElementById('panel');
 const bufEl   = document.getElementById('bufStat');
 const dbEl    = document.getElementById('dbSize');
 
-const DERIVED_DEVICES = ['ahrs', 'press_alt', 'compass'];
+const DERIVED_DEVICES = ['ahrs', 'press_alt', 'compass', 'airspeed'];
+// Derived / model tabs show (calc), not (hub).
+const CALC_DEVICES = new Set([...DERIVED_DEVICES, 'geo']);
 // Wing-pod sensor tabs (matches pod.DefaultPodDeviceNames).
-const POD_TELEMETRY_DEVICES = new Set(['bmp581', 'mmc5983', 'ms4525']);
-const HUB_VIRTUAL_DEVICES = new Set(['gps', 'geo', ...DERIVED_DEVICES]);
+const POD_TELEMETRY_DEVICES = new Set(['bmp581', 'mmc5983', 'ms4525', 'bq27441']);
+const HUB_VIRTUAL_DEVICES = new Set(['gps', ...CALC_DEVICES]);
 // Derived tabs use custom settings UI; skip /api/devices/.../attrs polling.
-const SKIP_ATTRS_FETCH = new Set(['compass', 'ahrs', 'geo', 'press_alt', 'gps']);
+const SKIP_ATTRS_FETCH = new Set(['compass', 'ahrs', 'geo', 'press_alt', 'gps', 'airspeed']);
 
 function isPodTelemetry(name) {
   return state.deviceLocation.get(name) === 'pod';
 }
 
 function inferDeviceLocation(name) {
-  if (HUB_VIRTUAL_DEVICES.has(name)) return 'hub';
+  if (CALC_DEVICES.has(name)) return 'calc';
   if (POD_TELEMETRY_DEVICES.has(name)) return 'pod';
   if (state.iioDevices.has(name)) return 'hub';
   return null;
@@ -41,6 +43,7 @@ function inferDeviceLocation(name) {
 
 function applyDeviceLocation(name, loc) {
   if (!loc) return;
+  if (CALC_DEVICES.has(name)) loc = 'calc';
   const prev = state.deviceLocation.get(name);
   if (prev === loc) return;
   state.deviceLocation.set(name, loc);
@@ -105,6 +108,8 @@ function selectTab(name) {
   // Reload pod/IIO attrs so rate fields stay current after edits or SetRate/ack.
   if (name === 'compass') {
     if (!state.attrs.has('compass')) state.attrs.set('compass', []);
+  } else if (name === 'airspeed') {
+    if (!state.attrs.has('airspeed')) state.attrs.set('airspeed', []);
   } else if (!SKIP_ATTRS_FETCH.has(name) &&
     (isPodTelemetry(name) || state.iioDevices.has(name) || !state.attrs.has(name))) {
     loadAttrs(name);
@@ -125,6 +130,7 @@ function rebuildPanel() {
     attrs: document.getElementById('attrsBox'),
   };
   regions.attrs.removeAttribute('data-compass-wired');
+  regions.attrs.removeAttribute('data-airspeed-wired');
   return regions;
 }
 let panelRegions = rebuildPanel();
@@ -138,13 +144,16 @@ function renderLiveValues() {
   let html = '';
   const keys = KFDisplay.sortKeys(name, Object.keys(vals));
   for (const k of keys) {
-    const out = KFDisplay.formatValue(name, k, vals[k]);
+    const out = KFDisplay.formatValue(name, k, vals[k], vals);
     const vCell = out.html ?? escapeHtml(String(out.text ?? ''));
     const label = escapeHtml(KFDisplay.channelLabel(name, k));
     const rowCls = KFDisplay.rowClass(name, k);
     html += `<div class="kv${rowCls}"><div class="k">${label}</div><div class="v">${vCell}</div></div>`;
   }
   html += KFDisplay.gpsFootnote(name);
+  if (name === 'bq27441') {
+    html = KFDisplay.bq27441Footnote(vals) + html;
+  }
   panelRegions.kv.innerHTML = html;
 }
 
@@ -163,6 +172,13 @@ function renderAttrs() {
     panelRegions.attrs.removeAttribute('data-compass-wired');
     panelRegions.attrs.innerHTML = html + `</section>`;
     wireCompassSettings();
+    return;
+  }
+  if (name === 'airspeed') {
+    html += renderAirspeedSettings();
+    panelRegions.attrs.removeAttribute('data-airspeed-wired');
+    panelRegions.attrs.innerHTML = html + `</section>`;
+    wireAirspeedSettings();
     return;
   }
   if (!attrs) {
@@ -317,9 +333,121 @@ function wireCompassSettings() {
   }
 }
 
+function airspeedCfg() {
+  return state.config?.airspeed ?? {};
+}
+
+function renderAirspeedSettings() {
+  const cfg = airspeedCfg();
+  const zero = cfg.dp_zero_pa ?? 0;
+  const floor = cfg.low_speed_floor_kt ?? 5;
+  const emaOn = cfg.ema_enabled !== false;
+  const tau = cfg.ema_tau_s ?? 0.5;
+  return (
+    `<div class="kv"><div class="k">Zero offset (Pa)</div>` +
+    `<div class="v"><input id="airspeedDpZero" type="number" step="0.01" value="${escapeAttr(zero)}" style="width:7em"/> ` +
+    `<button type="button" id="airspeedZeroBtn">Zero now (15 s avg)</button></div></div>` +
+    `<div class="kv"><div class="k">Low-speed floor (kt)</div>` +
+    `<div class="v"><input id="airspeedFloor" type="number" step="0.5" min="0" value="${escapeAttr(floor)}" style="width:5em"/></div></div>` +
+    `<div class="kv"><div class="k">EMA filter</div>` +
+    `<div class="v"><label><input id="airspeedEmaEnabled" type="checkbox"${emaOn ? ' checked' : ''}/> Enable</label></div></div>` +
+    `<div class="kv"><div class="k">EMA τ (s)</div>` +
+    `<div class="v"><input id="airspeedEmaTau" type="number" step="0.05" min="0.05" value="${escapeAttr(tau)}" style="width:5em"/></div></div>` +
+    `<div id="airspeedSettingsMsg" class="dim"></div>`
+  );
+}
+
+async function saveAirspeedSettings() {
+  const msg = document.getElementById('airspeedSettingsMsg');
+  if (!state.config) await loadConfig();
+  const cfg = state.config ?? {};
+  cfg.airspeed = cfg.airspeed ?? {};
+  const zeroInp = document.getElementById('airspeedDpZero');
+  const floorInp = document.getElementById('airspeedFloor');
+  const emaChk = document.getElementById('airspeedEmaEnabled');
+  const tauInp = document.getElementById('airspeedEmaTau');
+  if (zeroInp) cfg.airspeed.dp_zero_pa = Number(zeroInp.value) || 0;
+  if (floorInp) cfg.airspeed.low_speed_floor_kt = Number(floorInp.value);
+  if (emaChk) cfg.airspeed.ema_enabled = emaChk.checked;
+  if (tauInp) cfg.airspeed.ema_tau_s = Number(tauInp.value) || 0.5;
+  try {
+    const r = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg),
+    });
+    const t = await r.text();
+    if (!r.ok) throw new Error(t || r.statusText);
+    state.config = cfg;
+    if (msg) msg.textContent = 'Settings saved.';
+  } catch (e) {
+    if (msg) msg.textContent = String(e.message || e);
+  }
+}
+
+function wireAirspeedSettings() {
+  if (panelRegions.attrs.dataset.airspeedWired === '1') return;
+  panelRegions.attrs.dataset.airspeedWired = '1';
+  const zeroBtn = document.getElementById('airspeedZeroBtn');
+  const msg = document.getElementById('airspeedSettingsMsg');
+  const saveDebounced = debounce(() => saveAirspeedSettings(), 400);
+  for (const id of ['airspeedDpZero', 'airspeedFloor', 'airspeedEmaTau']) {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', saveDebounced);
+  }
+  const emaChk = document.getElementById('airspeedEmaEnabled');
+  if (emaChk) emaChk.addEventListener('change', saveDebounced);
+  if (zeroBtn) {
+    zeroBtn.addEventListener('click', async () => {
+      const durationS = 15;
+      if (msg) msg.textContent = `Sampling… ${durationS}s remaining`;
+      zeroBtn.disabled = true;
+      let left = durationS;
+      const tick = setInterval(() => {
+        left -= 1;
+        if (left > 0 && msg) msg.textContent = `Sampling… ${left}s remaining`;
+      }, 1000);
+      try {
+        const r = await fetch('/api/airspeed/zero', {
+          method: 'POST',
+          signal: AbortSignal.timeout((durationS + 10) * 1000),
+        });
+        const t = await r.text();
+        let body = {};
+        try { body = JSON.parse(t); } catch { /* plain-text error */ }
+        if (!r.ok) throw new Error(body.error || t || r.statusText);
+        const cfgR = await fetch('/api/config');
+        state.config = await cfgR.json();
+        const zeroInp = document.getElementById('airspeedDpZero');
+        if (zeroInp && body.dp_zero_pa != null) {
+          zeroInp.value = Number(body.dp_zero_pa).toFixed(2);
+        }
+        const n = body.samples != null ? `, ${body.samples} samples` : '';
+        if (msg) msg.textContent = `Zero saved (${Number(body.dp_zero_pa).toFixed(2)} Pa${n}).`;
+      } catch (e) {
+        if (msg) msg.textContent = String(e.message || e);
+      } finally {
+        clearInterval(tick);
+        zeroBtn.disabled = false;
+      }
+    });
+  }
+}
+
+function debounce(fn, ms) {
+  let t;
+  return (...args) => {
+    clearTimeout(t);
+    t = setTimeout(() => fn(...args), ms);
+  };
+}
+
 function attrLabel(device, a) {
   if (device === 'press_alt' && !a.channel && a.attr === 'kollsman_inhg') {
     return 'Kollsman (inHg)';
+  }
+  if (device === 'bq27441' && !a.channel && a.attr === 'design_capacity_mah') {
+    return 'Design capacity (mAh)';
   }
   return a.channel ? `${a.channel} ${a.attr}` : a.attr;
 }
@@ -375,6 +503,55 @@ function rssiClass(dbm) {
   return 'rssi-bad';
 }
 
+function battSocClass(soc) {
+  if (!Number.isFinite(soc)) return '';
+  if (soc < 10) return 'batt-bad';
+  if (soc < 20) return 'batt-warn';
+  return '';
+}
+
+function formatBatteryCurrent(a) {
+  if (!Number.isFinite(a)) return '—';
+  const ma = a * 1000;
+  const sign = ma >= 0 ? '+' : '−';
+  return `${sign}${Math.abs(ma).toFixed(0)} mA`;
+}
+
+function formatBatteryPower(w) {
+  if (!Number.isFinite(w)) return '—';
+  return `${w.toFixed(2)} W`;
+}
+
+function formatBatteryCapacity(mah) {
+  if (!Number.isFinite(mah)) return '—';
+  return `${Math.round(mah)} mAh`;
+}
+
+function formatBatteryTimeRemain(sec) {
+  if (!Number.isFinite(sec) || sec < 0) return '—';
+  if (sec >= 3600) return `${(sec / 3600).toFixed(1)} h`;
+  if (sec >= 60) return `${Math.round(sec / 60)} m`;
+  return `${Math.round(sec)} s`;
+}
+
+function formatBatteryHeadline(p) {
+  if (p.has_battery_telemetry) {
+    const parts = [
+      `${Number(p.battery_v).toFixed(2)} V`,
+      p.battery_gauge_learned ? `${Math.round(p.battery_soc_pct)}%` : null,
+      formatBatteryCurrent(p.battery_current_a),
+      formatBatteryPower(p.battery_power_w),
+      p.battery_gauge_learned ? formatBatteryCapacity(p.battery_capacity_remain_mah) : null,
+      p.battery_gauge_learned ? formatBatteryTimeRemain(p.battery_time_remain_s) : null,
+    ].filter(Boolean);
+    return parts.join(' · ');
+  }
+  if (p.has_battery) {
+    return `${Number(p.battery_v).toFixed(2)} V`;
+  }
+  return '—';
+}
+
 function renderPodStatus() {
   const el = document.getElementById('podStatus');
   if (!el) return;
@@ -394,41 +571,64 @@ function renderPodStatus() {
     rssiText = formatRssi(p.rssi_dbm);
     rssiCls = rssiClass(p.rssi_dbm);
   }
-  let battText = '—';
-  if (p.has_battery) {
-    battText = `${Number(p.battery_v).toFixed(2)} V`;
-  }
+  let battText = formatBatteryHeadline(p);
+  const battCls = p.has_battery_telemetry && p.battery_gauge_learned
+    ? battSocClass(p.battery_soc_pct)
+    : '';
   el.className = `podStatus podStatus-${linkCls}`;
   el.innerHTML =
     `<span class="podStatusItem"><span class="lbl">Pod</span> ${escapeHtml(podLinkLabel(p))}</span>` +
     `<span class="podStatusItem ${rssiCls}"><span class="lbl">RSSI</span> ${escapeHtml(rssiText)}</span>` +
-    `<span class="podStatusItem"><span class="lbl">Batt</span> ${escapeHtml(battText)}</span>`;
+    `<span class="podStatusItem ${battCls}"><span class="lbl">Batt</span> ${escapeHtml(battText)}</span>`;
 }
 
-function clockStateLabel(clock) {
-  switch (clock?.state) {
-    case 'aligned': return 'Clock OK';
-    case 'offset_high': return 'Clock skew high';
-    case 'stale_fix': return 'GPS time stale';
-    case 'waiting_for_fix': return 'Waiting for GPS time';
-    default: return 'Clock unknown';
-  }
+function formatTimeOffsetNs(ns) {
+  if (!Number.isFinite(ns)) return '—';
+  const sign = ns >= 0 ? '+' : '−';
+  const abs = Math.abs(ns);
+  if (abs < 1000) return `${sign}${abs.toFixed(0)} ns`;
+  if (abs < 1e6) return `${sign}${(abs / 1000).toFixed(1)} µs`;
+  if (abs < 1e9) return `${sign}${(abs / 1e6).toFixed(2)} ms`;
+  return `${sign}${(abs / 1e9).toFixed(2)} s`;
 }
 
-function formatClockOffset(ms) {
+function formatClockOffsetMs(ms) {
   if (!Number.isFinite(ms)) return '—';
-  const sign = ms >= 0 ? '+' : '-';
-  const abs = Math.abs(ms);
-  if (abs >= 1000) return `${sign}${(abs / 1000).toFixed(2)} s`;
-  if (abs >= 100) return `${sign}${abs.toFixed(0)} ms`;
-  return `${sign}${abs.toFixed(1)} ms`;
+  return formatTimeOffsetNs(ms * 1e6);
 }
 
 function formatAgeSeconds(sec) {
   if (!Number.isFinite(sec)) return '—';
-  if (sec >= 10) return `${sec.toFixed(0)} s`;
-  if (sec >= 1) return `${sec.toFixed(1)} s`;
-  return `${sec.toFixed(2)} s`;
+  if (sec >= 10) return `${sec.toFixed(0)} s ago`;
+  if (sec >= 1) return `${sec.toFixed(1)} s ago`;
+  return `${sec.toFixed(2)} s ago`;
+}
+
+function disciplineSourceLabel(d) {
+  if (!d) return '—';
+  if (d.source_label) return d.source_label;
+  switch (d.source) {
+    case 'pps': return 'PPS';
+    case 'gps': return 'GPS';
+    case 'ntp': return 'NTP';
+    case 'local': return 'Local';
+    default: return 'Unknown';
+  }
+}
+
+function clockBadgeClass(clock) {
+  const d = clock?.discipline;
+  const g = clock?.gps_check;
+  if (d?.available && d.synced) {
+    if (d.pps_steering) return 'ok';
+    if (d.source === 'gps') return 'warn';
+    if (d.source === 'ntp') return 'warn';
+    return 'ok';
+  }
+  if (g?.state === 'waiting_for_fix') return 'off';
+  if (g?.state === 'stale_fix' || g?.state === 'offset_high') return 'warn';
+  if (g?.disciplined) return 'ok';
+  return 'warn';
 }
 
 function renderClockStatus() {
@@ -441,34 +641,66 @@ function renderClockStatus() {
     return;
   }
   el.hidden = false;
-  const cls = c.disciplined && !c.startup_fallback
-    ? 'ok'
-    : (c.state === 'waiting_for_fix' ? 'off' : 'warn');
-  el.className = `clockStatus clockStatus-${cls}`;
-  const parts = [
-    `<span class="clockStatusItem"><span class="lbl">Clock</span> ${escapeHtml(clockStateLabel(c))}</span>`,
-  ];
-  if (Number.isFinite(c.skew_ms)) {
-    parts.push(`<span class="clockStatusItem"><span class="lbl">Skew</span> ${escapeHtml(formatClockOffset(c.skew_ms))}</span>`);
-  } else if (Number.isFinite(c.offset_ms)) {
-    parts.push(`<span class="clockStatusItem"><span class="lbl">Lag</span> ${escapeHtml(formatClockOffset(c.offset_ms))}</span>`);
+  el.className = `clockStatus clockStatus-${clockBadgeClass(c)}`;
+
+  const d = c.discipline || {};
+  const g = c.gps_check || {};
+  const parts = [];
+
+  if (d.available && d.synced) {
+    const src = disciplineSourceLabel(d);
+    parts.push(`<span class="clockStatusItem"><span class="lbl">Pi time</span> <span class="clockSource clockSource-${escapeAttr(d.source || 'unknown')}">${escapeHtml(src)}</span> synced</span>`);
+    if (Number.isFinite(d.last_offset_ns)) {
+      parts.push(`<span class="clockStatusItem"><span class="lbl">Correction</span> ${escapeHtml(formatTimeOffsetNs(d.last_offset_ns))}</span>`);
+    }
+    if (d.pps_present && !d.pps_steering) {
+      parts.push('<span class="clockStatusItem clockHint"><span class="lbl">PPS</span> wired, idle</span>');
+    }
+  } else if (d.available) {
+    parts.push('<span class="clockStatusItem"><span class="lbl">Pi time</span> not synced</span>');
+    if (d.pps_present) {
+      parts.push('<span class="clockStatusItem clockHint"><span class="lbl">PPS</span> present</span>');
+    }
+  } else if (g.has_fix) {
+    parts.push('<span class="clockStatusItem"><span class="lbl">Pi time</span> GPS fix only</span>');
+    if (g.baseline_ready && Number.isFinite(g.clock_error_ms)) {
+      parts.push(`<span class="clockStatusItem"><span class="lbl">Est. error</span> ${escapeHtml(formatClockOffsetMs(g.clock_error_ms))}</span>`);
+    } else if (Number.isFinite(g.pipeline_lag_ms)) {
+      parts.push('<span class="clockStatusItem"><span class="lbl">Est. error</span> calibrating…</span>');
+    }
+  } else {
+    parts.push('<span class="clockStatusItem"><span class="lbl">Pi time</span> no GPS fix</span>');
   }
-  if (Number.isFinite(c.fix_age_s)) {
-    parts.push(`<span class="clockStatusItem"><span class="lbl">Fix age</span> ${escapeHtml(formatAgeSeconds(c.fix_age_s))}</span>`);
+
+  if (g.has_fix && Number.isFinite(g.fix_age_s)) {
+    const stale = g.fresh === false;
+    parts.push(`<span class="clockStatusItem${stale ? ' clockWarn' : ''}"><span class="lbl">GPS data</span> ${escapeHtml(formatAgeSeconds(g.fix_age_s))}</span>`);
   }
+
   if (c.startup_fallback) {
-    parts.push('<span class="clockStatusItem"><span class="lbl">Startup</span> local wall time</span>');
+    parts.push('<span class="clockStatusItem clockHint"><span class="lbl">Boot</span> unsynced start</span>');
   }
-  el.title = c.startup_reason || '';
+
+  el.title = c.detail || c.startup_reason || '';
   el.innerHTML = parts.join('');
 }
 
 function renderActiveTab() {
   if (state.activeTab === 'compass') {
     renderCompassPanel();
+  } else if (state.activeTab === 'airspeed') {
+    renderAirspeedPanel();
   } else {
     renderLiveValues();
   }
+}
+
+function renderAirspeedPanel() {
+  const ms4525 = state.devices.get('ms4525');
+  const bmp581 = state.devices.get('bmp581');
+  const airspeed = state.devices.get('airspeed');
+  const pressAlt = state.devices.get('press_alt');
+  KFAirspeed.renderPanel(panelRegions.kv, ms4525, bmp581, airspeed, pressAlt);
 }
 
 function renderCompassPanel() {
@@ -552,13 +784,16 @@ function connect() {
     let snap;
     try { snap = JSON.parse(ev.data); } catch { return; }
     if (!snap || !snap.devices) return;
+    let battUpdated = false;
     for (const [name, sample] of Object.entries(snap.devices)) {
       state.devices.set(name, sample);
       ensureTab(name);
+      if (name === 'bq27441') battUpdated = true;
       if (state.activeTab === name && !SKIP_ATTRS_FETCH.has(name) && !state.attrs.has(name)) {
         loadAttrs(name);
       }
     }
+    if (battUpdated) renderPodStatus();
     renderActiveTab();
   };
   ws.onerror = () => setServerConnected(false);
@@ -753,6 +988,7 @@ async function loadConfig() {
     for (const d of window.KF_INITIAL_DEVICES) ensureTab(d);
   }
   await loadIIODevices();
+  for (const d of POD_TELEMETRY_DEVICES) ensureTab(d);
   await preloadDeviceLocations();
   connect();
   refreshStatus();

@@ -7,6 +7,7 @@
 //	POST /api/config  — replace config; persists to disk + signals reload.
 //	GET  /api/status  — DB path, size, buffered rows, GPS fix state, clock health.
 //	POST /api/compass/align — capture sensor→vehicle alignment (manual or GPS taxi).
+//	POST /api/airspeed/zero — average pitot ΔP over 15s and save as zero offset.
 package web
 
 import (
@@ -24,6 +25,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/westphae/kingfisher/internal/clock"
 	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/derive"
 	"github.com/westphae/kingfisher/internal/gps"
@@ -82,6 +84,7 @@ func (s *Server) Run(addr string, stop <-chan struct{}) error {
 	mux.HandleFunc("/api/devices/", s.handleDeviceSub)
 	mux.HandleFunc("/api/recording", s.handleRecording)
 	mux.HandleFunc("/api/compass/align", s.handleCompassAlign)
+	mux.HandleFunc("/api/airspeed/zero", s.handleAirspeedZero)
 
 	staticFS, err := fs.Sub(assets, "static")
 	if err != nil {
@@ -217,7 +220,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			gpsView["fix_time_utc"] = fix.Time.UTC().Format(time.RFC3339Nano)
 		}
 		st["gps"] = gpsView
-		st["clock"] = clockStatusView(s.gps.ClockStatus())
+		st["clock"] = clockStatusView(r.Context(), s.gps.ClockStatus())
 	}
 	if s.pod != nil {
 		st["pod"] = s.pod.LinkStats()
@@ -297,6 +300,23 @@ func (s *Server) handleDeviceSub(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, s.deviceAttrsResponse(device))
 			return
 		}
+		if device == pod.BatteryDeviceName && body.Attr == pod.AttrDesignCapacityMah {
+			if err := s.persistPodBatteryCapacity(body.Value); err != nil {
+				log.Printf("web: bq27441 design_capacity_mah=%q: %v", body.Value, err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if err := s.reg.WriteAttr(device, body.Channel, body.Attr, body.Value); err != nil {
+				log.Printf("web: %s/%s %s=%q: %v", device, body.Channel, body.Attr, body.Value, err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if s.pod != nil {
+				s.pod.RefreshRegistryViews()
+			}
+			writeJSON(w, s.deviceAttrsResponse(device))
+			return
+		}
 		if s.isIIODevice(device) && sensors.IsDeviceConfigAttr(body.Attr) {
 			if err := s.persistIIODeviceSetting(device, body.Attr, body.Value); err != nil {
 				log.Printf("web: %s %s=%q: %v", device, body.Attr, body.Value, err)
@@ -331,6 +351,9 @@ type deviceAttrsResponse struct {
 }
 
 func (s *Server) deviceAttrsResponse(device string) deviceAttrsResponse {
+	if loc := derivedDeviceLocation(device); loc != "" {
+		return deviceAttrsResponse{Location: loc, Attrs: s.deviceAttrViews(device)}
+	}
 	loc := location.Hub
 	if s.reg != nil {
 		if l := s.reg.Location(device); l != "" {
@@ -342,6 +365,15 @@ func (s *Server) deviceAttrsResponse(device string) deviceAttrsResponse {
 		loc = location.Pod
 	}
 	return deviceAttrsResponse{Location: loc, Attrs: s.deviceAttrViews(device)}
+}
+
+func derivedDeviceLocation(device string) string {
+	switch device {
+	case "ahrs", pressAltDeviceName, "compass", "airspeed", "geo":
+		return location.Calc
+	default:
+		return ""
+	}
 }
 
 func (s *Server) isIIODevice(name string) bool {
@@ -393,6 +425,9 @@ func (s *Server) deviceAttrViews(device string) []sensors.AttrView {
 	var base []sensors.AttrView
 	if s.reg != nil {
 		base = s.reg.Get(device)
+	}
+	if device == pod.BatteryDeviceName {
+		base = mergeBatteryCapacityAttr(base, s.cfg.Get().PodBatteryCapacityMah())
 	}
 	if !s.isIIODevice(device) {
 		return base
@@ -482,6 +517,38 @@ func (s *Server) handleCompassAlign(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
+func (s *Server) handleAirspeedZero(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	avg, n, err := derive.SamplePitotDpAverage(r.Context(), s.hub, derive.AirspeedZeroSampleDuration)
+	if err != nil {
+		code := http.StatusServiceUnavailable
+		if err == context.Canceled || err == context.DeadlineExceeded {
+			code = http.StatusRequestTimeout
+		}
+		http.Error(w, err.Error(), code)
+		return
+	}
+	cur := s.cfg.Get()
+	cp := *cur
+	cp.Airspeed = cur.Airspeed
+	cp.Airspeed.DpZeroPa = avg
+	s.cfg.Set(&cp)
+	if err := config.Save(s.cfg.Path(), &cp); err != nil {
+		log.Printf("web: airspeed zero save: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"status":     "ok",
+		"dp_zero_pa": avg,
+		"samples":    n,
+		"duration_s": derive.AirspeedZeroSampleDuration.Seconds(),
+	})
+}
+
 func (s *Server) persistPressAltKollsman(value string) error {
 	inhg, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
 	if err != nil || inhg < 20 || inhg > 35 {
@@ -493,6 +560,44 @@ func (s *Server) persistPressAltKollsman(value string) error {
 	cp.PressAlt.KollsmanInHg = inhg
 	s.cfg.Set(&cp)
 	return config.Save(s.cfg.Path(), &cp)
+}
+
+func (s *Server) persistPodBatteryCapacity(value string) error {
+	mah64, err := strconv.ParseUint(strings.TrimSpace(value), 10, 16)
+	if err != nil {
+		return fmt.Errorf("design_capacity_mah: invalid %q", value)
+	}
+	mah := uint16(mah64)
+	if mah < 100 || mah > 10000 {
+		return fmt.Errorf("design_capacity_mah: %d out of range [100, 10000]", mah)
+	}
+	cur := s.cfg.Get()
+	cp := *cur
+	cp.Pod = copyPod(cur.Pod)
+	cp.Pod.BatteryCapacityMah = mah
+	s.cfg.Set(&cp)
+	return config.Save(s.cfg.Path(), &cp)
+}
+
+func mergeBatteryCapacityAttr(base []sensors.AttrView, mah uint16) []sensors.AttrView {
+	if mah == 0 {
+		mah = config.DefaultPodBatteryCapacityMah
+	}
+	val := strconv.FormatUint(uint64(mah), 10)
+	for i := range base {
+		if base[i].Channel == "" && base[i].Attr == pod.AttrDesignCapacityMah {
+			base[i].Value = val
+			base[i].Writable = true
+			return base
+		}
+	}
+	return append(base, sensors.AttrView{
+		Channel:  "",
+		Attr:     pod.AttrDesignCapacityMah,
+		Value:    val,
+		Writable: true,
+		Location: location.Pod,
+	})
 }
 
 // persistAttrChange merges one attribute write into the live config's
@@ -593,24 +698,14 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = enc.Encode(v)
 }
 
-func clockStatusView(st gps.ClockStatus) map[string]any {
+func clockStatusView(ctx context.Context, st gps.ClockStatus) map[string]any {
+	disc := clock.QueryDiscipline(ctx)
+
 	out := map[string]any{
-		"state":            st.State,
-		"has_fix":          st.HasFix,
-		"fresh":            st.Fresh,
-		"disciplined":      st.Disciplined,
 		"startup_fallback": st.StartupCheck.Fallback,
 		"startup_state":    st.StartupCheck.State,
-	}
-	if !st.FixTime.IsZero() {
-		out["fix_time_utc"] = st.FixTime.UTC().Format(time.RFC3339Nano)
-		out["fix_age_s"] = st.FixAge.Seconds()
-		out["offset_ms"] = float64(st.Offset) / float64(time.Millisecond)
-		out["fix_epoch_lag_ms"] = float64(st.Offset) / float64(time.Millisecond)
-		if st.Baseline != 0 {
-			out["baseline_lag_ms"] = float64(st.Baseline) / float64(time.Millisecond)
-		}
-		out["skew_ms"] = float64(st.Skew) / float64(time.Millisecond)
+		"discipline":       disciplineView(disc),
+		"gps_check":        gpsCrosscheckView(st),
 	}
 	if !st.StartupCheck.CheckedAt.IsZero() {
 		out["startup_checked_at_utc"] = st.StartupCheck.CheckedAt.UTC().Format(time.RFC3339Nano)
@@ -621,5 +716,96 @@ func clockStatusView(st gps.ClockStatus) map[string]any {
 	if st.StartupCheck.HasFix {
 		out["startup_offset_ms"] = float64(st.StartupCheck.Offset) / float64(time.Millisecond)
 	}
+	out["detail"] = clockDetailTooltip(disc, st)
 	return out
+}
+
+func disciplineView(disc clock.DisciplineStatus) map[string]any {
+	v := map[string]any{
+		"available":    disc.Available,
+		"synced":       disc.Synced,
+		"source":       disc.Source,
+		"source_label": disc.SourceLabel,
+		"stratum":      disc.Stratum,
+		"pps_present":  disc.PPSPresent,
+		"pps_steering": disc.PPSSteering,
+	}
+	if disc.LastOffset != 0 || disc.Synced {
+		v["last_offset_ns"] = disc.LastOffset.Nanoseconds()
+	}
+	if disc.RMSOffset != 0 || disc.Synced {
+		v["rms_offset_ns"] = disc.RMSOffset.Nanoseconds()
+	}
+	return v
+}
+
+func gpsCrosscheckView(st gps.ClockStatus) map[string]any {
+	v := map[string]any{
+		"state":       st.State,
+		"has_fix":     st.HasFix,
+		"fresh":       st.Fresh,
+		"disciplined": st.Disciplined,
+	}
+	if !st.FixTime.IsZero() {
+		v["fix_time_utc"] = st.FixTime.UTC().Format(time.RFC3339Nano)
+		v["fix_age_s"] = st.FixAge.Seconds()
+		v["pipeline_lag_ms"] = float64(st.Offset) / float64(time.Millisecond)
+		if st.Baseline != 0 {
+			v["baseline_lag_ms"] = float64(st.Baseline) / float64(time.Millisecond)
+		}
+		v["clock_error_ms"] = float64(st.Skew) / float64(time.Millisecond)
+		v["baseline_ready"] = st.BaselineReady
+	}
+	return v
+}
+
+func clockDetailTooltip(disc clock.DisciplineStatus, st gps.ClockStatus) string {
+	var parts []string
+	if disc.Available && disc.Synced {
+		parts = append(parts, fmt.Sprintf("Pi wall clock steered by %s via chrony (stratum %d). Last correction: %s, RMS %s.",
+			disc.SourceLabel, disc.Stratum, formatDurationHuman(disc.LastOffset), formatDurationHuman(disc.RMSOffset)))
+		if disc.PPSPresent && !disc.PPSSteering {
+			parts = append(parts, "PPS hardware is present but chrony is not steering from it.")
+		}
+	} else if disc.Available {
+		parts = append(parts, "chrony is not synchronized to a time reference.")
+	} else {
+		parts = append(parts, "chrony status unavailable.")
+	}
+	if st.HasFix {
+		if st.BaselineReady {
+			parts = append(parts, fmt.Sprintf("GPS fix cross-check: Pi clock differs from fix epoch by %s after subtracting typical receiver lag (%s).",
+				formatDurationHuman(st.Skew), formatDurationHuman(st.Baseline)))
+		} else {
+			parts = append(parts, fmt.Sprintf("GPS fix cross-check warming up (fix epoch lag %s).", formatDurationHuman(st.Offset)))
+		}
+		if !st.Fresh {
+			parts = append(parts, fmt.Sprintf("Last GPS fix time is %.1f s old.", st.FixAge.Seconds()))
+		}
+	} else {
+		parts = append(parts, "No GPS fix for cross-check.")
+	}
+	if st.StartupCheck.Fallback && st.StartupCheck.Reason != "" {
+		parts = append(parts, "Startup: "+st.StartupCheck.Reason)
+	}
+	return strings.Join(parts, " ")
+}
+
+func formatDurationHuman(d time.Duration) string {
+	abs := d
+	sign := ""
+	if d < 0 {
+		abs = -d
+		sign = "-"
+	}
+	switch {
+	case abs < time.Microsecond:
+		return fmt.Sprintf("%s%d ns", sign, abs.Nanoseconds())
+	case abs < time.Millisecond:
+		return fmt.Sprintf("%s%.1f µs", sign, float64(abs)/float64(time.Microsecond))
+	case abs < time.Second:
+		return fmt.Sprintf("%s%.2f ms", sign, float64(abs)/float64(time.Millisecond))
+	default:
+		return fmt.Sprintf("%s%.2f s", sign, float64(abs)/float64(time.Second))
+	}
 }
