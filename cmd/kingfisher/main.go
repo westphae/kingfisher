@@ -143,6 +143,8 @@ func main() {
 	wg.Add(1)
 	go func() { defer wg.Done(); derive.AltitudeFromHub(ctx, holder, hub, buf, st) }()
 	wg.Add(1)
+	go func() { defer wg.Done(); derive.AirspeedFromHub(ctx, holder, hub, buf) }()
+	wg.Add(1)
 	go func() { defer wg.Done(); derive.DeclinationFromGPS(ctx, gpsClient, hub, buf) }()
 	if cfg.AHRS.Enabled {
 		wg.Add(1)
