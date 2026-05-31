@@ -56,6 +56,66 @@ type PressAlt struct {
 	KollsmanInHg float64 `json:"kollsman_inhg"`
 }
 
+// Airspeed configures pitot processing for the derived airspeed device.
+type Airspeed struct {
+	// DpZeroPa is subtracted from raw differential pressure before IAS (Pa).
+	DpZeroPa float64 `json:"dp_zero_pa,omitempty"`
+	// LowSpeedFloorKt zeroes displayed IAS/TAS below this threshold (kt).
+	LowSpeedFloorKt float64 `json:"low_speed_floor_kt,omitempty"`
+	// EmaEnabled defaults to true when omitted (see EmaEnabledEffective).
+	EmaEnabled *bool   `json:"ema_enabled,omitempty"`
+	EmaTauS     float64 `json:"ema_tau_s,omitempty"`
+}
+
+const (
+	DefaultAirspeedLowSpeedFloorKt = 5.0
+	DefaultAirspeedEmaTauS         = 0.5
+)
+
+func (a *Airspeed) LowSpeedFloorKtOrDefault() float64 {
+	if a == nil || math.IsNaN(a.LowSpeedFloorKt) || a.LowSpeedFloorKt < 0 {
+		return DefaultAirspeedLowSpeedFloorKt
+	}
+	return a.LowSpeedFloorKt
+}
+
+func (a *Airspeed) EmaTauSOrDefault() float64 {
+	if a == nil || math.IsNaN(a.EmaTauS) || a.EmaTauS <= 0 {
+		return DefaultAirspeedEmaTauS
+	}
+	return a.EmaTauS
+}
+
+func (a *Airspeed) EmaEnabledEffective() bool {
+	if a == nil || a.EmaEnabled == nil {
+		return true
+	}
+	return *a.EmaEnabled
+}
+
+// MergePodDefaults fills unset pod fields from Defaults().
+func MergePodDefaults(p *Pod) {
+	if p == nil {
+		return
+	}
+	if p.BatteryCapacityMah == 0 {
+		p.BatteryCapacityMah = DefaultPodBatteryCapacityMah
+	}
+}
+
+func MergeAirspeedDefaults(a *Airspeed) {
+	if a == nil {
+		return
+	}
+	def := Defaults().Airspeed
+	if math.IsNaN(a.LowSpeedFloorKt) || a.LowSpeedFloorKt < 0 {
+		a.LowSpeedFloorKt = def.LowSpeedFloorKt
+	}
+	if math.IsNaN(a.EmaTauS) || a.EmaTauS <= 0 {
+		a.EmaTauS = def.EmaTauS
+	}
+}
+
 type AHRS struct {
 	Enabled bool    `json:"enabled"`
 	RateHz  float64 `json:"rate_hz"`
@@ -163,17 +223,26 @@ func (c *Compass) N0UtOrDefault() float64 {
 
 const DefaultKollsmanInHg = 29.92
 
+func boolPtr(v bool) *bool {
+	b := v
+	return &b
+}
+
 // Pod holds wing-pod WiFi/UDP settings and persisted sensor attrs in
 // config.json. Firmware build.rs reads wifi_ssid/password/udp_addr.
 // Attrs are written on each UI change (config.Save) and survive power-off.
 type Pod struct {
 	WiFiSSID     string            `json:"wifi_ssid,omitempty"`
 	WiFiPassword string            `json:"wifi_password,omitempty"`
-	UDPAddr      string            `json:"udp_addr,omitempty"` // Pi host:port pod sends to; kingfisher binds :port on all ifaces
-	Attrs        map[string]string `json:"attrs,omitempty"`    // e.g. in_mag_sampling_frequency
+	UDPAddr              string            `json:"udp_addr,omitempty"` // Pi host:port pod sends to; kingfisher binds :port on all ifaces
+	BatteryCapacityMah     uint16            `json:"battery_capacity_mah,omitempty"`
+	Attrs                  map[string]string `json:"attrs,omitempty"` // e.g. in_mag_sampling_frequency
 }
 
-const defaultPodUDPAddr = "192.168.10.1:47808"
+const (
+	defaultPodUDPAddr            = "192.168.10.1:47808"
+	DefaultPodBatteryCapacityMah = 850
+)
 
 // PodDeviceName is the registry / UI device id for the wing pod.
 const PodDeviceName = "pod"
@@ -214,6 +283,7 @@ type Config struct {
 	Devices    map[string]Device `json:"devices,omitempty"`
 	GPS        GPS               `json:"gps"`
 	PressAlt   PressAlt          `json:"press_alt"`
+	Airspeed   Airspeed          `json:"airspeed"`
 	AHRS       AHRS              `json:"ahrs"`
 	Compass    Compass           `json:"compass"`
 }
@@ -227,8 +297,9 @@ func Defaults() *Config {
 		GPSDAddr:     "localhost:2947",
 		HTTPAddr:     ":8080",
 		Pod: Pod{
-			WiFiSSID:     "kingfisher",
-			WiFiPassword: "",
+			WiFiSSID:           "kingfisher",
+			WiFiPassword:       "",
+			BatteryCapacityMah: DefaultPodBatteryCapacityMah,
 		},
 		GPSFields: []string{
 			"lat", "lon", "alt_msl", "gs", "track", "vs",
@@ -238,7 +309,12 @@ func Defaults() *Config {
 		Devices:  map[string]Device{},
 		GPS:      GPS{RateHz: 5},
 		PressAlt: PressAlt{KollsmanInHg: DefaultKollsmanInHg},
-		AHRS:     AHRS{Enabled: true, RateHz: 20},
+		Airspeed: Airspeed{
+			LowSpeedFloorKt: DefaultAirspeedLowSpeedFloorKt,
+			EmaEnabled:      boolPtr(true),
+			EmaTauS:         DefaultAirspeedEmaTauS,
+		},
+		AHRS: AHRS{Enabled: true, RateHz: 20},
 		Compass: Compass{
 			Enabled:      true,
 			RateHz:       10,
@@ -277,6 +353,15 @@ func (c *Config) KollsmanInHg() float64 {
 		return DefaultKollsmanInHg
 	}
 	return c.PressAlt.KollsmanInHg
+}
+
+// PodBatteryCapacityMah returns the LiPo design capacity (mAh) for BQ27441 fallback
+// when the gauge has not been programmed or reports zero full capacity.
+func (c *Config) PodBatteryCapacityMah() uint16 {
+	if c == nil || c.Pod.BatteryCapacityMah == 0 {
+		return DefaultPodBatteryCapacityMah
+	}
+	return c.Pod.BatteryCapacityMah
 }
 
 // podUDPConfigAddr returns the configured pod.udp_addr (or legacy/default).
@@ -371,6 +456,8 @@ func Load(path string) (*Config, error) {
 	MigrateCompassMounts(c)
 	ImportMagkalBestFit(&c.Compass)
 	MergeCompassKalman(&c.Compass.Kalman)
+	MergeAirspeedDefaults(&c.Airspeed)
+	MergePodDefaults(&c.Pod)
 	return c, nil
 }
 
