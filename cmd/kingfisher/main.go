@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/westphae/kingfisher/internal/clock"
 	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/derive"
 	"github.com/westphae/kingfisher/internal/gps"
@@ -65,6 +66,11 @@ func main() {
 		offsetMs := fmt.Sprintf("%.1f", float64(startupClock.Offset)/float64(time.Millisecond))
 		if err := st.SetMeta("clock_startup_offset_ms", offsetMs); err != nil {
 			log.Printf("store: clock_startup_offset_ms: %v", err)
+		}
+	}
+	for k, v := range clock.StartupMeta(clock.QueryDiscipline(context.Background())) {
+		if err := st.SetMeta(k, v); err != nil {
+			log.Printf("store: %s: %v", k, err)
 		}
 	}
 	if err := st.WriteSession(cfg.Aircraft, cfg.AircraftName, cfg.Notes, version); err != nil {
