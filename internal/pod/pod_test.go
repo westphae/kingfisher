@@ -128,6 +128,40 @@ func TestSetSamplingFrequencyEnqueuesCmd(t *testing.T) {
 	}
 }
 
+func TestSetDesignCapacityEnqueuesCmd(t *testing.T) {
+	hub := live.NewHub()
+	reg := sensors.NewRegistry()
+	c := New("", nil, hub, nil, nil, reg, nil)
+
+	c.reader.applyHello(wire.Hello{
+		FwVersion:    1,
+		ProtoVersion: wire.ProtoVersion,
+		Caps: wire.Capabilities{Sensors: []wire.SensorCap{
+			helloCap(wire.SensorBattery, 1, 2, 1),
+		}},
+	})
+
+	if err := c.reader.SetChannelAttr(BatteryDeviceName, AttrDesignCapacityMah, "900"); err != nil {
+		t.Fatalf("SetChannelAttr: %v", err)
+	}
+	select {
+	case out := <-c.cmdOut:
+		set, ok := out.Cmd.(wire.CmdSetAttr)
+		if !ok {
+			t.Fatalf("got %T, want CmdSetAttr", out.Cmd)
+		}
+		if set.Sensor != wire.SensorBattery || set.Key != wire.AttrDesignCapacity || set.Value != 900 {
+			t.Errorf("got %+v", set)
+		}
+	default:
+		t.Fatal("no Cmd enqueued")
+	}
+
+	if err := c.reader.SetChannelAttr(BatteryDeviceName, AttrDesignCapacityMah, "50"); err == nil {
+		t.Fatal("expected out-of-range error")
+	}
+}
+
 func TestHelloDoesNotPublishAggregatePodDevice(t *testing.T) {
 	hub := live.NewHub()
 	c := New("", nil, hub, nil, nil, nil, nil)

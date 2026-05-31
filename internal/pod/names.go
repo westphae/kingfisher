@@ -11,6 +11,8 @@ func DefaultDeviceName(sid wire.SensorID) string {
 		return "mmc5983"
 	case wire.SensorAirspeed:
 		return "ms4525"
+	case wire.SensorBattery:
+		return "bq27441"
 	default:
 		return ""
 	}
@@ -22,5 +24,6 @@ func DefaultPodDeviceNames() []string {
 		DefaultDeviceName(wire.SensorStatic),
 		DefaultDeviceName(wire.SensorMag),
 		DefaultDeviceName(wire.SensorAirspeed),
+		DefaultDeviceName(wire.SensorBattery),
 	}
 }

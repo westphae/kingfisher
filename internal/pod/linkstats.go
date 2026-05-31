@@ -13,6 +13,9 @@ const linkStaleTimeout = 3 * time.Second
 // statusStaleTimeout is how long before the last Status frame is treated as stale.
 const statusStaleTimeout = 15 * time.Second
 
+// batteryTelemetryStaleTimeout is how long before the last bq27441 sample is stale.
+const batteryTelemetryStaleTimeout = 15 * time.Second
+
 // LinkStats is a snapshot of wing-pod UDP link health for the cockpit UI.
 type LinkStats struct {
 	Enabled    bool    `json:"enabled"`
@@ -24,6 +27,14 @@ type LinkStats struct {
 	RssiDBm    int8    `json:"rssi_dbm"`    // pod WiFi STA RSSI toward the Pi AP
 	HasBattery bool    `json:"has_battery"` // true when Status reports a non-zero voltage
 	BatteryV   float32 `json:"battery_v"`
+
+	HasBatteryTelemetry bool    `json:"has_battery_telemetry"`
+	BatteryCurrentA     float32 `json:"battery_current_a"`
+	BatteryPowerW       float32 `json:"battery_power_w"`
+	BatteryCapacityMah  float32 `json:"battery_capacity_remain_mah"`
+	BatteryTimeRemainS  float32 `json:"battery_time_remain_s"`
+	BatterySocPct       float32 `json:"battery_soc_pct"`
+	BatteryGaugeLearned bool    `json:"battery_gauge_learned"`
 }
 
 // LinkStats returns session counters and derived connection state.
@@ -54,6 +65,20 @@ func (c *Client) LinkStats() LinkStats {
 			st.BatteryV = batt
 		}
 	}
+	lastBatt := c.lastBatteryTelemetryNs.Load()
+	if lastBatt > 0 && time.Now().UnixNano()-lastBatt < int64(batteryTelemetryStaleTimeout) {
+		st.HasBatteryTelemetry = true
+		st.BatteryV = math.Float32frombits(c.telemetryBatteryV.Load())
+		st.BatteryCurrentA = math.Float32frombits(c.telemetryBatteryI.Load())
+		st.BatteryPowerW = math.Float32frombits(c.telemetryBatteryP.Load())
+		st.BatteryCapacityMah = math.Float32frombits(c.telemetryBatteryCap.Load())
+		st.BatteryTimeRemainS = math.Float32frombits(c.telemetryBatteryTime.Load())
+		st.BatterySocPct = math.Float32frombits(c.telemetryBatterySoc.Load())
+		st.BatteryGaugeLearned = c.telemetryBatteryLearned.Load() > 0
+		if st.BatteryV > 0.01 {
+			st.HasBattery = true
+		}
+	}
 	return st
 }
 
@@ -65,6 +90,24 @@ func (c *Client) noteStatus(s wire.Status) {
 	c.lastStatusNs.Store(time.Now().UnixNano())
 	c.statusRssi.Store(int32(s.RssiDBm))
 	c.statusBattery.Store(math.Float32bits(s.BatteryV))
+}
+
+func (c *Client) noteBatteryTelemetry(v wire.BatteryReading, learned bool) {
+	c.lastBatteryTelemetryNs.Store(time.Now().UnixNano())
+	c.telemetryBatteryV.Store(math.Float32bits(v.VoltageV))
+	c.telemetryBatteryI.Store(math.Float32bits(v.CurrentA))
+	c.telemetryBatteryP.Store(math.Float32bits(v.PowerW))
+	if learned {
+		c.telemetryBatteryLearned.Store(1)
+		c.telemetryBatteryCap.Store(math.Float32bits(v.CapacityRemainMah))
+		c.telemetryBatteryTime.Store(math.Float32bits(v.TimeRemainS))
+		c.telemetryBatterySoc.Store(math.Float32bits(v.SocPct))
+	} else {
+		c.telemetryBatteryLearned.Store(0)
+		c.telemetryBatteryCap.Store(0)
+		c.telemetryBatteryTime.Store(0)
+		c.telemetryBatterySoc.Store(0)
+	}
 }
 
 func (c *Client) noteTxOK() {

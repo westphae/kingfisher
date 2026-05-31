@@ -73,6 +73,15 @@ type Client struct {
 	statusRssi    atomic.Int32
 	statusBattery atomic.Uint32
 
+	lastBatteryTelemetryNs atomic.Int64
+	telemetryBatteryV      atomic.Uint32
+	telemetryBatteryI      atomic.Uint32
+	telemetryBatteryP      atomic.Uint32
+	telemetryBatteryCap    atomic.Uint32
+	telemetryBatteryTime   atomic.Uint32
+	telemetryBatterySoc    atomic.Uint32
+	telemetryBatteryLearned atomic.Uint32
+
 	mu sync.Mutex
 }
 
@@ -102,6 +111,7 @@ func New(addr string, transport Transport, hub *live.Hub, buf *store.Buffer, st 
 		}
 	}
 	if cfg != nil {
+		c.reader.SetDesignCapacityFromConfig(cfg.Get().PodBatteryCapacityMah())
 		c.applySavedSettings(false)
 		c.refreshRegistryViews()
 	}
@@ -227,6 +237,7 @@ func (c *Client) dispatch(frame wire.Frame, peer string) {
 		c.reader.applyHello(f)
 		c.syncRegistryAliases()
 		c.applySavedSettings(true)
+		c.pushConfiguredBatteryCapacity()
 		c.refreshRegistryViews()
 		c.logPodSensorAttrs()
 	case wire.Status:
@@ -297,15 +308,38 @@ func (c *Client) onBatch(b wire.SampleBatch) {
 	c.rxBatches.Add(1)
 
 	capsAdded := false
+	var designMah uint16 = config.DefaultPodBatteryCapacityMah
+	if c.cfg != nil {
+		designMah = c.cfg.Get().PodBatteryCapacityMah()
+	}
 	for _, rd := range b.Samples {
 		if c.reader.ensureCapsFromReading(rd) {
 			capsAdded = true
 		}
-		dev, values, ok := c.reader.sampleDeviceValues(rd)
+		var dev string
+		var values map[string]float64
+		var ok bool
+		var learned bool
+		switch raw := rd.(type) {
+		case wire.BatteryReading:
+			learned = BatteryGaugeLearned(raw)
+			br, _ := NormalizeBatteryReading(raw, designMah)
+			dev, values, ok = c.reader.sampleBatteryValues(br, learned)
+			rd = br
+			if ok {
+				c.noteBatteryTelemetry(br, learned)
+				c.reader.applyReading(br, learned)
+			}
+		default:
+			rd = NormalizeReading(rd, designMah)
+			dev, values, ok = c.reader.sampleDeviceValues(rd)
+			if ok {
+				c.reader.applyReading(rd, true)
+			}
+		}
 		if !ok {
 			continue
 		}
-		c.reader.applyReading(rd)
 		readingNs := podUptimeNs - int64(rd.AgeMicros())*1000 + offset
 		sm := live.Sample{
 			Device: dev,
@@ -339,7 +373,9 @@ func (c *Client) runConfigReload(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-reload:
+			c.reader.SetDesignCapacityFromConfig(c.cfg.Get().PodBatteryCapacityMah())
 			c.applySavedSettings(true)
+			c.pushConfiguredBatteryCapacity()
 			c.refreshRegistryViews()
 			c.logPodSensorAttrDiff()
 		}
@@ -366,6 +402,16 @@ func (c *Client) enqueueOutbound(o outboundCmd) {
 	case c.cmdOut <- o:
 	default:
 		log.Printf("pod: outbound queue full; dropped %T", o.Cmd)
+	}
+}
+
+func (c *Client) pushConfiguredBatteryCapacity() {
+	if c.cfg == nil {
+		return
+	}
+	o := c.reader.DesignCapacityOutbound(c.cfg.Get().PodBatteryCapacityMah())
+	if o != nil {
+		c.enqueueOutbound(*o)
 	}
 }
 

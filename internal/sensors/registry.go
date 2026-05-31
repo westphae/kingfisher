@@ -171,7 +171,8 @@ func (rg *Registry) WriteAttr(device, channel, attr, value string) error {
 	if e == nil {
 		return fmt.Errorf("registry: unknown device %q", device)
 	}
-	if !e.reader.WritableAttr(channel, attr) {
+	rec := store.AttrRecord{Channel: channel, Attr: attr}
+	if !writableFor(e, rec) {
 		return fmt.Errorf("registry: attr %s/%s not writable", channel, attr)
 	}
 	ch := channel

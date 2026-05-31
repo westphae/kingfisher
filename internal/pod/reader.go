@@ -25,7 +25,24 @@ const (
 	ChMagX         = "mag_x_ut"
 	ChMagY         = "mag_y_ut"
 	ChMagZ         = "mag_z_ut"
+	ChBatteryV     = "battery_voltage_v"
+	ChBatteryI     = "battery_current_a"
+	ChBatteryP     = "battery_power_w"
+	ChBatteryCapRm = "battery_capacity_remain_mah"
+	ChBatteryCapFull = "battery_capacity_full_mah"
+	ChBatterySOC     = "battery_soc_pct"
+	ChBatteryTime    = "battery_time_remain_s"
+	ChBatteryLearned = "battery_gauge_learned"
 )
+
+// AttrDesignCapacityMah is the UI/config key for BQ27441 design capacity (mAh).
+const AttrDesignCapacityMah = "design_capacity_mah"
+
+// BatteryDeviceName is the default wing-tab name for the fuel gauge.
+const BatteryDeviceName = "bq27441"
+
+const minDesignCapacityMah = 100
+const maxDesignCapacityMah = 10000
 
 var podChannels = []string{
 	ChAirspeedDP, ChAirspeedTemp,
@@ -38,6 +55,7 @@ var legacySettingsChannel = map[string]wire.SensorID{
 	"airspeed": wire.SensorAirspeed,
 	"static":   wire.SensorStatic,
 	"mag":      wire.SensorMag,
+	"battery":  wire.SensorBattery,
 }
 
 // dataChannelToSensor maps telemetry column names to SensorID.
@@ -45,6 +63,7 @@ var dataChannelToSensor = map[string]wire.SensorID{
 	ChAirspeedDP: wire.SensorAirspeed,
 	ChStaticP:    wire.SensorStatic,
 	ChMagX:       wire.SensorMag,
+	ChBatteryV:   wire.SensorBattery,
 }
 
 // defaultSensorCap matches firmware hello.rs limits when Hello has not arrived.
@@ -63,6 +82,11 @@ func defaultSensorCap(sid wire.SensorID) (wire.SensorCap, bool) {
 	case wire.SensorAirspeed:
 		return wire.SensorCap{
 			ID: sid, MinHz: 1, MaxHz: 50, DefaultHz: 10,
+			DeviceName: wire.NewDeviceName(DefaultDeviceName(sid)),
+		}, true
+	case wire.SensorBattery:
+		return wire.SensorCap{
+			ID: sid, MinHz: 1, MaxHz: 2, DefaultHz: 1,
 			DeviceName: wire.NewDeviceName(DefaultDeviceName(sid)),
 		}, true
 	default:
@@ -90,7 +114,7 @@ func (r *reader) sensorIDForDevice(device string) (wire.SensorID, bool) {
 			return sid, true
 		}
 	}
-	for _, sid := range []wire.SensorID{wire.SensorStatic, wire.SensorMag, wire.SensorAirspeed} {
+	for _, sid := range []wire.SensorID{wire.SensorStatic, wire.SensorMag, wire.SensorAirspeed, wire.SensorBattery} {
 		if DefaultDeviceName(sid) == device {
 			return sid, true
 		}
@@ -111,7 +135,7 @@ func (r *reader) TelemetryDeviceNames() []string {
 	defer r.mu.RUnlock()
 	seen := make(map[string]struct{}, 3)
 	var out []string
-	for _, sid := range []wire.SensorID{wire.SensorStatic, wire.SensorMag, wire.SensorAirspeed} {
+	for _, sid := range []wire.SensorID{wire.SensorStatic, wire.SensorMag, wire.SensorAirspeed, wire.SensorBattery} {
 		if _, ok := r.caps[sid]; !ok {
 			if _, ok := r.rates[sid]; !ok {
 				continue
@@ -147,11 +171,12 @@ type outboundCmd struct {
 // optimistically updates the local cache; the next Hello/Status frame
 // from the pod reconciles authoritative state.
 type reader struct {
-	mu     sync.RWMutex
-	values map[string]float64       // channel -> latest sample value
-	rates  map[wire.SensorID]uint16 // sensor -> last known sampling Hz
-	caps   map[wire.SensorID]wire.SensorCap
-	out    chan<- outboundCmd
+	mu                sync.RWMutex
+	values            map[string]float64       // channel -> latest sample value
+	rates             map[wire.SensorID]uint16 // sensor -> last known sampling Hz
+	caps              map[wire.SensorID]wire.SensorCap
+	designCapacityMah uint16
+	out               chan<- outboundCmd
 }
 
 func newReader(out chan<- outboundCmd) *reader {
@@ -165,7 +190,8 @@ func newReader(out chan<- outboundCmd) *reader {
 }
 
 // applyReading updates the sticky cache with one Reading's values.
-func (r *reader) applyReading(rd wire.Reading) {
+// learned applies to BatteryReading only (from raw gauge before normalize).
+func (r *reader) applyReading(rd wire.Reading, learned bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	switch v := rd.(type) {
@@ -179,6 +205,19 @@ func (r *reader) applyReading(rd wire.Reading) {
 		r.values[ChMagX] = float64(v.XUt)
 		r.values[ChMagY] = float64(v.YUt)
 		r.values[ChMagZ] = float64(v.ZUt)
+	case wire.BatteryReading:
+		r.values[ChBatteryV] = float64(v.VoltageV)
+		r.values[ChBatteryI] = float64(v.CurrentA)
+		r.values[ChBatteryP] = float64(v.PowerW)
+		if learned {
+			r.values[ChBatteryLearned] = 1
+		} else {
+			r.values[ChBatteryLearned] = 0
+		}
+		r.values[ChBatteryCapRm] = float64(v.CapacityRemainMah)
+		r.values[ChBatteryCapFull] = float64(v.CapacityFullMah)
+		r.values[ChBatterySOC] = float64(v.SocPct)
+		r.values[ChBatteryTime] = float64(v.TimeRemainS)
 	}
 }
 
@@ -201,9 +240,30 @@ func (r *reader) sampleDeviceValues(rd wire.Reading) (device string, values map[
 			ChAirspeedDP:   float64(v.DpPa),
 			ChAirspeedTemp: float64(v.TempC),
 		}, true
+	case wire.BatteryReading:
+		return "", nil, false
 	default:
 		return "", nil, false
 	}
+}
+
+// sampleBatteryValues maps a normalized battery reading to hub columns.
+func (r *reader) sampleBatteryValues(v wire.BatteryReading, learned bool) (device string, values map[string]float64, ok bool) {
+	learnedVal := 0.0
+	if learned {
+		learnedVal = 1
+	}
+	values = map[string]float64{
+		ChBatteryV:           float64(v.VoltageV),
+		ChBatteryI:           float64(v.CurrentA),
+		ChBatteryP:           float64(v.PowerW),
+		ChBatteryLearned:     learnedVal,
+		ChBatteryCapRm:       float64(v.CapacityRemainMah),
+		ChBatteryCapFull:     float64(v.CapacityFullMah),
+		ChBatterySOC:         float64(v.SocPct),
+		ChBatteryTime:        float64(v.TimeRemainS),
+	}
+	return r.deviceNameLocked(wire.SensorBattery), values, true
 }
 
 // snapshotValues returns a copy of the sticky cache for publishing.
@@ -245,6 +305,8 @@ func (r *reader) ensureCapsFromReading(rd wire.Reading) bool {
 		sid = wire.SensorStatic
 	case wire.AirspeedReading:
 		sid = wire.SensorAirspeed
+	case wire.BatteryReading:
+		sid = wire.SensorBattery
 	default:
 		return false
 	}
@@ -319,7 +381,7 @@ func (r *reader) FlightLogAttrRecordsForUIDevice(uiDevice string) []store.AttrRe
 func (r *reader) attrRecords(onlyDevice string, includeCapMeta bool) []store.AttrRecord {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	order := []wire.SensorID{wire.SensorStatic, wire.SensorMag, wire.SensorAirspeed}
+	order := []wire.SensorID{wire.SensorStatic, wire.SensorMag, wire.SensorAirspeed, wire.SensorBattery}
 	out := make([]store.AttrRecord, 0, len(order)*4)
 	for _, sid := range order {
 		dev := r.deviceNameLocked(sid)
@@ -339,6 +401,13 @@ func (r *reader) attrRecords(onlyDevice string, includeCapMeta bool) []store.Att
 			Attr:    "sampling_frequency",
 			Value:   strconv.FormatUint(uint64(hz), 10),
 		})
+		if sid == wire.SensorBattery && r.designCapacityMah > 0 {
+			out = append(out, store.AttrRecord{
+				Channel: "",
+				Attr:    AttrDesignCapacityMah,
+				Value:   strconv.FormatUint(uint64(r.designCapacityMah), 10),
+			})
+		}
 		if includeCapMeta {
 			out = append(out,
 				store.AttrRecord{Channel: "", Attr: "min_hz", Value: strconv.FormatUint(uint64(cap.MinHz), 10)},
@@ -365,6 +434,17 @@ func (r *reader) ChannelAttr(ch, attr string) (string, error) {
 			return "", fmt.Errorf("pod: no rate cached yet for %s", sid)
 		}
 		return strconv.FormatUint(uint64(hz), 10), nil
+	case AttrDesignCapacityMah:
+		if sid != wire.SensorBattery {
+			return "", fmt.Errorf("pod: attr %q only on battery sensor", attr)
+		}
+		r.mu.RLock()
+		mah := r.designCapacityMah
+		r.mu.RUnlock()
+		if mah == 0 {
+			return "", fmt.Errorf("pod: design capacity not configured yet")
+		}
+		return strconv.FormatUint(uint64(mah), 10), nil
 	case "sampling_frequency_available":
 		r.mu.RLock()
 		c, ok := r.capForSettings(sid)
@@ -383,12 +463,20 @@ func (r *reader) Attr(name string) (string, error) {
 }
 
 func (r *reader) SetChannelAttr(ch, attr, value string) error {
+	switch attr {
+	case "sampling_frequency":
+		return r.setSamplingFrequency(ch, value)
+	case AttrDesignCapacityMah:
+		return r.setDesignCapacity(ch, value)
+	default:
+		return fmt.Errorf("pod: attr %q is not writable", attr)
+	}
+}
+
+func (r *reader) setSamplingFrequency(ch, value string) error {
 	sid, ok := r.sensorIDForKey(ch)
 	if !ok {
 		return fmt.Errorf("pod: channel %q is not writable", ch)
-	}
-	if attr != "sampling_frequency" {
-		return fmt.Errorf("pod: attr %q is not writable", attr)
 	}
 	hz, err := strconv.ParseUint(value, 10, 16)
 	if err != nil {
@@ -405,10 +493,10 @@ func (r *reader) SetChannelAttr(ch, attr, value string) error {
 	}
 	prevHz := r.rates[sid]
 	newHz := uint16(hz)
-	sHz, mHz, aHz := RatesAfterChange(r.rates, sid, newHz)
-	if !SustainableRates(sHz, mHz, aHz) {
+	sHz, mHz, aHz, bHz := RatesAfterChange(r.rates, sid, newHz)
+	if !SustainableRates(sHz, mHz, aHz, bHz) {
 		r.mu.Unlock()
-		err := fmt.Errorf("pod: combined rates (static=%d mag=%d airspeed=%d Hz) exceed wing I²C budget", sHz, mHz, aHz)
+		err := fmt.Errorf("pod: combined rates (static=%d mag=%d airspeed=%d battery=%d Hz) exceed wing I²C budget", sHz, mHz, aHz, bHz)
 		log.Printf("pod: %v", err)
 		return err
 	}
@@ -428,6 +516,66 @@ func (r *reader) SetChannelAttr(ch, attr, value string) error {
 		return fmt.Errorf("pod: outbound queue full; dropped SetRate")
 	}
 	return nil
+}
+
+func (r *reader) setDesignCapacity(ch, value string) error {
+	sid, ok := r.sensorIDForKey(ch)
+	if !ok || sid != wire.SensorBattery {
+		return fmt.Errorf("pod: design capacity only on %s", BatteryDeviceName)
+	}
+	mah64, err := strconv.ParseUint(strings.TrimSpace(value), 10, 16)
+	if err != nil {
+		return fmt.Errorf("pod: parse design_capacity_mah %q: %w", value, err)
+	}
+	mah := uint16(mah64)
+	if mah < minDesignCapacityMah || mah > maxDesignCapacityMah {
+		return fmt.Errorf("pod: design capacity %d out of range [%d, %d]", mah, minDesignCapacityMah, maxDesignCapacityMah)
+	}
+	r.mu.Lock()
+	prev := r.designCapacityMah
+	r.designCapacityMah = mah
+	r.mu.Unlock()
+	select {
+	case r.out <- outboundCmd{
+		Cmd: wire.CmdSetAttr{
+			Sensor: wire.SensorBattery,
+			Key:    wire.AttrDesignCapacity,
+			Value:  float32(mah),
+		},
+	}:
+	default:
+		r.mu.Lock()
+		r.designCapacityMah = prev
+		r.mu.Unlock()
+		return fmt.Errorf("pod: outbound queue full; dropped SetAttr design capacity")
+	}
+	return nil
+}
+
+// SetDesignCapacityFromConfig updates the cached design capacity shown in the UI.
+func (r *reader) SetDesignCapacityFromConfig(mah uint16) {
+	if mah == 0 {
+		mah = config.DefaultPodBatteryCapacityMah
+	}
+	r.mu.Lock()
+	r.designCapacityMah = mah
+	r.mu.Unlock()
+}
+
+// DesignCapacityOutbound returns a SetAttr cmd for the configured capacity, or nil if unset.
+func (r *reader) DesignCapacityOutbound(mah uint16) *outboundCmd {
+	if mah == 0 {
+		mah = config.DefaultPodBatteryCapacityMah
+	}
+	r.SetDesignCapacityFromConfig(mah)
+	o := outboundCmd{
+		Cmd: wire.CmdSetAttr{
+			Sensor: wire.SensorBattery,
+			Key:    wire.AttrDesignCapacity,
+			Value:  float32(mah),
+		},
+	}
+	return &o
 }
 
 // ApplyDeviceConfig loads pod.attrs from config into the rate
@@ -483,21 +631,30 @@ func (r *reader) WritableAttr(ch, attr string) bool {
 
 // WritableForDevice implements per-tab registry writability (device is the UI tab name).
 func (r *reader) WritableForDevice(device, ch, attr string) bool {
-	if attr != "sampling_frequency" {
-		return false
-	}
-	if device != "" {
-		sid, ok := r.sensorIDForDevice(device)
+	switch attr {
+	case "sampling_frequency":
+		if device != "" {
+			sid, ok := r.sensorIDForDevice(device)
+			if !ok {
+				return false
+			}
+			return ch == "" || ch == r.deviceNameLocked(sid) || legacySettingsChannel[ch] == sid
+		}
+		sid, ok := r.sensorIDForKey(ch)
 		if !ok {
 			return false
 		}
 		return ch == "" || ch == r.deviceNameLocked(sid) || legacySettingsChannel[ch] == sid
-	}
-	sid, ok := r.sensorIDForKey(ch)
-	if !ok {
+	case AttrDesignCapacityMah:
+		if device != "" {
+			sid, ok := r.sensorIDForDevice(device)
+			return ok && sid == wire.SensorBattery && (ch == "" || ch == device || ch == "battery")
+		}
+		sid, ok := r.sensorIDForKey(ch)
+		return ok && sid == wire.SensorBattery
+	default:
 		return false
 	}
-	return ch == "" || ch == r.deviceNameLocked(sid) || legacySettingsChannel[ch] == sid
 }
 
 func (r *reader) Close() error { return nil }

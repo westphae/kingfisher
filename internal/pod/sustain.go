@@ -9,6 +9,7 @@ const (
 	usPerStaticFrame  = 400
 	usPerMagRead      = 1_200
 	usPerAirspeedRead = 5_000
+	usPerBatteryRead  = 3_000
 	maxReadsPerTick   = 3
 )
 
@@ -42,18 +43,20 @@ func staticTickWorkUs(hz uint16) uint64 {
 
 // SustainableRates reports whether the combined schedule fits the pod bus
 // budget (matches firmware rates::sustainable).
-func SustainableRates(staticHz, magHz, airHz uint16) bool {
+func SustainableRates(staticHz, magHz, airHz, batteryHz uint16) bool {
 	work := staticTickWorkUs(staticHz) +
 		readsPerTickCapped(magHz)*usPerMagRead +
-		readsPerTickCapped(airHz)*usPerAirspeedRead
+		readsPerTickCapped(airHz)*usPerAirspeedRead +
+		readsPerTickCapped(batteryHz)*usPerBatteryRead
 	return work <= maxTickWorkUs
 }
 
-// RatesAfterChange returns the three sensor Hz values after applying one change.
-func RatesAfterChange(cur map[wire.SensorID]uint16, sid wire.SensorID, newHz uint16) (staticHz, magHz, airHz uint16) {
+// RatesAfterChange returns sensor Hz values after applying one change.
+func RatesAfterChange(cur map[wire.SensorID]uint16, sid wire.SensorID, newHz uint16) (staticHz, magHz, airHz, batteryHz uint16) {
 	staticHz = cur[wire.SensorStatic]
 	magHz = cur[wire.SensorMag]
 	airHz = cur[wire.SensorAirspeed]
+	batteryHz = cur[wire.SensorBattery]
 	switch sid {
 	case wire.SensorStatic:
 		staticHz = newHz
@@ -61,6 +64,8 @@ func RatesAfterChange(cur map[wire.SensorID]uint16, sid wire.SensorID, newHz uin
 		magHz = newHz
 	case wire.SensorAirspeed:
 		airHz = newHz
+	case wire.SensorBattery:
+		batteryHz = newHz
 	}
 	return
 }
