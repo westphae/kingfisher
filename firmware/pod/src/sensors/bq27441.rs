@@ -84,7 +84,9 @@ impl Bq27441 {
                 "pod: bq27441 configuring design capacity {} mAh (ITPOR full={})",
                 design, full
             );
-            if set_design_capacity(bus, self.addr, design).is_err() {
+            if set_design_capacity(bus, self.addr, design).is_ok() {
+                crate::battery_cfg::note_program_ok();
+            } else {
                 println!("pod: bq27441 ITPOR design capacity program failed (continuing)");
             }
         } else if full == 0 {
@@ -103,7 +105,6 @@ impl Bq27441 {
 
     /// Reprogram design capacity (mAh) while running; called from the poll loop.
     pub fn program_design_capacity(&self, bus: &mut I2cBus, mah: u16) -> Result<(), ()> {
-        println!("pod: bq27441 programming design capacity {mah} mAh");
         set_design_capacity(bus, self.addr, mah)
     }
 
