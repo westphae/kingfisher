@@ -189,9 +189,11 @@ Pre-condition: Pi WiFi AP running; `~/.config/kingfisher/config.json`
 1. **Fallback trigger (uncalibrated):** force gauge-unlearned conditions and hold
    loaded voltage below `sleep_voltage_v_uncalibrated` for `sleep_debounce_s`;
    status should move `power_mode: active -> sleep_pending -> sleeping` with
-   `sleep_reason: voltage_fallback`.
-2. **SOC trigger (learned):** after gauge learning, drain below `sleep_soc_pct`
-   and verify the same transition with `sleep_reason: soc`.
+   `sleep_reason: voltage_fallback`. Positive charge current (≥50 mA) inhibits
+   sleep and wakes a sleeping pod.
+2. **SOC trigger (learned):** after design capacity is programmed successfully,
+   drain below `sleep_soc_pct` and verify the same transition with
+   `sleep_reason: soc` (not while charging).
 3. **Emergency floor:** drop below `sleep_emergency_voltage_v` and verify immediate
    `sleep_pending/sleeping` without waiting for debounce (`sleep_reason: emergency`).
 4. **Buffering checks:** introduce link delay/loss and verify status `buffer_depth`
