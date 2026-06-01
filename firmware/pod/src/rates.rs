@@ -28,7 +28,8 @@ const US_PER_STATIC_DRAIN: u32 = 3_000;
 const US_PER_STATIC_FRAME: u32 = 400;
 /// Status poll + 7-byte XOUT burst (no per-sample IC0 write).
 const US_PER_MAG_READ: u32 = 1_200;
-const US_PER_AIR_READ: u32 = 5_000;
+/// MS4525: trigger + ~2 ms conversion wait + I²C fetch (see `ms4525.rs`).
+const US_PER_AIR_READ: u32 = 4_500;
 const US_PER_BATTERY_READ: u32 = 3_000;
 
 /// Max I²C work per 100 ms poll tick (leave time for UDP / WiFi).
@@ -318,12 +319,16 @@ pub fn note_read_ok(sensor: SensorId) {
     fail_atom(sensor).store(0, Ordering::Relaxed);
 }
 
+/// True when the caller should run bus recovery (rate was lowered).
 pub fn note_read_fail(sensor: SensorId) -> bool {
     let f = fail_atom(sensor).load(Ordering::Relaxed).saturating_add(1);
     fail_atom(sensor).store(f, Ordering::Relaxed);
+    println!(
+        "pod: {:?} read fail ({}/{})",
+        sensor, f, FAIL_BACKOFF_THRESHOLD
+    );
     if f >= FAIL_BACKOFF_THRESHOLD {
-        backoff(sensor);
-        return true;
+        return backoff(sensor);
     }
     false
 }
@@ -332,12 +337,15 @@ pub fn note_tick_overrun() -> bool {
     let n = OVERRUN_STREAK.load(Ordering::Relaxed).saturating_add(1);
     OVERRUN_STREAK.store(n, Ordering::Relaxed);
     if n >= OVERRUN_BACKOFF_THRESHOLD {
-        if let Some(s) = sensor_from_tag(LAST_CHANGED.load(Ordering::Relaxed)) {
-            backoff(s);
-        } else {
-            set_safe_defaults();
-        }
+        println!(
+            "pod: poll tick overrun ({} consecutive ticks >80 ms)",
+            n
+        );
         OVERRUN_STREAK.store(0, Ordering::Relaxed);
+        if let Some(s) = sensor_from_tag(LAST_CHANGED.load(Ordering::Relaxed)) {
+            return backoff(s);
+        }
+        set_safe_defaults();
         return true;
     }
     false
@@ -347,7 +355,10 @@ pub fn clear_overrun_streak() {
     OVERRUN_STREAK.store(0, Ordering::Relaxed);
 }
 
-fn backoff(sensor: SensorId) {
+/// Lower the sensor rate after repeated read failures. Returns true only when Hz
+/// actually changed (caller may run bus recovery). At the safe floor, log once
+/// and do not trigger recovery — transient MS4525 NACKs are common under load.
+fn backoff(sensor: SensorId) -> bool {
     let prev = prev_atom(sensor).load(Ordering::Relaxed);
     let cur = get(sensor);
     let next = if prev > 0 && prev < cur {
@@ -358,12 +369,20 @@ fn backoff(sensor: SensorId) {
             _ => (cur / 2).max(SAFE_HZ),
         }
     };
+    rem_atom(sensor).store(0, Ordering::Relaxed);
+    fail_atom(sensor).store(0, Ordering::Relaxed);
+    if next >= cur {
+        println!(
+            "pod: {:?} read errors at {} Hz (already at safe minimum)",
+            sensor, cur
+        );
+        return false;
+    }
     println!(
         "pod: backing off {:?} {} -> {} Hz",
         sensor, cur, next
     );
     store_hz(sensor, next);
-    rem_atom(sensor).store(0, Ordering::Relaxed);
-    fail_atom(sensor).store(0, Ordering::Relaxed);
     link::request_hello();
+    true
 }
