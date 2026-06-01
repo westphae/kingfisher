@@ -79,12 +79,10 @@ pub fn handle_datagram(
         Err(_) => return out,
     };
 
-    link::touch_inbound(now_us);
-
     match frame {
         Frame::Ping(p) => {
-            // Pi may start after our boot Hello; re-advertise caps on link-up.
-            link::request_hello();
+            // Pong only: do not treat the 5 s pinger as app traffic (avoids Hello
+            // every ping) and do not re-queue gauge programming via SetAttr.
             let _ = out.push(Frame::Pong(pod_wire::Pong {
                 seq: p.seq,
                 sender_uptime_us: uptime_us,
@@ -92,6 +90,7 @@ pub fn handle_datagram(
             }));
         }
         Frame::Cmd(env) => {
+            link::touch_inbound(now_us);
             let ack = handle(env);
             let _ = out.push(Frame::Ack(ack));
         }
