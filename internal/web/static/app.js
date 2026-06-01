@@ -529,6 +529,8 @@ function nearlyEqual(opt, val) {
 
 function podLinkLabel(pod) {
   if (!pod || !pod.enabled) return 'Pod ingest off';
+  if (pod.power_mode === 'sleeping') return `Sleeping (${pod.sleep_reason || 'battery'})`;
+  if (pod.power_mode === 'sleep_pending') return `Sleep pending (${pod.sleep_reason || 'battery'})`;
   if (!pod.connected) return 'No recent pod traffic';
   if ((pod.rx_dropped || 0) > 0) return 'Link up (batch gaps)';
   return 'Link OK';
@@ -622,7 +624,8 @@ function renderPodStatus() {
   el.innerHTML =
     `<span class="podStatusItem"><span class="lbl">Pod</span> ${escapeHtml(podLinkLabel(p))}</span>` +
     `<span class="podStatusItem ${rssiCls}"><span class="lbl">RSSI</span> ${escapeHtml(rssiText)}</span>` +
-    `<span class="podStatusItem ${battCls}"><span class="lbl">Batt</span> ${escapeHtml(battText)}</span>`;
+    `<span class="podStatusItem ${battCls}"><span class="lbl">Batt</span> ${escapeHtml(battText)}</span>` +
+    `<span class="podStatusItem"><span class="lbl">Buf</span> ${escapeHtml(String(p.buffer_depth ?? '—'))}</span>`;
 }
 
 function formatTimeOffsetNs(ns) {

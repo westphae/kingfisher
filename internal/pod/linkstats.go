@@ -35,6 +35,10 @@ type LinkStats struct {
 	BatteryTimeRemainS  float32 `json:"battery_time_remain_s"`
 	BatterySocPct       float32 `json:"battery_soc_pct"`
 	BatteryGaugeLearned bool    `json:"battery_gauge_learned"`
+	PowerMode           string  `json:"power_mode"`
+	SleepReason         string  `json:"sleep_reason"`
+	BufferDepth         uint32  `json:"buffer_depth"`
+	DroppedReadings     uint64  `json:"dropped_readings"`
 }
 
 // LinkStats returns session counters and derived connection state.
@@ -64,6 +68,10 @@ func (c *Client) LinkStats() LinkStats {
 			st.HasBattery = true
 			st.BatteryV = batt
 		}
+		st.PowerMode = statusPowerModeText(uint8(c.statusPowerMode.Load()))
+		st.SleepReason = statusSleepReasonText(uint8(c.statusSleepReason.Load()))
+		st.BufferDepth = uint32(c.statusBufferDepth.Load())
+		st.DroppedReadings = c.statusDroppedReadings.Load()
 	}
 	lastBatt := c.lastBatteryTelemetryNs.Load()
 	if lastBatt > 0 && time.Now().UnixNano()-lastBatt < int64(batteryTelemetryStaleTimeout) {
@@ -90,6 +98,34 @@ func (c *Client) noteStatus(s wire.Status) {
 	c.lastStatusNs.Store(time.Now().UnixNano())
 	c.statusRssi.Store(int32(s.RssiDBm))
 	c.statusBattery.Store(math.Float32bits(s.BatteryV))
+	c.statusPowerMode.Store(uint32(s.PowerMode))
+	c.statusSleepReason.Store(uint32(s.SleepReason))
+	c.statusBufferDepth.Store(uint32(s.BufferDepth))
+	c.statusDroppedReadings.Store(uint64(s.DroppedReadings))
+}
+
+func statusPowerModeText(v uint8) string {
+	switch v {
+	case 1:
+		return "sleep_pending"
+	case 2:
+		return "sleeping"
+	default:
+		return "active"
+	}
+}
+
+func statusSleepReasonText(v uint8) string {
+	switch v {
+	case 1:
+		return "soc"
+	case 2:
+		return "voltage_fallback"
+	case 3:
+		return "emergency"
+	default:
+		return "none"
+	}
 }
 
 func (c *Client) noteBatteryTelemetry(v wire.BatteryReading, learned bool) {
