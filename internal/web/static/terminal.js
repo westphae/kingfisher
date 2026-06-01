@@ -14,6 +14,8 @@
   const keySetup = document.getElementById('keySetup');
   const keySetupHint = document.getElementById('keySetupHint');
   const termEl = document.getElementById('terminal');
+  const termKeys = document.getElementById('termKeys');
+  const keyCtrl = document.getElementById('keyCtrl');
   const termUser = document.getElementById('termUser');
   const termLogout = document.getElementById('termLogout');
 
@@ -23,12 +25,15 @@
   let ws = null;
   let resizeObs = null;
   let resizeHandler = null;
+  let ctrlSticky = false;
 
   function showLogin() {
     loginBox.hidden = false;
     termEl.hidden = true;
+    if (termKeys) termKeys.hidden = true;
     termUser.hidden = true;
     termLogout.hidden = true;
+    setCtrlSticky(false);
     teardownTerm();
     configureLoginUI();
   }
@@ -36,6 +41,7 @@
   function showTerminal(username) {
     loginBox.hidden = true;
     termEl.hidden = false;
+    if (termKeys) termKeys.hidden = false;
     termUser.hidden = false;
     termLogout.hidden = false;
     termUser.textContent = username;
@@ -320,6 +326,59 @@
     showLogin();
   });
 
+  function setCtrlSticky(on) {
+    ctrlSticky = !!on;
+    if (keyCtrl) {
+      keyCtrl.classList.toggle('active', ctrlSticky);
+      keyCtrl.setAttribute('aria-pressed', ctrlSticky ? 'true' : 'false');
+    }
+  }
+
+  function ctrlChar(ch) {
+    if (ch.length !== 1) return ch;
+    const code = ch.charCodeAt(0);
+    if (code >= 0x61 && code <= 0x7a) return String.fromCharCode(code - 96);
+    if (code >= 0x41 && code <= 0x5a) return String.fromCharCode(code - 64);
+    if (code === 0x40) return '\x00';
+    if (code === 0x5b) return '\x1b';
+    if (code === 0x5c) return '\x1c';
+    if (code === 0x5d) return '\x1d';
+    if (code === 0x5e) return '\x1e';
+    if (code === 0x5f) return '\x1f';
+    if (code === 0x3f) return '\x7f';
+    return ch;
+  }
+
+  function sendToShell(data) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(data);
+    }
+  }
+
+  function focusTerm() {
+    if (term) {
+      try { term.focus(); } catch {}
+    }
+  }
+
+  if (keyCtrl) {
+    keyCtrl.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      setCtrlSticky(!ctrlSticky);
+      focusTerm();
+    });
+  }
+
+  if (termKeys) {
+    termKeys.querySelectorAll('.termKey[data-send]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        sendToShell(btn.getAttribute('data-send'));
+        focusTerm();
+      });
+    });
+  }
+
   function resolveFitAddonCtor() {
     if (typeof FitAddon === 'function') return FitAddon;
     if (FitAddon && typeof FitAddon.FitAddon === 'function') return FitAddon.FitAddon;
@@ -354,9 +413,13 @@
       term.focus();
     });
     term.onData((data) => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
+      if (ctrlSticky) {
+        setCtrlSticky(false);
+        if (data.length === 1) {
+          data = ctrlChar(data);
+        }
       }
+      sendToShell(data);
     });
     resizeObs = new ResizeObserver(() => fitAndNotify());
     resizeObs.observe(termEl);
@@ -419,6 +482,7 @@
 
   function teardownTerm() {
     closeWS();
+    setCtrlSticky(false);
     if (resizeHandler) {
       window.removeEventListener('resize', resizeHandler);
       resizeHandler = null;

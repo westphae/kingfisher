@@ -183,6 +183,41 @@ body {
   margin: 0.5rem 0 0;
 }
 
+.termKeys {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+  padding: 0.4rem 0.5rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  flex-shrink: 0;
+}
+
+.termKeys .termKey {
+  flex: 0 0 auto;
+  min-width: 2.75rem;
+  min-height: 44px;
+  padding: 0 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.termKeys .termKey.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg));
+  color: var(--accent);
+}
+
 #terminal {
   flex: 1 1 auto;
   min-height: 50vh;

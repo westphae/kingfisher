@@ -45,6 +45,18 @@
     <p id="loginErr" class="err" hidden></p>
   </section>
 
+  <div id="termKeys" class="termKeys" hidden>
+    <button type="button" class="termKey" id="keyCtrl" aria-pressed="false" title="Next key sends as Ctrl (e.g. Ctrl+C)">Ctrl</button>
+    <button type="button" class="termKey" data-send="&#x03;" title="Ctrl+C (interrupt)">^C</button>
+    <button type="button" class="termKey" data-send="&#x1b;" title="Escape">Esc</button>
+    <button type="button" class="termKey" data-send="&#x09;" title="Tab">Tab</button>
+    <button type="button" class="termKey" data-send="|" title="Pipe">|</button>
+    <button type="button" class="termKey" data-send="&#x1b;[A" title="Up arrow">↑</button>
+    <button type="button" class="termKey" data-send="&#x1b;[B" title="Down arrow">↓</button>
+    <button type="button" class="termKey" data-send="&#x1b;[D" title="Left arrow">←</button>
+    <button type="button" class="termKey" data-send="&#x1b;[C" title="Right arrow">→</button>
+  </div>
+
   <div id="terminal" hidden></div>
 
   <script src="/static/xterm/xterm.js"></script>
