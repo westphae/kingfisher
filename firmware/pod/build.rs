@@ -27,10 +27,49 @@ struct PodSection {
     udp_addr: String,
     #[serde(default = "default_battery_capacity", rename = "battery_capacity_mah")]
     battery_capacity_mah: u16,
+    #[serde(default = "default_sleep_soc_pct", rename = "sleep_soc_pct")]
+    sleep_soc_pct: u8,
+    #[serde(
+        default = "default_sleep_voltage_uncal",
+        rename = "sleep_voltage_v_uncalibrated"
+    )]
+    sleep_voltage_v_uncalibrated: f32,
+    #[serde(default = "default_sleep_debounce_s", rename = "sleep_debounce_s")]
+    sleep_debounce_s: u16,
+    #[serde(default = "default_sleep_emergency_v", rename = "sleep_emergency_voltage_v")]
+    sleep_emergency_voltage_v: f32,
+    #[serde(default = "default_flush_interval_s", rename = "flush_interval_s")]
+    flush_interval_s: u16,
+    #[serde(default = "default_flush_watermark", rename = "flush_high_watermark")]
+    flush_high_watermark: u16,
+    #[serde(default = "default_buffer_max", rename = "buffer_max_readings")]
+    buffer_max_readings: u16,
 }
 
 fn default_battery_capacity() -> u16 {
     850
+}
+
+fn default_sleep_soc_pct() -> u8 {
+    20
+}
+fn default_sleep_voltage_uncal() -> f32 {
+    3.60
+}
+fn default_sleep_debounce_s() -> u16 {
+    45
+}
+fn default_sleep_emergency_v() -> f32 {
+    3.50
+}
+fn default_flush_interval_s() -> u16 {
+    3
+}
+fn default_flush_watermark() -> u16 {
+    24
+}
+fn default_buffer_max() -> u16 {
+    128
 }
 
 fn main() {
@@ -79,6 +118,28 @@ fn main() {
     println!(
         "cargo:rustc-env=BATTERY_CAPACITY_MAH={}",
         cfg.pod.battery_capacity_mah
+    );
+    println!("cargo:rustc-env=SLEEP_SOC_PCT={}", cfg.pod.sleep_soc_pct);
+    println!(
+        "cargo:rustc-env=SLEEP_VOLTAGE_UNCAL={:.3}",
+        cfg.pod.sleep_voltage_v_uncalibrated
+    );
+    println!(
+        "cargo:rustc-env=SLEEP_DEBOUNCE_S={}",
+        cfg.pod.sleep_debounce_s
+    );
+    println!(
+        "cargo:rustc-env=SLEEP_EMERGENCY_V={:.3}",
+        cfg.pod.sleep_emergency_voltage_v
+    );
+    println!("cargo:rustc-env=FLUSH_INTERVAL_S={}", cfg.pod.flush_interval_s);
+    println!(
+        "cargo:rustc-env=FLUSH_HIGH_WATERMARK={}",
+        cfg.pod.flush_high_watermark
+    );
+    println!(
+        "cargo:rustc-env=BUFFER_MAX_READINGS={}",
+        cfg.pod.buffer_max_readings
     );
 }
 

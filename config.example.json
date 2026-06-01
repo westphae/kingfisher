@@ -17,6 +17,13 @@
     "wifi_ssid": "kingfisher",
     "wifi_password": "",
     "udp_addr": "192.168.10.1:47808",
-    "battery_capacity_mah": 850
+    "battery_capacity_mah": 850,
+    "sleep_soc_pct": 20,
+    "sleep_voltage_v_uncalibrated": 3.60,
+    "sleep_debounce_s": 45,
+    "sleep_emergency_voltage_v": 3.50,
+    "buffer_max_readings": 128,
+    "flush_interval_s": 3,
+    "flush_high_watermark": 24
   }
 }

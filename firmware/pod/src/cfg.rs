@@ -29,6 +29,13 @@ pub const BASE_HZ: u16 = (1000 / TICK_MS) as u16;
 
 /// LiPo design capacity (mAh) for BQ27441 gauge configuration at build time.
 pub const BATTERY_CAPACITY_MAH: u16 = parse_env_u16(env!("BATTERY_CAPACITY_MAH"));
+pub const SLEEP_SOC_PCT: u8 = parse_env_u8(env!("SLEEP_SOC_PCT"));
+pub const SLEEP_VOLTAGE_UNCALIBRATED: f32 = parse_env_millivolts(env!("SLEEP_VOLTAGE_UNCAL"));
+pub const SLEEP_DEBOUNCE_US: u64 = parse_env_u16(env!("SLEEP_DEBOUNCE_S")) as u64 * 1_000_000;
+pub const SLEEP_EMERGENCY_VOLTAGE: f32 = parse_env_millivolts(env!("SLEEP_EMERGENCY_V"));
+pub const FLUSH_INTERVAL_US: u64 = parse_env_u16(env!("FLUSH_INTERVAL_S")) as u64 * 1_000_000;
+pub const FLUSH_HIGH_WATERMARK: u16 = parse_env_u16(env!("FLUSH_HIGH_WATERMARK"));
+pub const BUFFER_MAX_READINGS: u16 = parse_env_u16(env!("BUFFER_MAX_READINGS"));
 
 /// Parse decimal u16 at compile time from env string.
 const fn parse_env_u16(s: &str) -> u16 {
@@ -47,6 +54,49 @@ const fn parse_env_u16(s: &str) -> u16 {
         panic!("BATTERY_CAPACITY_MAH must be > 0");
     }
     n
+}
+
+const fn parse_env_u8(s: &str) -> u8 {
+    let n = parse_env_u16(s);
+    if n > u8::MAX as u16 {
+        panic!("u8 env parse overflow");
+    }
+    n as u8
+}
+
+// Parse x.yy volts into f32 at compile time via integer millivolts.
+const fn parse_env_millivolts(s: &str) -> f32 {
+    let bytes = s.as_bytes();
+    let mut i = 0usize;
+    let mut whole = 0u16;
+    let mut frac = 0u16;
+    let mut frac_digits = 0u8;
+    let mut seen_dot = false;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'.' {
+            if seen_dot {
+                panic!("invalid float env");
+            }
+            seen_dot = true;
+        } else if b >= b'0' && b <= b'9' {
+            if !seen_dot {
+                whole = whole * 10 + (b - b'0') as u16;
+            } else if frac_digits < 3 {
+                frac = frac * 10 + (b - b'0') as u16;
+                frac_digits += 1;
+            }
+        } else {
+            panic!("invalid float env");
+        }
+        i += 1;
+    }
+    while frac_digits < 3 {
+        frac *= 10;
+        frac_digits += 1;
+    }
+    let mv = whole as u32 * 1000 + frac as u32;
+    mv as f32 / 1000.0
 }
 
 /// Parse `a.b.c.d:port` at compile time (same source as `env!("PI_ADDR")`).
