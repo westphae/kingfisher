@@ -7,8 +7,26 @@ import (
 	"github.com/westphae/kingfisher/internal/pod/wire"
 )
 
-// BatteryGaugeLearned reports whether the BQ27441 has non-zero capacity/SOC data.
-func BatteryGaugeLearned(r wire.BatteryReading) bool {
+// gaugeFullMatchesDesign is true when the full-capacity register matches design (±15%).
+func gaugeFullMatchesDesign(fullMah float32, designMah uint16) bool {
+	if designMah == 0 || fullMah <= 0 {
+		return false
+	}
+	design := float32(designMah)
+	ratio := fullMah / design
+	return ratio >= 0.85 && ratio <= 1.15
+}
+
+// BatteryGaugeLearned reports whether capacity/SOC are trustworthy for display.
+// A non-zero full register that does not match configured design is treated as
+// unlearned (stale gauge data until reprogrammed).
+func BatteryGaugeLearned(r wire.BatteryReading, designMah uint16) bool {
+	if r.CapacityFullMah <= 0 && r.CapacityRemainMah <= 0 && r.SocPct <= 0 {
+		return false
+	}
+	if r.CapacityFullMah > 0 && designMah > 0 && !gaugeFullMatchesDesign(r.CapacityFullMah, designMah) {
+		return false
+	}
 	return r.CapacityFullMah > 0 || r.CapacityRemainMah > 0 || r.SocPct > 0
 }
 
@@ -16,7 +34,7 @@ func BatteryGaugeLearned(r wire.BatteryReading) bool {
 // derived remain/time). When unlearned, capacity/SOC/time are left at zero for
 // hub/DB; battery_gauge_learned flags the state for the UI.
 func NormalizeBatteryReading(r wire.BatteryReading, designMah uint16) (wire.BatteryReading, bool) {
-	if !BatteryGaugeLearned(r) {
+	if !BatteryGaugeLearned(r, designMah) {
 		r.CapacityFullMah = 0
 		r.CapacityRemainMah = 0
 		r.SocPct = 0

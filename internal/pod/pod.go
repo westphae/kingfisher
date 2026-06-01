@@ -328,7 +328,11 @@ func (c *Client) onBatch(b wire.SampleBatch) {
 		var learned bool
 		switch raw := rd.(type) {
 		case wire.BatteryReading:
-			learned = BatteryGaugeLearned(raw)
+			if raw.CapacityFullMah > 0 && designMah > 0 && !gaugeFullMatchesDesign(raw.CapacityFullMah, designMah) {
+				c.lastPushedBatteryMah = 0
+				c.pushConfiguredBatteryCapacity()
+			}
+			learned = BatteryGaugeLearned(raw, designMah)
 			br, _ := NormalizeBatteryReading(raw, designMah)
 			dev, values, ok = c.reader.sampleBatteryValues(br, learned)
 			rd = br

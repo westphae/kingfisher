@@ -65,11 +65,25 @@ func TestNormalizeBatteryReading_unlearnedOmitsCapacity(t *testing.T) {
 }
 
 func TestBatteryGaugeLearned(t *testing.T) {
-	if BatteryGaugeLearned(wire.BatteryReading{}) {
+	if BatteryGaugeLearned(wire.BatteryReading{}, 850) {
 		t.Fatal("empty reading should be unlearned")
 	}
-	if !BatteryGaugeLearned(wire.BatteryReading{SocPct: 1}) {
+	if !BatteryGaugeLearned(wire.BatteryReading{SocPct: 1}, 850) {
 		t.Fatal("non-zero SOC should be learned")
+	}
+	if BatteryGaugeLearned(wire.BatteryReading{CapacityFullMah: 1221, SocPct: 50}, 850) {
+		t.Fatal("full capacity far from design should be unlearned")
+	}
+}
+
+func TestNormalizeBatteryReading_wrongFullUnlearned(t *testing.T) {
+	_, learned := NormalizeBatteryReading(wire.BatteryReading{
+		CapacityFullMah:   1221,
+		CapacityRemainMah: 600,
+		SocPct:            50,
+	}, 850)
+	if learned {
+		t.Fatal("expected unlearned when full != design")
 	}
 }
 
