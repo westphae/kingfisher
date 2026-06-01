@@ -527,17 +527,53 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
 
     loop {
         ticker.next().await;
-        if power::sleep_requested() {
-            power::mark_sleeping();
-            continue;
-        }
         let tick_start = Instant::now();
         let tick_us = tick_start.as_micros();
-        rates::begin_tick();
         let mut tick_failures = 0u8;
 
-        // BQ27441 config updates need a quiet bus; run before BMP FIFO drain.
+        // Always sample the gauge for sleep/wake policy, even when quiesced.
         if let Some(ref mut bq27441) = board.bq27441 {
+            let hz = rates::get(SensorId::Battery);
+            if hz > 0 {
+                let cap_us = Instant::now().as_micros();
+                match bq27441.read_when_due(bus) {
+                    Ok(Some(s)) => {
+                        store_latest_battery_v(s.voltage_v);
+                        crate::battery_cfg::note_gauge_full_capacity(s.capacity_full_mah);
+                        let _ = power::note_battery_sample(
+                            cap_us,
+                            s.voltage_v,
+                            s.current_a,
+                            s.soc_pct,
+                            crate::battery_cfg::gauge_trusted(),
+                        );
+                        if !power::sleep_requested() {
+                            rates::note_read_ok(SensorId::Battery);
+                            push_battery(
+                                Reading::Battery {
+                                    voltage_v: s.voltage_v,
+                                    current_a: s.current_a,
+                                    power_w: s.power_w,
+                                    capacity_remain_mah: s.capacity_remain_mah,
+                                    capacity_full_mah: s.capacity_full_mah,
+                                    soc_pct: s.soc_pct,
+                                    time_remain_s: s.time_remain_s,
+                                    age_us: 0,
+                                },
+                                cap_us,
+                            );
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(()) => {
+                        tick_failures = tick_failures.saturating_add(1);
+                        if rates::note_read_fail(SensorId::Battery) {
+                            need_recovery = true;
+                        }
+                    }
+                }
+            }
+            // Config update needs a quiet bus; run even when quiesced for sleep.
             if let Some(mah) = crate::battery_cfg::should_program_design(tick_us) {
                 match bq27441.program_design_capacity(bus, mah) {
                     Ok(()) => {
@@ -554,48 +590,14 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
                     }
                 }
             }
-            let hz = rates::get(SensorId::Battery);
-            if hz > 0 && rates::poll_budget(SensorId::Battery, hz) > 0 {
-                let cap_us = Instant::now().as_micros();
-                match bq27441.read_when_due(bus) {
-                    Ok(Some(s)) => {
-                        rates::note_read_ok(SensorId::Battery);
-                        store_latest_battery_v(s.voltage_v);
-                        crate::battery_cfg::note_gauge_full_capacity(s.capacity_full_mah);
-                        let learned = s.capacity_full_mah > 10.0
-                            && s.capacity_remain_mah > 1.0
-                            && s.soc_pct > 0.0
-                            && s.soc_pct <= 100.0;
-                        let _ = power::note_battery_sample(
-                            cap_us,
-                            s.voltage_v,
-                            s.soc_pct,
-                            learned,
-                        );
-                        push_battery(
-                            Reading::Battery {
-                                voltage_v: s.voltage_v,
-                                current_a: s.current_a,
-                                power_w: s.power_w,
-                                capacity_remain_mah: s.capacity_remain_mah,
-                                capacity_full_mah: s.capacity_full_mah,
-                                soc_pct: s.soc_pct,
-                                time_remain_s: s.time_remain_s,
-                                age_us: 0,
-                            },
-                            cap_us,
-                        );
-                    }
-                    Ok(None) => {}
-                    Err(()) => {
-                        tick_failures = tick_failures.saturating_add(1);
-                        if rates::note_read_fail(SensorId::Battery) {
-                            need_recovery = true;
-                        }
-                    }
-                }
-            }
         }
+
+        if power::sleep_requested() {
+            power::mark_sleeping();
+            continue;
+        }
+
+        rates::begin_tick();
 
         // Cheap sensors first so mag/airspeed keep updating under BMP load.
         if let Some(ref mut mmc5983) = board.mmc5983 {
