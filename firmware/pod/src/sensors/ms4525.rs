@@ -2,10 +2,20 @@
 //!
 //! Protocol and transfer function follow PX4 `ms4525_airspeed` and
 //! cojmeister/ms4525do (±1 PSI, output type A). Bench part: DS5AI001DP @ 0x28.
+//!
+//! After the measure command the die needs ~1–2 ms before status is normal; reading
+//! immediately yields status busy/stale and looks like an I²C failure in the poll loop.
 
+use embassy_time::{block_for, Duration};
 use esp_println::{print, println};
 
 use super::bus::Bus as I2cBus;
+
+/// Wait after triggering a conversion (datasheet / PX4-style drivers use ~2 ms).
+const CONV_WAIT_US: u64 = 2_000;
+/// Extra wait between fetch retries when status is still busy.
+const FETCH_RETRY_WAIT_US: u64 = 500;
+const MAX_FETCH_TRIES: u8 = 4;
 
 pub const ADDR: u8 = 0x28;
 
@@ -51,7 +61,7 @@ impl Ms4525 {
 
     /// Log a single measure attempt for [`bus::scan`].
     pub fn scan_line(bus: &mut I2cBus) -> u8 {
-        match read_raw(bus) {
+        match fetch_raw(bus) {
             Ok(data) => {
                 let st = status_from_byte(data[0]);
                 print!(" 0x{ADDR:02x}(st={st})");
@@ -66,16 +76,40 @@ impl Ms4525 {
 }
 
 fn read_and_decode(bus: &mut I2cBus) -> Result<Sample, &'static str> {
-    let data = read_raw(bus)?;
-    decode(&data)
+    trigger_conversion(bus)?;
+    block_for(Duration::from_micros(CONV_WAIT_US));
+    fetch_and_decode(bus)
 }
 
-fn read_raw(bus: &mut I2cBus) -> Result<[u8; 4], &'static str> {
-    bus.write(ADDR, &[CMD_MEASURE]).map_err(|_| "trigger")?;
+fn trigger_conversion(bus: &mut I2cBus) -> Result<(), &'static str> {
+    bus.write(ADDR, &[CMD_MEASURE]).map_err(|_| "trigger")
+}
+
+/// Read four data bytes without sending a new measure command.
+fn fetch_raw(bus: &mut I2cBus) -> Result<[u8; 4], &'static str> {
     let mut data = [0u8; 4];
     bus.write_read(ADDR, &[], &mut data)
         .map_err(|_| "read")?;
     Ok(data)
+}
+
+fn fetch_and_decode(bus: &mut I2cBus) -> Result<Sample, &'static str> {
+    let mut last = "status not ready";
+    for attempt in 0..MAX_FETCH_TRIES {
+        let data = fetch_raw(bus)?;
+        match decode(&data) {
+            Ok(sample) => return Ok(sample),
+            Err(e) => {
+                last = e;
+                if (e == "status not ready" || e == "fault") && attempt + 1 < MAX_FETCH_TRIES {
+                    block_for(Duration::from_micros(FETCH_RETRY_WAIT_US));
+                    continue;
+                }
+                return Err(e);
+            }
+        }
+    }
+    Err(last)
 }
 
 fn status_from_byte(b0: u8) -> u8 {
