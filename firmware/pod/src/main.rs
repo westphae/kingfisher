@@ -9,6 +9,7 @@ mod cfg;
 mod cmd;
 mod hello;
 mod link;
+mod power;
 mod rates;
 mod sensors;
 
@@ -110,7 +111,16 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(uplink_task(stack).unwrap());
 
     loop {
-        Timer::after(Duration::from_secs(60)).await;
+        if power::sleep_requested() {
+            power::mark_sleeping();
+            println!(
+                "pod: sleep mode entered reason={:?}",
+                power::sleep_reason()
+            );
+            Timer::after(Duration::from_secs(30)).await;
+            continue;
+        }
+        Timer::after(Duration::from_secs(5)).await;
     }
 }
 
@@ -129,6 +139,11 @@ fn clamp_rssi_dbm(rssi: i32) -> i8 {
 async fn connection_task(mut controller: WifiController<'static>) {
     let mut rssi_tick = Ticker::every(Duration::from_secs(1));
     loop {
+        if power::sleep_requested() {
+            link::clear_wifi_rssi();
+            Timer::after(Duration::from_secs(1)).await;
+            continue;
+        }
         match controller.connect_async().await {
             Ok(info) => {
                 println!("pod: wifi connected: {:?}", info);
@@ -194,14 +209,16 @@ async fn uplink_task(stack: Stack<'static>) {
     let mut sent_since_log: u32 = 0;
     let mut seq: u32 = 0;
     let mut pi_peer: Option<IpEndpoint> = None;
+    let mut last_flush_us: u64 = 0;
 
     loop {
         match select(ticker.next(), socket.recv_from(&mut udp_rx)).await {
             Either::First(()) => {
                 let now = Instant::now();
                 let uptime_us = now.as_micros();
+                let sleeping = power::sleep_requested();
 
-                if link::should_send_hello(uptime_us) {
+                if !sleeping && link::should_send_hello(uptime_us) {
                     let mask = sensors::attached_mask();
                     let hello = hello::build(mask);
                     match pod_wire::encode_to_slice(&hello, &mut frame_buf) {
@@ -215,15 +232,34 @@ async fn uplink_task(stack: Stack<'static>) {
                     }
                 }
 
-                seq = seq.wrapping_add(1);
-                let batch = sensors::with_samples_mut(|s| s.build_batch(uptime_us, seq));
-                if !batch.samples.is_empty() {
-                    let frame = Frame::Sample(batch);
-                    if let Ok(bytes) = pod_wire::encode_to_slice(&frame, &mut frame_buf) {
-                        let peer = pi_peer.unwrap_or(dest);
-                        if socket.send_to(bytes, peer).await.is_ok() {
-                            sent_since_log += 1;
+                let depth = sensors::buffer_depth();
+                let flush_due = last_flush_us == 0
+                    || uptime_us.saturating_sub(last_flush_us) >= cfg::FLUSH_INTERVAL_US
+                    || depth >= cfg::FLUSH_HIGH_WATERMARK;
+                if !sleeping && flush_due {
+                    // Wire batches cap at MAX_READINGS; drain backlog with short bursts.
+                    const MAX_BATCHES_PER_FLUSH: u32 = 12;
+                    let mut flushed = false;
+                    for _ in 0..MAX_BATCHES_PER_FLUSH {
+                        seq = seq.wrapping_add(1);
+                        let batch = sensors::with_samples_mut(|s| s.build_batch(uptime_us, seq));
+                        if batch.samples.is_empty() {
+                            break;
                         }
+                        let frame = Frame::Sample(batch);
+                        if let Ok(bytes) = pod_wire::encode_to_slice(&frame, &mut frame_buf) {
+                            let peer = pi_peer.unwrap_or(dest);
+                            if socket.send_to(bytes, peer).await.is_ok() {
+                                sent_since_log += 1;
+                                flushed = true;
+                            }
+                        }
+                        if sensors::buffer_depth() == 0 {
+                            break;
+                        }
+                    }
+                    if flushed {
+                        last_flush_us = uptime_us;
                     }
                 }
 
@@ -235,6 +271,10 @@ async fn uplink_task(stack: Stack<'static>) {
                         rssi_dbm: link::wifi_rssi_dbm(),
                         tx_seq: seq,
                         rx_seq_last: cmd::last_rx_cmd_seq(),
+                        power_mode: power::mode() as u8,
+                        sleep_reason: power::sleep_reason() as u8,
+                        buffer_depth: sensors::buffer_depth(),
+                        dropped_readings: sensors::dropped_readings(),
                     });
                     if let Ok(bytes) = pod_wire::encode_to_slice(&status, &mut frame_buf) {
                         let peer = pi_peer.unwrap_or(dest);

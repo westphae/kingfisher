@@ -23,6 +23,7 @@ use mmc5983::Mmc5983;
 use ms4525::Ms4525;
 
 use crate::link;
+use crate::power;
 use crate::rates;
 
 pub const BMP_BIT: u8 = 1;
@@ -32,14 +33,39 @@ pub const BATTERY_BIT: u8 = 8;
 
 static LATEST_BATTERY_V: core::sync::atomic::AtomicU32 =
     core::sync::atomic::AtomicU32::new(0);
+static DROPPED_READINGS: Mutex<RefCell<u32>> = Mutex::new(RefCell::new(0));
+
+const MAX_BUFFERED_READINGS: usize = crate::cfg::BUFFER_MAX_READINGS as usize;
 
 /// Latest fuel-gauge voltage for Status frames (0 when unknown).
 pub fn latest_battery_v() -> f32 {
     let bits = LATEST_BATTERY_V.load(core::sync::atomic::Ordering::Relaxed);
     if bits == 0 {
-        return 0.0;
+        return crate::cfg::SLEEP_VOLTAGE_UNCALIBRATED;
     }
     f32::from_bits(bits)
+}
+
+pub fn buffer_depth() -> u16 {
+    with_samples_mut(|s| {
+        let n = s.pending_static.len()
+            + s.pending_mag.len()
+            + s.pending_airspeed.len()
+            + s.pending_battery.len();
+        n.min(u16::MAX as usize) as u16
+    })
+}
+
+pub fn dropped_readings() -> u32 {
+    critical_section::with(|cs| *DROPPED_READINGS.borrow(cs).borrow())
+}
+
+fn note_dropped_reading(sensor: &'static str) {
+    critical_section::with(|cs| {
+        let mut n = DROPPED_READINGS.borrow(cs).borrow_mut();
+        *n = n.saturating_add(1);
+    });
+    println!("pod: warn: dropped {} sample (buffer full)", sensor);
 }
 
 fn store_latest_battery_v(v: f32) {
@@ -89,13 +115,13 @@ pub struct StampedReading {
 #[derive(Clone, Default)]
 pub struct LatestSamples {
     /// Static readings queued since the last uplink (FIFO drain may add several).
-    pub pending_static: Vec<StampedReading, MAX_READINGS>,
+    pub pending_static: Vec<StampedReading, MAX_BUFFERED_READINGS>,
     /// Mag readings queued since the last uplink (multiple poll reads per tick).
-    pub pending_mag: Vec<StampedReading, MAX_READINGS>,
+    pub pending_mag: Vec<StampedReading, MAX_BUFFERED_READINGS>,
     /// Airspeed readings queued since the last uplink (poll budget may add several).
-    pub pending_airspeed: Vec<StampedReading, MAX_READINGS>,
+    pub pending_airspeed: Vec<StampedReading, MAX_BUFFERED_READINGS>,
     /// Battery readings queued since the last uplink.
-    pub pending_battery: Vec<StampedReading, MAX_READINGS>,
+    pub pending_battery: Vec<StampedReading, MAX_BUFFERED_READINGS>,
     pub static_sample: Option<StampedReading>,
     pub mag_sample: Option<StampedReading>,
     pub airspeed_sample: Option<StampedReading>,
@@ -111,190 +137,205 @@ fn age_us(pod_uptime_us: u64, captured_us: u64) -> u32 {
 impl LatestSamples {
     fn enqueue_static(&mut self, stamped: StampedReading) {
         self.static_sample = Some(stamped.clone());
-        if self.pending_static.len() >= MAX_READINGS {
-            println!("pod: warn: dropped static sample (pending full)");
-            return;
+        if self.pending_static.len() >= MAX_BUFFERED_READINGS {
+            let _ = self.pending_static.remove(0);
+            note_dropped_reading("static");
         }
         let _ = self.pending_static.push(stamped);
     }
 
     fn enqueue_mag(&mut self, stamped: StampedReading) {
         self.mag_sample = Some(stamped.clone());
-        if self.pending_mag.len() >= MAX_READINGS {
-            println!("pod: warn: dropped mag sample (pending full)");
-            return;
+        if self.pending_mag.len() >= MAX_BUFFERED_READINGS {
+            let _ = self.pending_mag.remove(0);
+            note_dropped_reading("mag");
         }
         let _ = self.pending_mag.push(stamped);
     }
 
     fn enqueue_airspeed(&mut self, stamped: StampedReading) {
         self.airspeed_sample = Some(stamped.clone());
-        if self.pending_airspeed.len() >= MAX_READINGS {
-            println!("pod: warn: dropped airspeed sample (pending full)");
-            return;
+        if self.pending_airspeed.len() >= MAX_BUFFERED_READINGS {
+            let _ = self.pending_airspeed.remove(0);
+            note_dropped_reading("airspeed");
         }
         let _ = self.pending_airspeed.push(stamped);
     }
 
     fn enqueue_battery(&mut self, stamped: StampedReading) {
         self.battery_sample = Some(stamped.clone());
-        if self.pending_battery.len() >= MAX_READINGS {
-            println!("pod: warn: dropped battery sample (pending full)");
-            return;
+        if self.pending_battery.len() >= MAX_BUFFERED_READINGS {
+            let _ = self.pending_battery.remove(0);
+            note_dropped_reading("battery");
         }
         let _ = self.pending_battery.push(stamped);
     }
 }
 
-fn push_to_batch(
+fn push_to_batch(samples: &mut Vec<Reading, MAX_READINGS>, reading: Reading) -> bool {
+    samples.push(reading).is_ok()
+}
+
+fn drain_one_static(
     samples: &mut Vec<Reading, MAX_READINGS>,
-    reading: Reading,
-    sensor: &'static str,
+    pending: &mut Vec<StampedReading, MAX_BUFFERED_READINGS>,
+    pod_uptime_us: u64,
 ) -> bool {
-    match samples.push(reading) {
-        Ok(()) => true,
-        Err(_) => {
-            println!("pod: warn: dropped {} sample (batch full)", sensor);
-            false
+    if pending.is_empty() || samples.len() >= MAX_READINGS {
+        return false;
+    }
+    let s = pending[0].clone();
+    let age = age_us(pod_uptime_us, s.captured_us);
+    let wire = match s.reading {
+        Reading::Static { p_pa, temp_c, .. } => Reading::Static {
+            p_pa,
+            temp_c,
+            age_us: age,
+        },
+        _ => {
+            let _ = pending.remove(0);
+            return false;
         }
+    };
+    if push_to_batch(samples, wire) {
+        let _ = pending.remove(0);
+        true
+    } else {
+        false
     }
 }
 
-fn drain_static_pending(
+fn drain_one_mag(
     samples: &mut Vec<Reading, MAX_READINGS>,
-    pending: &mut Vec<StampedReading, MAX_READINGS>,
+    pending: &mut Vec<StampedReading, MAX_BUFFERED_READINGS>,
     pod_uptime_us: u64,
-) {
-    while !pending.is_empty() {
-        let s = pending[0].clone();
-        let age = age_us(pod_uptime_us, s.captured_us);
-        let wire = match s.reading {
-            Reading::Static { p_pa, temp_c, .. } => Reading::Static {
-                p_pa,
-                temp_c,
-                age_us: age,
-            },
-            _ => {
-                let _ = pending.remove(0);
-                continue;
-            }
-        };
-        if push_to_batch(samples, wire, "static") {
+) -> bool {
+    if pending.is_empty() || samples.len() >= MAX_READINGS {
+        return false;
+    }
+    let s = pending[0].clone();
+    let age = age_us(pod_uptime_us, s.captured_us);
+    let wire = match s.reading {
+        Reading::Mag {
+            x_ut,
+            y_ut,
+            z_ut,
+            ..
+        } => Reading::Mag {
+            x_ut,
+            y_ut,
+            z_ut,
+            age_us: age,
+        },
+        _ => {
             let _ = pending.remove(0);
-        } else {
-            break;
+            return false;
         }
+    };
+    if push_to_batch(samples, wire) {
+        let _ = pending.remove(0);
+        true
+    } else {
+        false
     }
 }
 
-fn drain_mag_pending(
+fn drain_one_airspeed(
     samples: &mut Vec<Reading, MAX_READINGS>,
-    pending: &mut Vec<StampedReading, MAX_READINGS>,
+    pending: &mut Vec<StampedReading, MAX_BUFFERED_READINGS>,
     pod_uptime_us: u64,
-) {
-    while !pending.is_empty() {
-        let s = pending[0].clone();
-        let age = age_us(pod_uptime_us, s.captured_us);
-        let wire = match s.reading {
-            Reading::Mag {
-                x_ut,
-                y_ut,
-                z_ut,
-                ..
-            } => Reading::Mag {
-                x_ut,
-                y_ut,
-                z_ut,
-                age_us: age,
-            },
-            _ => {
-                let _ = pending.remove(0);
-                continue;
-            }
-        };
-        if push_to_batch(samples, wire, "mag") {
+) -> bool {
+    if pending.is_empty() || samples.len() >= MAX_READINGS {
+        return false;
+    }
+    let s = pending[0].clone();
+    let age = age_us(pod_uptime_us, s.captured_us);
+    let wire = match s.reading {
+        Reading::Airspeed { dp_pa, temp_c, .. } => Reading::Airspeed {
+            dp_pa,
+            temp_c,
+            age_us: age,
+        },
+        _ => {
             let _ = pending.remove(0);
-        } else {
-            break;
+            return false;
         }
+    };
+    if push_to_batch(samples, wire) {
+        let _ = pending.remove(0);
+        true
+    } else {
+        false
     }
 }
 
-fn drain_airspeed_pending(
+fn drain_one_battery(
     samples: &mut Vec<Reading, MAX_READINGS>,
-    pending: &mut Vec<StampedReading, MAX_READINGS>,
+    pending: &mut Vec<StampedReading, MAX_BUFFERED_READINGS>,
     pod_uptime_us: u64,
-) {
-    while !pending.is_empty() {
-        let s = pending[0].clone();
-        let age = age_us(pod_uptime_us, s.captured_us);
-        let wire = match s.reading {
-            Reading::Airspeed { dp_pa, temp_c, .. } => Reading::Airspeed {
-                dp_pa,
-                temp_c,
-                age_us: age,
-            },
-            _ => {
-                let _ = pending.remove(0);
-                continue;
-            }
-        };
-        if push_to_batch(samples, wire, "airspeed") {
-            let _ = pending.remove(0);
-        } else {
-            break;
-        }
+) -> bool {
+    if pending.is_empty() || samples.len() >= MAX_READINGS {
+        return false;
     }
-}
-
-fn drain_battery_pending(
-    samples: &mut Vec<Reading, MAX_READINGS>,
-    pending: &mut Vec<StampedReading, MAX_READINGS>,
-    pod_uptime_us: u64,
-) {
-    while !pending.is_empty() {
-        let s = pending[0].clone();
-        let age = age_us(pod_uptime_us, s.captured_us);
-        let wire = match s.reading {
-            Reading::Battery {
-                voltage_v,
-                current_a,
-                power_w,
-                capacity_remain_mah,
-                capacity_full_mah,
-                soc_pct,
-                time_remain_s,
-                ..
-            } => Reading::Battery {
-                voltage_v,
-                current_a,
-                power_w,
-                capacity_remain_mah,
-                capacity_full_mah,
-                soc_pct,
-                time_remain_s,
-                age_us: age,
-            },
-            _ => {
-                let _ = pending.remove(0);
-                continue;
-            }
-        };
-        if push_to_batch(samples, wire, "battery") {
+    let s = pending[0].clone();
+    let age = age_us(pod_uptime_us, s.captured_us);
+    let wire = match s.reading {
+        Reading::Battery {
+            voltage_v,
+            current_a,
+            power_w,
+            capacity_remain_mah,
+            capacity_full_mah,
+            soc_pct,
+            time_remain_s,
+            ..
+        } => Reading::Battery {
+            voltage_v,
+            current_a,
+            power_w,
+            capacity_remain_mah,
+            capacity_full_mah,
+            soc_pct,
+            time_remain_s,
+            age_us: age,
+        },
+        _ => {
             let _ = pending.remove(0);
-        } else {
-            break;
+            return false;
         }
+    };
+    if push_to_batch(samples, wire) {
+        let _ = pending.remove(0);
+        true
+    } else {
+        false
     }
 }
 
 impl LatestSamples {
+    /// Build one wire batch (max [`MAX_READINGS`]). Round-robins sensor queues so
+    /// BMP581 FIFO backlog cannot starve mag/airspeed/battery.
     pub fn build_batch(&mut self, pod_uptime_us: u64, seq: u32) -> SampleBatch {
         let mut samples: Vec<Reading, MAX_READINGS> = Vec::new();
-        drain_static_pending(&mut samples, &mut self.pending_static, pod_uptime_us);
-        drain_mag_pending(&mut samples, &mut self.pending_mag, pod_uptime_us);
-        drain_airspeed_pending(&mut samples, &mut self.pending_airspeed, pod_uptime_us);
-        drain_battery_pending(&mut samples, &mut self.pending_battery, pod_uptime_us);
+        while samples.len() < MAX_READINGS {
+            let before = samples.len();
+            let _ = drain_one_static(&mut samples, &mut self.pending_static, pod_uptime_us);
+            if samples.len() >= MAX_READINGS {
+                break;
+            }
+            let _ = drain_one_mag(&mut samples, &mut self.pending_mag, pod_uptime_us);
+            if samples.len() >= MAX_READINGS {
+                break;
+            }
+            let _ = drain_one_airspeed(&mut samples, &mut self.pending_airspeed, pod_uptime_us);
+            if samples.len() >= MAX_READINGS {
+                break;
+            }
+            let _ = drain_one_battery(&mut samples, &mut self.pending_battery, pod_uptime_us);
+            if samples.len() == before {
+                break;
+            }
+        }
         SampleBatch {
             pod_uptime_us,
             seq,
@@ -486,10 +527,75 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
 
     loop {
         ticker.next().await;
+        if power::sleep_requested() {
+            power::mark_sleeping();
+            continue;
+        }
         let tick_start = Instant::now();
+        let tick_us = tick_start.as_micros();
         rates::begin_tick();
-        let _tick_us = tick_start.as_micros();
         let mut tick_failures = 0u8;
+
+        // BQ27441 config updates need a quiet bus; run before BMP FIFO drain.
+        if let Some(ref mut bq27441) = board.bq27441 {
+            if let Some(mah) = crate::battery_cfg::should_program_design(tick_us) {
+                match bq27441.program_design_capacity(bus, mah) {
+                    Ok(()) => {
+                        println!("pod: bq27441 design capacity programmed {mah} mAh");
+                        crate::battery_cfg::note_program_ok();
+                    }
+                    Err(()) => {
+                        crate::battery_cfg::note_program_fail(tick_us);
+                        if crate::battery_cfg::should_log_program_fail() {
+                            println!(
+                                "pod: bq27441 design capacity program failed; retry in 60s"
+                            );
+                        }
+                    }
+                }
+            }
+            let hz = rates::get(SensorId::Battery);
+            if hz > 0 && rates::poll_budget(SensorId::Battery, hz) > 0 {
+                let cap_us = Instant::now().as_micros();
+                match bq27441.read_when_due(bus) {
+                    Ok(Some(s)) => {
+                        rates::note_read_ok(SensorId::Battery);
+                        store_latest_battery_v(s.voltage_v);
+                        crate::battery_cfg::note_gauge_full_capacity(s.capacity_full_mah);
+                        let learned = s.capacity_full_mah > 10.0
+                            && s.capacity_remain_mah > 1.0
+                            && s.soc_pct > 0.0
+                            && s.soc_pct <= 100.0;
+                        let _ = power::note_battery_sample(
+                            cap_us,
+                            s.voltage_v,
+                            s.soc_pct,
+                            learned,
+                        );
+                        push_battery(
+                            Reading::Battery {
+                                voltage_v: s.voltage_v,
+                                current_a: s.current_a,
+                                power_w: s.power_w,
+                                capacity_remain_mah: s.capacity_remain_mah,
+                                capacity_full_mah: s.capacity_full_mah,
+                                soc_pct: s.soc_pct,
+                                time_remain_s: s.time_remain_s,
+                                age_us: 0,
+                            },
+                            cap_us,
+                        );
+                    }
+                    Ok(None) => {}
+                    Err(()) => {
+                        tick_failures = tick_failures.saturating_add(1);
+                        if rates::note_read_fail(SensorId::Battery) {
+                            need_recovery = true;
+                        }
+                    }
+                }
+            }
+        }
 
         // Cheap sensors first so mag/airspeed keep updating under BMP load.
         if let Some(ref mut mmc5983) = board.mmc5983 {
@@ -612,44 +718,6 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
             }
         }
 
-        if let Some(ref mut bq27441) = board.bq27441 {
-            if let Some(mah) = crate::battery_cfg::take_pending_design_mah() {
-                if bq27441.program_design_capacity(bus, mah).is_err() {
-                    println!("pod: bq27441 design capacity program failed");
-                }
-            }
-            let hz = rates::get(SensorId::Battery);
-            if hz > 0 && rates::poll_budget(SensorId::Battery, hz) > 0 {
-                let cap_us = Instant::now().as_micros();
-                match bq27441.read_when_due(bus) {
-                    Ok(Some(s)) => {
-                        rates::note_read_ok(SensorId::Battery);
-                        store_latest_battery_v(s.voltage_v);
-                        push_battery(
-                            Reading::Battery {
-                                voltage_v: s.voltage_v,
-                                current_a: s.current_a,
-                                power_w: s.power_w,
-                                capacity_remain_mah: s.capacity_remain_mah,
-                                capacity_full_mah: s.capacity_full_mah,
-                                soc_pct: s.soc_pct,
-                                time_remain_s: s.time_remain_s,
-                                age_us: 0,
-                            },
-                            cap_us,
-                        );
-                    }
-                    Ok(None) => {}
-                    Err(()) => {
-                        tick_failures = tick_failures.saturating_add(1);
-                        if rates::note_read_fail(SensorId::Battery) {
-                            need_recovery = true;
-                        }
-                    }
-                }
-            }
-        }
-
         let elapsed_ms = tick_start.elapsed().as_millis() as u64;
         if elapsed_ms > 80 {
             if rates::note_tick_overrun() {
@@ -658,7 +726,7 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
         } else {
             rates::clear_overrun_streak();
         }
-        if tick_failures >= 4 {
+        if tick_failures >= 8 {
             need_recovery = true;
         }
         if need_recovery {
