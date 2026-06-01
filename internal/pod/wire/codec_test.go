@@ -10,10 +10,6 @@ import (
 	"testing"
 )
 
-// TestRustFixtures decodes the hex blobs produced by `pod_wire_dump`
-// (in pod_wire/examples/) and checks they match Go-side expected values.
-// Run `cargo run --example pod_wire_dump > internal/pod/wire/testdata/fixtures.txt`
-// after changing the Rust wire types to regenerate.
 func TestRustFixtures(t *testing.T) {
 	want := map[string]Frame{
 		"hello": Hello{
@@ -32,9 +28,14 @@ func TestRustFixtures(t *testing.T) {
 				StaticReading{PPa: 98_765.0, TempC: 18.4, AgeUs: 100},
 				MagReading{XUt: 21.3, YUt: -4.1, ZUt: 42.8, AgeUs: 0},
 				BatteryReading{
-					VoltageV: 3.85, CurrentA: -0.12, PowerW: 0.46,
-					CapacityRemainMah: 610, CapacityFullMah: 850,
-					SocPct: 72, TimeRemainS: 15_120, AgeUs: 50,
+					VoltageV:          3.85,
+					CurrentA:          -0.12,
+					PowerW:            0.46,
+					CapacityRemainMah: 610,
+					CapacityFullMah:   850,
+					SocPct:            72,
+					TimeRemainS:       15_120,
+					AgeUs:             50,
 				},
 			},
 		},
@@ -45,14 +46,18 @@ func TestRustFixtures(t *testing.T) {
 		"cmd_ping":   CmdFrame{Seq: 3, Cmd: CmdPing{}},
 		"cmd_reboot": CmdFrame{Seq: 4, Cmd: CmdReboot{}},
 		"status": Status{
-			PodUptimeUs: 5_000_000,
-			BatteryV:    3.78,
-			RssiDBm:     -64,
-			TxSeq:       100,
-			RxSeqLast:   12,
+			PodUptimeUs:     5_000_000,
+			BatteryV:        3.78,
+			RssiDBm:         -64,
+			TxSeq:           100,
+			RxSeqLast:       12,
+			PowerMode:       0,
+			SleepReason:     0,
+			BufferDepth:     0,
+			DroppedReadings: 0,
 		},
-		"ping": Ping{Seq: 7, SenderUptimeUs: 999},
-		"pong": Pong{Seq: 7, SenderUptimeUs: 1100, EchoUptimeUs: 999},
+		"ping":     Ping{Seq: 7, SenderUptimeUs: 999},
+		"pong":     Pong{Seq: 7, SenderUptimeUs: 1100, EchoUptimeUs: 999},
 		"ack_ok":   Ack{ForSeq: 99, OK: true},
 		"ack_fail": Ack{ForSeq: 100, OK: false},
 	}
@@ -104,8 +109,6 @@ func TestRustFixtures(t *testing.T) {
 	}
 }
 
-// TestRoundTrip ensures Encode/Decode round-trips every Frame variant
-// without needing the Rust dump output.
 func TestRoundTrip(t *testing.T) {
 	frames := []Frame{
 		Hello{
@@ -114,15 +117,34 @@ func TestRoundTrip(t *testing.T) {
 				{ID: SensorAirspeed, MinHz: 1, MaxHz: 50, DefaultHz: 10, DeviceName: NewDeviceName("ms4525")},
 			}},
 		},
-		Status{PodUptimeUs: 99, BatteryV: 4.10, RssiDBm: -42, TxSeq: 1, RxSeqLast: 0},
-		SampleBatch{PodUptimeUs: 12345, Seq: 1, Samples: []Reading{
-			MagReading{XUt: 1, YUt: 2, ZUt: 3, AgeUs: 10},
-			BatteryReading{
-				VoltageV: 4.1, CurrentA: -0.05, PowerW: 0.2,
-				CapacityRemainMah: 400, CapacityFullMah: 850,
-				SocPct: 47, TimeRemainS: 28_800, AgeUs: 5,
+		Status{
+			PodUptimeUs:     99,
+			BatteryV:        4.10,
+			RssiDBm:         -42,
+			TxSeq:           1,
+			RxSeqLast:       0,
+			PowerMode:       0,
+			SleepReason:     0,
+			BufferDepth:     0,
+			DroppedReadings: 0,
+		},
+		SampleBatch{
+			PodUptimeUs: 12345,
+			Seq:         1,
+			Samples: []Reading{
+				MagReading{XUt: 1, YUt: 2, ZUt: 3, AgeUs: 10},
+				BatteryReading{
+					VoltageV:          4.1,
+					CurrentA:          -0.05,
+					PowerW:            0.2,
+					CapacityRemainMah: 400,
+					CapacityFullMah:   850,
+					SocPct:            47,
+					TimeRemainS:       28_800,
+					AgeUs:             5,
+				},
 			},
-		}},
+		},
 		CmdFrame{Seq: 10, Cmd: CmdSetRate{Sensor: SensorMag, Hz: 100}},
 		CmdFrame{Seq: 11, Cmd: CmdReboot{}},
 		Ack{ForSeq: 5, OK: true},
@@ -142,6 +164,33 @@ func TestRoundTrip(t *testing.T) {
 		if !reflect.DeepEqual(got, f) {
 			t.Errorf("%T round-trip mismatch:\n  got  = %#v\n  want = %#v", f, got, f)
 		}
+	}
+}
+
+func TestDecodeLegacyStatus(t *testing.T) {
+	// Status frame from pod firmware before power_mode / buffer fields (18-byte datagram).
+	const legacyHex = "0c0001c096b10285eb7140c0640ce346d5f0"
+	raw, err := hex.DecodeString(legacyHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Decode(raw)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	st, ok := got.(Status)
+	if !ok {
+		t.Fatalf("got %T, want Status", got)
+	}
+	want := Status{
+		PodUptimeUs: 5_000_000,
+		BatteryV:    3.78,
+		RssiDBm:     -64,
+		TxSeq:       100,
+		RxSeqLast:   12,
+	}
+	if !reflect.DeepEqual(st, want) {
+		t.Errorf("legacy status:\n  got  = %#v\n  want = %#v", st, want)
 	}
 }
 

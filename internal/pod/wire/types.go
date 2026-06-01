@@ -78,10 +78,10 @@ func (n DeviceName) String() string {
 }
 
 type SensorCap struct {
-	ID        SensorID
-	MinHz     uint16
-	MaxHz     uint16
-	DefaultHz uint16
+	ID         SensorID
+	MinHz      uint16
+	MaxHz      uint16
+	DefaultHz  uint16
 	DeviceName DeviceName
 }
 
@@ -112,11 +112,15 @@ func (s SensorID) String() string {
 
 // Status is a periodic health frame from the pod.
 type Status struct {
-	PodUptimeUs uint64
-	BatteryV    float32
-	RssiDBm     int8
-	TxSeq       uint32
-	RxSeqLast   uint32
+	PodUptimeUs     uint64
+	BatteryV        float32
+	RssiDBm         int8
+	TxSeq           uint32
+	RxSeqLast       uint32
+	PowerMode       uint8
+	SleepReason     uint8
+	BufferDepth     uint16
+	DroppedReadings uint32
 }
 
 func (Status) isFrame() {}
@@ -144,7 +148,7 @@ type AirspeedReading struct {
 	AgeUs uint32
 }
 
-func (AirspeedReading) isReading()         {}
+func (AirspeedReading) isReading()          {}
 func (r AirspeedReading) AgeMicros() uint32 { return r.AgeUs }
 
 type StaticReading struct {
@@ -153,7 +157,7 @@ type StaticReading struct {
 	AgeUs uint32
 }
 
-func (StaticReading) isReading()         {}
+func (StaticReading) isReading()          {}
 func (r StaticReading) AgeMicros() uint32 { return r.AgeUs }
 
 type MagReading struct {
@@ -163,7 +167,7 @@ type MagReading struct {
 	AgeUs uint32
 }
 
-func (MagReading) isReading()         {}
+func (MagReading) isReading()          {}
 func (r MagReading) AgeMicros() uint32 { return r.AgeUs }
 
 type BatteryReading struct {
@@ -177,7 +181,7 @@ type BatteryReading struct {
 	AgeUs             uint32
 }
 
-func (BatteryReading) isReading()         {}
+func (BatteryReading) isReading()          {}
 func (r BatteryReading) AgeMicros() uint32 { return r.AgeUs }
 
 // Cmd is the Pi -> pod control message. It is wrapped in CmdFrame for
@@ -220,9 +224,9 @@ func (CmdReboot) isCmd() {}
 type AttrKey uint8
 
 const (
-	AttrOversampling    AttrKey = 0
-	AttrIirFilter       AttrKey = 1
-	AttrDesignCapacity  AttrKey = 2
+	AttrOversampling   AttrKey = 0
+	AttrIirFilter      AttrKey = 1
+	AttrDesignCapacity AttrKey = 2
 )
 
 // Ack acknowledges a Cmd by its outbound seq number.

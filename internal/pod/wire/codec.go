@@ -9,10 +9,10 @@ import (
 )
 
 var (
-	ErrShort         = errors.New("wire: input shorter than framing overhead")
-	ErrLengthBounds  = errors.New("wire: declared length exceeds buffer")
-	ErrCRC           = errors.New("wire: crc mismatch")
-	ErrVarintTooLong = errors.New("wire: varint exceeds 10 bytes")
+	ErrShort          = errors.New("wire: input shorter than framing overhead")
+	ErrLengthBounds   = errors.New("wire: declared length exceeds buffer")
+	ErrCRC            = errors.New("wire: crc mismatch")
+	ErrVarintTooLong  = errors.New("wire: varint exceeds 10 bytes")
 	ErrUnknownVariant = errors.New("wire: unknown enum discriminant")
 	ErrTrailingBytes  = errors.New("wire: trailing bytes after frame body")
 )
@@ -239,13 +239,38 @@ func (d *decoder) decodeStatus() (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	return Status{
+	st := Status{
 		PodUptimeUs: uptime,
 		BatteryV:    batt,
 		RssiDBm:     int8(rssi),
 		TxSeq:       uint32(tx),
 		RxSeqLast:   uint32(rx),
-	}, nil
+	}
+	// Pre–deep-sleep firmware omitted power/buffer tail fields; accept short bodies.
+	if d.empty() {
+		return st, nil
+	}
+	mode, err := d.byte()
+	if err != nil {
+		return Status{}, err
+	}
+	reason, err := d.byte()
+	if err != nil {
+		return Status{}, err
+	}
+	depth, err := d.uvarint()
+	if err != nil {
+		return Status{}, err
+	}
+	dropped, err := d.uvarint()
+	if err != nil {
+		return Status{}, err
+	}
+	st.PowerMode = mode
+	st.SleepReason = reason
+	st.BufferDepth = uint16(depth)
+	st.DroppedReadings = uint32(dropped)
+	return st, nil
 }
 
 func (d *decoder) decodeSample() (SampleBatch, error) {
@@ -624,7 +649,19 @@ func (e *encoder) encodeStatus(s Status) error {
 	if err := e.uvarint(uint64(s.TxSeq)); err != nil {
 		return err
 	}
-	return e.uvarint(uint64(s.RxSeqLast))
+	if err := e.uvarint(uint64(s.RxSeqLast)); err != nil {
+		return err
+	}
+	if err := e.byte(s.PowerMode); err != nil {
+		return err
+	}
+	if err := e.byte(s.SleepReason); err != nil {
+		return err
+	}
+	if err := e.uvarint(uint64(s.BufferDepth)); err != nil {
+		return err
+	}
+	return e.uvarint(uint64(s.DroppedReadings))
 }
 
 func (e *encoder) encodeSample(b SampleBatch) error {
@@ -740,6 +777,6 @@ func (e *encoder) encodeCmd(c Cmd) error {
 	case CmdReboot:
 		return e.uvarint(uint64(cmdReboot))
 	default:
-		return fmt.Errorf("wire: cannot encode cmd of type %T", c)
+		return fmt.Errorf("wire: cannot encode cmd variant %T", c)
 	}
 }
