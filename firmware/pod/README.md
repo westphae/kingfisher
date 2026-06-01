@@ -141,7 +141,14 @@ See [`config.example.json`](../../config.example.json) for the `pod` block shape
   "wifi_ssid": "kingfisher",
   "wifi_password": "",
   "udp_addr": "192.168.10.1:47808",
-  "battery_capacity_mah": 850
+  "battery_capacity_mah": 850,
+  "sleep_soc_pct": 20,
+  "sleep_voltage_v_uncalibrated": 3.60,
+  "sleep_debounce_s": 45,
+  "sleep_emergency_voltage_v": 3.50,
+  "buffer_max_readings": 128,
+  "flush_interval_s": 3,
+  "flush_high_watermark": 24
 }
 ```
 
@@ -176,6 +183,20 @@ Pre-condition: Pi WiFi AP running; `~/.config/kingfisher/config.json`
    `airspeed_*` when MS4525 is on the bus.
 3. **MS4525 bench** (5 V applied): `airspeed_dp_pa` near 0 at rest; suction/blow on
    the `+` port moves ΔP. Without 5 V, `ms4525 not present` is expected.
+
+### Deep-sleep and burst validation
+
+1. **Fallback trigger (uncalibrated):** force gauge-unlearned conditions and hold
+   loaded voltage below `sleep_voltage_v_uncalibrated` for `sleep_debounce_s`;
+   status should move `power_mode: active -> sleep_pending -> sleeping` with
+   `sleep_reason: voltage_fallback`.
+2. **SOC trigger (learned):** after gauge learning, drain below `sleep_soc_pct`
+   and verify the same transition with `sleep_reason: soc`.
+3. **Emergency floor:** drop below `sleep_emergency_voltage_v` and verify immediate
+   `sleep_pending/sleeping` without waiting for debounce (`sleep_reason: emergency`).
+4. **Buffering checks:** introduce link delay/loss and verify status `buffer_depth`
+   grows, then bursts flush on `flush_high_watermark` or `flush_interval_s`;
+   `dropped_readings` should remain zero in nominal operation.
 
 **Status: Phase 4 — control plane and link keepalive.** Firmware answers Pi
 `Ping` with `Pong`, gates `Hello` when the link is active (30 s rediscover),
