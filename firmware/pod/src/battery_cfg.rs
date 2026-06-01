@@ -13,6 +13,12 @@ use crate::cfg;
 /// Wait this long after a failed config update before retrying (µs).
 const PROGRAM_FAIL_BACKOFF_US: u64 = 60_000_000;
 
+/// Full-capacity register within ±15% of design counts as programmed.
+fn full_matches_design(full_mah: f32, design_mah: u16) -> bool {
+    let design = design_mah as f32;
+    full_mah >= design * 0.85 && full_mah <= design * 1.15
+}
+
 static DESIGN_MAH: AtomicU16 = AtomicU16::new(0);
 static PENDING_MAH: Mutex<Cell<u16>> = Mutex::new(Cell::new(0));
 static PROGRAM_DONE: AtomicBool = AtomicBool::new(false);
@@ -81,11 +87,38 @@ pub fn should_log_program_fail() -> bool {
     true
 }
 
-/// True when a full-capacity read shows the gauge already learned design capacity.
+/// Reconcile PROGRAM_DONE with the gauge full-capacity register.
 pub fn note_gauge_full_capacity(full_mah: f32) {
-    if full_mah > 10.0 {
+    let design = design_mah();
+    let matches = full_matches_design(full_mah, design);
+    if PROGRAM_DONE.load(Ordering::Relaxed) {
+        if !matches {
+            PROGRAM_DONE.store(false, Ordering::Relaxed);
+            critical_section::with(|cs| {
+                PENDING_MAH.borrow(cs).set(design);
+                FAIL_UNTIL_US.borrow(cs).set(0);
+            });
+            FAIL_LOGGED.store(false, Ordering::Relaxed);
+        }
+        return;
+    }
+    if matches {
         note_program_ok();
     }
+}
+
+/// Queue design capacity if the gauge full register does not match design.
+pub fn queue_design_if_mismatch(full_raw_mah: u16) {
+    let design = design_mah();
+    if full_matches_design(full_raw_mah as f32, design) {
+        return;
+    }
+    let _ = request_design_mah(design);
+}
+
+/// True after design capacity was programmed and trusted for SOC-based sleep.
+pub fn gauge_trusted() -> bool {
+    PROGRAM_DONE.load(Ordering::Relaxed)
 }
 
 /// Returns mAh to program when pending and not in backoff; does not clear pending until ok.

@@ -88,15 +88,20 @@ impl Bq27441 {
                 crate::battery_cfg::note_program_ok();
             } else {
                 println!("pod: bq27441 ITPOR design capacity program failed (continuing)");
+                let _ = crate::battery_cfg::request_design_mah(design);
             }
-        } else if full == 0 {
-            // Gauge reports 0 full capacity until programmed; do not fail attach —
-            // reprogram on the poll thread when I²C is idle.
-            println!(
-                "pod: bq27441 full=0; queued design {} mAh for poll thread",
-                design
-            );
-            let _ = crate::battery_cfg::request_design_mah(design);
+        } else {
+            crate::battery_cfg::queue_design_if_mismatch(full);
+            if full == 0 {
+                println!(
+                    "pod: bq27441 full=0; queued design {} mAh for poll thread",
+                    design
+                );
+            } else if full != design {
+                println!(
+                    "pod: bq27441 full={full} mAh != design {design} mAh; queued reprogram"
+                );
+            }
         }
         self.last_read_at = None;
         println!("pod: bq27441 init ok");
@@ -253,5 +258,15 @@ fn set_design_capacity(bus: &mut I2cBus, addr: u8, mah: u16) -> Result<(), ()> {
     let cap = mah.to_le_bytes();
     write_extended_bytes(bus, addr, ID_STATE, DESIGN_CAPACITY_OFFSET, &cap)?;
     exit_config_resim(bus, addr)?;
-    Ok(())
+    block_for(Duration::from_millis(300));
+    for _ in 0..20 {
+        let full = read_word(bus, addr, CMD_FULL_CAPACITY)?;
+        let f = full as f32;
+        let d = mah as f32;
+        if f >= d * 0.85 && f <= d * 1.15 {
+            return Ok(());
+        }
+        block_for(Duration::from_millis(50));
+    }
+    Err(())
 }
