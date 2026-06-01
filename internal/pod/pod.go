@@ -69,18 +69,24 @@ type Client struct {
 	rxDropped atomic.Uint64
 	txPackets atomic.Uint64
 
-	lastStatusNs  atomic.Int64
-	statusRssi    atomic.Int32
-	statusBattery atomic.Uint32
+	lastStatusNs          atomic.Int64
+	statusRssi            atomic.Int32
+	statusBattery         atomic.Uint32
+	statusPowerMode       atomic.Uint32
+	statusSleepReason     atomic.Uint32
+	statusBufferDepth     atomic.Uint32
+	statusDroppedReadings atomic.Uint64
 
-	lastBatteryTelemetryNs atomic.Int64
-	telemetryBatteryV      atomic.Uint32
-	telemetryBatteryI      atomic.Uint32
-	telemetryBatteryP      atomic.Uint32
-	telemetryBatteryCap    atomic.Uint32
-	telemetryBatteryTime   atomic.Uint32
-	telemetryBatterySoc    atomic.Uint32
+	lastBatteryTelemetryNs  atomic.Int64
+	telemetryBatteryV       atomic.Uint32
+	telemetryBatteryI       atomic.Uint32
+	telemetryBatteryP       atomic.Uint32
+	telemetryBatteryCap     atomic.Uint32
+	telemetryBatteryTime    atomic.Uint32
+	telemetryBatterySoc     atomic.Uint32
 	telemetryBatteryLearned atomic.Uint32
+
+	lastPushedBatteryMah uint16
 
 	mu sync.Mutex
 }
@@ -374,6 +380,8 @@ func (c *Client) runConfigReload(ctx context.Context) {
 			return
 		case <-reload:
 			c.reader.SetDesignCapacityFromConfig(c.cfg.Get().PodBatteryCapacityMah())
+			c.reader.ClearOutboundDesignCapacity()
+			c.lastPushedBatteryMah = 0
 			c.applySavedSettings(true)
 			c.pushConfiguredBatteryCapacity()
 			c.refreshRegistryViews()
@@ -409,9 +417,17 @@ func (c *Client) pushConfiguredBatteryCapacity() {
 	if c.cfg == nil {
 		return
 	}
-	o := c.reader.DesignCapacityOutbound(c.cfg.Get().PodBatteryCapacityMah())
+	mah := c.cfg.Get().PodBatteryCapacityMah()
+	if mah == 0 {
+		return
+	}
+	if mah == c.lastPushedBatteryMah {
+		return
+	}
+	o := c.reader.DesignCapacityOutbound(mah)
 	if o != nil {
 		c.enqueueOutbound(*o)
+		c.lastPushedBatteryMah = mah
 	}
 }
 
@@ -434,6 +450,7 @@ func (c *Client) refreshRegistryViews() {
 		return
 	}
 	for _, device := range c.reader.TelemetryDeviceNames() {
-		c.registry.Update(device, c.reader.SettingsAttrRecordsForUIDevice(device))
+		attrs := c.reader.SettingsAttrRecordsForUIDevice(device)
+		c.registry.Update(device, attrs)
 	}
 }
