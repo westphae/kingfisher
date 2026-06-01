@@ -109,6 +109,10 @@ pub struct Status {
     pub rssi_dbm: i8,
     pub tx_seq: u32,
     pub rx_seq_last: u32,
+    pub power_mode: u8,
+    pub sleep_reason: u8,
+    pub buffer_depth: u16,
+    pub dropped_readings: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -358,6 +362,10 @@ mod tests {
             rssi_dbm: -64,
             tx_seq: 100,
             rx_seq_last: 12,
+            power_mode: 0,
+            sleep_reason: 0,
+            buffer_depth: 0,
+            dropped_readings: 0,
         }));
         rt(&Frame::Ack(Ack {
             for_seq: 99,

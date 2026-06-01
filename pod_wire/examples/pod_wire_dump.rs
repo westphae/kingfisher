@@ -130,6 +130,10 @@ fn main() {
             rssi_dbm: -64,
             tx_seq: 100,
             rx_seq_last: 12,
+            power_mode: 0,
+            sleep_reason: 0,
+            buffer_depth: 0,
+            dropped_readings: 0,
         }),
     );
 
