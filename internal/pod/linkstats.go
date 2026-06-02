@@ -4,6 +4,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/westphae/kingfisher/internal/live"
 	"github.com/westphae/kingfisher/internal/pod/wire"
 )
 
@@ -102,6 +103,30 @@ func (c *Client) noteStatus(s wire.Status) {
 	c.statusSleepReason.Store(uint32(s.SleepReason))
 	c.statusBufferDepth.Store(uint32(s.BufferDepth))
 	c.statusDroppedReadings.Store(uint64(s.DroppedReadings))
+	c.maybePublishBatteryFromStatus(s.BatteryV)
+}
+
+func (c *Client) maybePublishBatteryFromStatus(v float32) {
+	if c.hub == nil {
+		return
+	}
+	last := c.lastBatteryTelemetryNs.Load()
+	if last > 0 && time.Now().UnixNano()-last < int64(batteryTelemetryStaleTimeout) {
+		return
+	}
+	values := c.reader.batteryValuesFromStatus(v)
+	if values == nil {
+		return
+	}
+	sm := live.Sample{
+		Device: c.reader.batteryDeviceName(),
+		TsNs:   time.Now().UnixNano(),
+		Values: values,
+	}
+	c.hub.Publish(sm)
+	if c.buf != nil {
+		c.buf.Append(sm)
+	}
 }
 
 func statusPowerModeText(v uint8) string {

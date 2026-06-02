@@ -267,6 +267,38 @@ func (r *reader) sampleBatteryValues(v wire.BatteryReading, learned bool) (devic
 	return r.deviceNameLocked(wire.SensorBattery), values, true
 }
 
+// batteryDeviceName returns the hub device tab for the fuel gauge.
+func (r *reader) batteryDeviceName() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.deviceNameLocked(wire.SensorBattery)
+}
+
+// batteryValuesFromStatus builds hub columns when SampleBatch telemetry is stale
+// but Status still carries live voltage from the pod.
+func (r *reader) batteryValuesFromStatus(voltageV float32) map[string]float64 {
+	if voltageV <= 0.01 {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := map[string]float64{
+		ChBatteryV: float64(voltageV),
+	}
+	for _, k := range []string{
+		ChBatteryI, ChBatteryP, ChBatteryLearned,
+		ChBatteryCapRm, ChBatteryCapFull, ChBatterySOC, ChBatteryTime,
+	} {
+		if v, ok := r.values[k]; ok {
+			out[k] = v
+		}
+	}
+	if _, ok := out[ChBatteryLearned]; !ok {
+		out[ChBatteryLearned] = 0
+	}
+	return out
+}
+
 // snapshotValues returns a copy of the sticky cache for publishing.
 func (r *reader) snapshotValues() map[string]float64 {
 	r.mu.RLock()
