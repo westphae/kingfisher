@@ -24,6 +24,8 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -55,29 +57,41 @@ type Server struct {
 	reg     *sensors.Registry
 	compass derive.CompassAligner
 
-	tpl     *template.Template
-	httpSrv *http.Server
-	up      websocket.Upgrader
-	term    *terminal.Handler
+	tpl        *template.Template
+	devWebRoot string // non-empty: serve static/templates from disk each request
+	httpSrv    *http.Server
+	up         websocket.Upgrader
+	term       *terminal.Handler
 }
 
-func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, gpsc *gps.Client, podc *pod.Client, reg *sensors.Registry, compass derive.CompassAligner) (*Server, error) {
+// New builds the web server. devWebRoot, when non-empty, points at internal/web
+// on disk (parent of static/ and templates/). UI assets are read on each
+// request with Cache-Control: no-cache — no go build/restart needed for CSS/JS
+// edits. Production binaries leave devWebRoot empty and use go:embed instead.
+func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, gpsc *gps.Client, podc *pod.Client, reg *sensors.Registry, compass derive.CompassAligner, devWebRoot string) (*Server, error) {
 	tpl, err := template.ParseFS(assets, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}
+	if devWebRoot != "" {
+		if _, err := os.Stat(filepath.Join(devWebRoot, "static", "app.css")); err != nil {
+			return nil, fmt.Errorf("web: dev root %q: missing static/app.css: %w", devWebRoot, err)
+		}
+		log.Printf("web: dev UI from %s (reload on refresh; no binary rebuild for static edits)", devWebRoot)
+	}
 	return &Server{
-		cfg:   cfg,
-		hub:   hub,
-		store: st,
-		buf:   buf,
-		gps:   gpsc,
-		pod:   podc,
-		reg:     reg,
-		compass: compass,
-		tpl:     tpl,
-		up:      websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
-		term: terminal.New(func() config.Terminal { return cfg.Get().Terminal }, tpl),
+		cfg:        cfg,
+		hub:        hub,
+		store:      st,
+		buf:        buf,
+		gps:        gpsc,
+		pod:        podc,
+		reg:        reg,
+		compass:    compass,
+		tpl:        tpl,
+		devWebRoot: devWebRoot,
+		up:         websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
+		term:       terminal.New(func() config.Terminal { return cfg.Get().Terminal }, tpl),
 	}, nil
 }
 
@@ -99,7 +113,14 @@ func (s *Server) Run(addr string, stop <-chan struct{}) error {
 	if err != nil {
 		return err
 	}
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
+	var staticHandler http.Handler
+	if s.devWebRoot != "" {
+		staticHandler = noCache(http.StripPrefix("/static/",
+			http.FileServer(http.Dir(filepath.Join(s.devWebRoot, "static")))))
+	} else {
+		staticHandler = noCache(http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
+	}
+	mux.Handle("/static/", staticHandler)
 
 	s.httpSrv = &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
@@ -135,7 +156,19 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	data := indexData{Aircraft: s.cfg.Get().Aircraft, Devices: devs}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tpl.ExecuteTemplate(w, "index.html", data); err != nil {
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	tpl := s.tpl
+	if s.devWebRoot != "" {
+		var err error
+		tpl, err = template.ParseGlob(filepath.Join(s.devWebRoot, "templates", "*.html"))
+		if err != nil {
+			log.Printf("web: dev template: %v", err)
+			http.Error(w, "template error", http.StatusInternalServerError)
+			return
+		}
+	}
+	if err := tpl.ExecuteTemplate(w, "index.html", data); err != nil {
 		log.Printf("web: template: %v", err)
 	}
 }

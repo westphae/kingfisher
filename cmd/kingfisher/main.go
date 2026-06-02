@@ -30,6 +30,8 @@ const version = "0.1.0"
 
 func main() {
 	cfgPath := flag.String("config", config.DefaultPath(), "path to JSON config")
+	webDev := flag.Bool("web-dev", false, "serve cockpit UI from internal/web on disk (CSS/JS edits apply on browser refresh without rebuild)")
+	webDevDir := flag.String("web-dev-dir", "", "path to internal/web for -web-dev (default: auto-detect from cwd)")
 	flag.Parse()
 
 	cfg, err := config.Load(*cfgPath)
@@ -124,7 +126,18 @@ func main() {
 		compassEngine = derive.CompassFromHub(ctx, holder, hub, gpsClient, buf)
 	}
 
-	srv, err := web.New(holder, hub, st, buf, gpsClient, podClient, registry, compassEngine)
+	devRoot := ""
+	if *webDev {
+		devRoot = *webDevDir
+		if devRoot == "" {
+			devRoot = web.FindDevWebRoot(".")
+		}
+		if devRoot == "" {
+			log.Fatal("web-dev: could not find internal/web (set -web-dev-dir explicitly)")
+		}
+	}
+
+	srv, err := web.New(holder, hub, st, buf, gpsClient, podClient, registry, compassEngine, devRoot)
 	if err != nil {
 		log.Fatalf("web: %v", err)
 	}
