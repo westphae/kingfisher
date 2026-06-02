@@ -41,7 +41,7 @@ const MAX_BUFFERED_READINGS: usize = crate::cfg::BUFFER_MAX_READINGS as usize;
 pub fn latest_battery_v() -> f32 {
     let bits = LATEST_BATTERY_V.load(core::sync::atomic::Ordering::Relaxed);
     if bits == 0 {
-        return crate::cfg::SLEEP_VOLTAGE_UNCALIBRATED;
+        return 0.0;
     }
     f32::from_bits(bits)
 }
@@ -547,22 +547,20 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
                             s.soc_pct,
                             crate::battery_cfg::gauge_trusted(),
                         );
-                        if !power::sleep_requested() {
-                            rates::note_read_ok(SensorId::Battery);
-                            push_battery(
-                                Reading::Battery {
-                                    voltage_v: s.voltage_v,
-                                    current_a: s.current_a,
-                                    power_w: s.power_w,
-                                    capacity_remain_mah: s.capacity_remain_mah,
-                                    capacity_full_mah: s.capacity_full_mah,
-                                    soc_pct: s.soc_pct,
-                                    time_remain_s: s.time_remain_s,
-                                    age_us: 0,
-                                },
-                                cap_us,
-                            );
-                        }
+                        rates::note_read_ok(SensorId::Battery);
+                        push_battery(
+                            Reading::Battery {
+                                voltage_v: s.voltage_v,
+                                current_a: s.current_a,
+                                power_w: s.power_w,
+                                capacity_remain_mah: s.capacity_remain_mah,
+                                capacity_full_mah: s.capacity_full_mah,
+                                soc_pct: s.soc_pct,
+                                time_remain_s: s.time_remain_s,
+                                age_us: 0,
+                            },
+                            cap_us,
+                        );
                     }
                     Ok(None) => {}
                     Err(()) => {

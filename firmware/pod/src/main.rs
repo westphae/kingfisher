@@ -236,7 +236,7 @@ async fn uplink_task(stack: Stack<'static>) {
                 let flush_due = last_flush_us == 0
                     || uptime_us.saturating_sub(last_flush_us) >= cfg::FLUSH_INTERVAL_US
                     || depth >= cfg::FLUSH_HIGH_WATERMARK;
-                if !sleeping && flush_due {
+                if flush_due && (!sleeping || depth > 0) {
                     // Wire batches cap at MAX_READINGS; drain backlog with short bursts.
                     const MAX_BATCHES_PER_FLUSH: u32 = 12;
                     let mut flushed = false;

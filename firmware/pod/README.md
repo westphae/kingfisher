@@ -200,6 +200,32 @@ Pre-condition: Pi WiFi AP running; `~/.config/kingfisher/config.json`
    grows, then bursts flush on `flush_high_watermark` or `flush_interval_s`;
    `dropped_readings` should remain zero in nominal operation.
 
+### BQ27441 gauge learning
+
+Design capacity (`pod.battery_capacity_mah`, default **850**) is a **config write** to
+the gauge (ITPOR / `SetAttr`). **Impedance Track learning** (Qmax, resistance profile)
+happens separately during real charge/discharge at representative load — the ROM
+gauge does not need a BQStudio “golden image” cycle.
+
+**Calibration run (bench or wing, pod at normal WiFi/sensor load):**
+
+1. **Full charge** to 4.2 V (charger taper complete), then **rest 30–60 min**.
+2. **Discharge** with the pod running normally until **~3.35–3.45 V under load**
+   (or SOC ~5–10% once `full` reads near design capacity). That includes the
+   discharge knee; **stop there** — do not chase ≤3.1 V for calibration.
+3. **Rest ≥2 h** (overnight is fine), then **full charge** again.
+
+One or two such cycles is usually enough. After that, partial cycles maintain
+accuracy; repeat a full anchor cycle every few months or after long storage.
+
+**Pass criteria:** serial `bq27441 design capacity programmed 850 mAh`; kingfisher
+`battery_gauge_learned` and `battery_capacity_full_mah` within ~±15% of design; SOC
+tracks voltage sensibly on the next partial cycle.
+
+**Cell note:** a single deep discharge to ~3.1 V loaded is unlikely to harm the pack
+if it charges normally afterward, but it adds wear without much extra gauge benefit.
+Treat **3.4 V under load** as the calibration target, not the operating floor.
+
 **Status: Phase 4 — control plane and link keepalive.** Firmware answers Pi
 `Ping` with `Pong`, gates `Hello` when the link is active (30 s rediscover),
 handles `Cmd`/`Ack` (including `SetRate`), sends dynamic caps and periodic
