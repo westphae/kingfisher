@@ -1,35 +1,43 @@
-// Kingfisher UI — vanilla JS, no build step. Maintains a per-device latest-
-// value map updated from the /ws snapshot stream and re-renders the active
-// tab on each tick.
+// Kingfisher UI — mobile-first overview + sensor detail, hash routing.
 
 const state = {
-  devices: new Map(),          // name -> {ts_ns, values}
-  activeTab: null,
-  tabs: new Set(),
-  attrs: new Map(),            // name -> [{channel, attr, value, writable}]
-  deviceLocation: new Map(),   // name -> "hub" | "pod"
-  iioDevices: new Set(),       // kernel IIO names (per-tab sample_hz in Settings)
-  podLink: null,               // latest /api/status pod object
-  clock: null,                 // latest /api/status clock object
-  serverConnected: false,      // kingfisher reachable (ws or /api/status)
+  devices: new Map(),
+  deviceNames: new Set(),
+  activeSensor: null,
+  routeView: 'sensors',
+  attrs: new Map(),
+  deviceLocation: new Map(),
+  iioDevices: new Set(),
+  podLink: null,
+  clock: null,
+  serverConnected: false,
   paused: false,
-  config: null,                // last /api/config (compass settings)
-  tabGroup: 'all',             // tab filter: all | hub | pod | calc
+  config: null,
 };
 
-const tabsEl = document.getElementById('tabs');
-const tabGroupFilterEl = document.getElementById('tabGroupFilter');
-const panelEl = document.getElementById('panel');
-const bufEl   = document.getElementById('bufStat');
-const dbEl    = document.getElementById('dbSize');
+const viewOverviewEl = document.getElementById('viewOverview');
+const viewDetailEl = document.getElementById('viewDetail');
+const viewInstrumentsEl = document.getElementById('viewInstruments');
+const detailPanelEl = document.getElementById('detailPanel');
+const detailTitleEl = document.getElementById('detailTitle');
+const detailBackEl = document.getElementById('detailBack');
+const statusChipsEl = document.getElementById('statusChips');
+const hdrTailEl = document.getElementById('hdrTail');
+const recDotEl = document.getElementById('recDot');
+const recSizeEl = document.getElementById('recSize');
+const recBlockEl = document.querySelector('#hdr .rec');
+const pauseBtn = document.getElementById('pauseBtn');
+const menuBtn = document.getElementById('menuBtn');
+const moreSheet = document.getElementById('moreSheet');
+const moreBufStatEl = document.getElementById('moreBufStat');
+const statusDrawer = document.getElementById('statusDrawer');
+const statusDrawerClock = document.getElementById('statusDrawerClock');
+const statusDrawerPod = document.getElementById('statusDrawerPod');
+const settingsDlg = document.getElementById('settingsDlg');
 
 const DERIVED_DEVICES = ['ahrs', 'press_alt', 'compass', 'airspeed'];
-// Derived / model tabs show (calc), not (hub).
 const CALC_DEVICES = new Set([...DERIVED_DEVICES, 'geo']);
-// Wing-pod sensor tabs (matches pod.DefaultPodDeviceNames).
 const POD_TELEMETRY_DEVICES = new Set(['bmp581', 'mmc5983', 'ms4525', 'bq27441']);
-const HUB_VIRTUAL_DEVICES = new Set(['gps', ...CALC_DEVICES]);
-// Derived tabs use custom settings UI; skip /api/devices/.../attrs polling.
 const SKIP_ATTRS_FETCH = new Set(['compass', 'ahrs', 'geo', 'press_alt', 'gps', 'airspeed']);
 
 function isPodTelemetry(name) {
@@ -49,106 +57,84 @@ function deviceTabGroup(name) {
   return loc || 'hub';
 }
 
-function tabMatchesGroup(name) {
-  return state.tabGroup === 'all' || deviceTabGroup(name) === state.tabGroup;
-}
-
-function visibleTabNames() {
-  return sortedTabNames().filter(tabMatchesGroup);
-}
-
-function tabLabel(name) {
-  if (state.tabGroup !== 'all') return name;
-  const loc = state.deviceLocation.get(name) || inferDeviceLocation(name);
-  return loc ? `${name} (${loc})` : name;
-}
-
 function applyDeviceLocation(name, loc) {
   if (!loc) return;
   if (CALC_DEVICES.has(name)) loc = 'calc';
   const prev = state.deviceLocation.get(name);
   if (prev === loc) return;
   state.deviceLocation.set(name, loc);
-  const btn = tabsEl.querySelector(`button[data-tab="${name}"]`);
-  if (btn) {
-    btn.textContent = tabLabel(name);
-    btn.hidden = !tabMatchesGroup(name);
-  }
 }
 
-function applyTabGroupFilter() {
-  for (const b of tabsEl.querySelectorAll('button')) {
-    const name = b.dataset.tab;
-    b.hidden = !tabMatchesGroup(name);
-    b.textContent = tabLabel(name);
-  }
-  reorderTabs();
-  if (state.activeTab && !tabMatchesGroup(state.activeTab)) {
-    const vis = visibleTabNames();
-    if (vis.length) selectTab(vis[0]);
-    else state.activeTab = null;
-  }
-}
-
-const TAB_GROUP_ORDER = { hub: 0, pod: 1, calc: 2 };
-
-function compareTabNames(a, b) {
-  if (state.tabGroup === 'all') {
-    const ga = TAB_GROUP_ORDER[deviceTabGroup(a)] ?? 9;
-    const gb = TAB_GROUP_ORDER[deviceTabGroup(b)] ?? 9;
-    if (ga !== gb) return ga - gb;
-  }
-  return a.localeCompare(b);
-}
-
-function sortedTabNames() {
-  return [...state.tabs].sort(compareTabNames);
-}
-
-function reorderTabs() {
-  for (const name of sortedTabNames()) {
-    const btn = tabsEl.querySelector(`button[data-tab="${name}"]`);
-    if (btn) tabsEl.appendChild(btn);
-  }
-}
-
-function insertTabButton(btn, name) {
-  const order = sortedTabNames();
-  const idx = order.indexOf(name);
-  for (const b of tabsEl.querySelectorAll('button')) {
-    if (order.indexOf(b.dataset.tab) > idx) {
-      tabsEl.insertBefore(btn, b);
-      return;
-    }
-  }
-  tabsEl.appendChild(btn);
-}
-
-function ensureTab(name) {
-  if (name === 'pod') return; // legacy aggregate sticky cache
-  if (state.tabs.has(name)) return;
-  state.tabs.add(name);
+function ensureDevice(name) {
+  if (name === 'pod') return;
+  if (state.deviceNames.has(name)) return;
+  state.deviceNames.add(name);
   const loc = inferDeviceLocation(name);
   if (loc) applyDeviceLocation(name, loc);
-  const btn = document.createElement('button');
-  btn.textContent = tabLabel(name);
-  btn.dataset.tab = name;
-  btn.hidden = !tabMatchesGroup(name);
-  btn.addEventListener('click', () => selectTab(name));
-  insertTabButton(btn, name);
-  reorderTabs();
-  if (!state.activeTab) {
-    const vis = visibleTabNames();
-    if (vis.length) selectTab(vis[0]);
+}
+
+function parseRoute() {
+  const raw = (location.hash || '#/').replace(/^#/, '');
+  const path = raw.startsWith('/') ? raw : '/' + raw;
+  if (path === '/instruments') return { view: 'instruments', sensor: null };
+  const m = path.match(/^\/sensor\/(.+)$/);
+  if (m) return { view: 'sensors', sensor: decodeURIComponent(m[1]) };
+  return { view: 'sensors', sensor: null };
+}
+
+function applyRoute() {
+  const r = parseRoute();
+  state.routeView = r.view;
+  state.activeSensor = r.sensor;
+
+  const onSensors = r.view === 'sensors';
+  const onDetail = onSensors && r.sensor;
+  viewOverviewEl.classList.toggle('view-active', onSensors && !onDetail);
+  viewDetailEl.classList.toggle('view-active', !!onDetail);
+  viewInstrumentsEl.classList.toggle('view-active', r.view === 'instruments');
+
+  for (const btn of document.querySelectorAll('#bottomNav .bottomNavBtn')) {
+    const nav = btn.dataset.nav;
+    let active = false;
+    if (nav === 'sensors') active = onSensors;
+    else if (nav === 'instruments') active = r.view === 'instruments';
+    btn.classList.toggle('active', active);
+  }
+
+  if (onDetail) {
+    openSensorDetail(r.sensor);
+  } else if (onSensors) {
+    renderOverview();
   }
 }
 
-function selectTab(name) {
-  state.activeTab = name;
-  for (const b of tabsEl.querySelectorAll('button')) {
-    b.classList.toggle('active', b.dataset.tab === name);
+function renderOverview() {
+  KFOverview.render(viewOverviewEl, (name) => state.devices.get(name));
+}
+
+let panelRegions = null;
+
+function rebuildDetailPanel() {
+  detailPanelEl.innerHTML =
+    '<div id="liveKV"></div><div class="detailHistoryStub dim">History charts — coming soon</div><div id="attrsBox"></div>';
+  panelRegions = {
+    kv: document.getElementById('liveKV'),
+    attrs: document.getElementById('attrsBox'),
+  };
+  panelRegions.attrs.removeAttribute('data-compass-wired');
+  panelRegions.attrs.removeAttribute('data-airspeed-wired');
+  return panelRegions;
+}
+
+function openSensorDetail(name) {
+  if (!state.deviceNames.has(name)) {
+    location.hash = '#/';
+    return;
   }
-  // Reload pod/IIO attrs so rate fields stay current after edits or SetRate/ack.
+  const loc = state.deviceLocation.get(name) || inferDeviceLocation(name) || '';
+  const label = KFDisplay.overviewDeviceName(name);
+  detailTitleEl.textContent = loc ? `${label} (${loc})` : label;
+  rebuildDetailPanel();
   if (name === 'compass') {
     if (!state.attrs.has('compass')) state.attrs.set('compass', []);
   } else if (name === 'airspeed') {
@@ -157,30 +143,13 @@ function selectTab(name) {
     (isPodTelemetry(name) || state.iioDevices.has(name) || !state.attrs.has(name))) {
     loadAttrs(name);
   }
-  renderActiveTab();
+  renderActiveSensor();
   renderAttrs();
 }
 
-// Two-region panel: a live-values div (re-rendered on every WS tick) and
-// an attrs div (re-rendered only on tab switch or attr fetch). Keeping
-// attrs untouched on snapshot updates preserves focus while the user is
-// typing into an editable attribute.
-function rebuildPanel() {
-  panelEl.innerHTML =
-    `<div id="liveKV"></div><div id="attrsBox"></div>`;
-  const regions = {
-    kv:    document.getElementById('liveKV'),
-    attrs: document.getElementById('attrsBox'),
-  };
-  regions.attrs.removeAttribute('data-compass-wired');
-  regions.attrs.removeAttribute('data-airspeed-wired');
-  return regions;
-}
-let panelRegions = rebuildPanel();
-
 function renderLiveValues() {
-  const name = state.activeTab;
-  if (!name) { panelRegions.kv.innerHTML = ''; return; }
+  const name = state.activeSensor;
+  if (!name || !panelRegions) return;
   const sm = state.devices.get(name);
   if (!sm) { panelRegions.kv.innerHTML = ''; return; }
   const vals = sm.values || {};
@@ -201,9 +170,8 @@ function renderLiveValues() {
 }
 
 function renderAttrs() {
-  const name = state.activeTab;
-  if (!name) {
-    panelRegions.attrs.innerHTML = '';
+  const name = state.activeSensor;
+  if (!name || !panelRegions) {
     return;
   }
   const attrs = state.attrs.get(name);
@@ -240,7 +208,7 @@ function renderAttrs() {
 }
 
 function magDeviceOptions() {
-  const names = [...state.tabs].filter((n) => {
+  const names = [...state.deviceNames].filter((n) => {
     if (DERIVED_DEVICES.includes(n) || n === 'gps' || n === 'geo' || n === 'pod') return false;
     const sm = state.devices.get(n);
     if (!sm?.values) return false;
@@ -516,9 +484,6 @@ function renderAttrInput(a) {
   return `<input ${dataAttrs} value="${escapeAttr(a.value)}">`;
 }
 
-// nearlyEqual compares attribute strings tolerantly: IIO sometimes formats
-// the current value with more trailing zeroes than the _available list
-// (e.g. value="0.000598550" vs option="0.000598550000"), or vice versa.
 function nearlyEqual(opt, val) {
   if (opt === val) return true;
   const a = parseFloat(opt);
@@ -555,6 +520,38 @@ function battSocClass(soc) {
   return '';
 }
 
+function formatBatteryHeadline(p) {
+  if (p.has_battery_telemetry) {
+    const parts = [
+      `${Number(p.battery_v).toFixed(2)} V`,
+      p.battery_gauge_learned ? `${Math.round(p.battery_soc_pct)}%` : null,
+    ].filter(Boolean);
+    return parts.join(' ');
+  }
+  if (p.has_battery) {
+    return `${Number(p.battery_v).toFixed(2)} V`;
+  }
+  return '—';
+}
+
+function formatBatteryHeadlineFull(p) {
+  if (p.has_battery_telemetry) {
+    const parts = [
+      `${Number(p.battery_v).toFixed(2)} V`,
+      p.battery_gauge_learned ? `${Math.round(p.battery_soc_pct)}%` : null,
+      formatBatteryCurrent(p.battery_current_a),
+      formatBatteryPower(p.battery_power_w),
+      p.battery_gauge_learned ? formatBatteryCapacity(p.battery_capacity_remain_mah) : null,
+      p.battery_gauge_learned ? formatBatteryTimeRemain(p.battery_time_remain_s) : null,
+    ].filter(Boolean);
+    return parts.join(' · ');
+  }
+  if (p.has_battery) {
+    return `${Number(p.battery_v).toFixed(2)} V`;
+  }
+  return '—';
+}
+
 function formatBatteryCurrent(a) {
   if (!Number.isFinite(a)) return '—';
   const ma = a * 1000;
@@ -577,55 +574,6 @@ function formatBatteryTimeRemain(sec) {
   if (sec >= 3600) return `${(sec / 3600).toFixed(1)} h`;
   if (sec >= 60) return `${Math.round(sec / 60)} m`;
   return `${Math.round(sec)} s`;
-}
-
-function formatBatteryHeadline(p) {
-  if (p.has_battery_telemetry) {
-    const parts = [
-      `${Number(p.battery_v).toFixed(2)} V`,
-      p.battery_gauge_learned ? `${Math.round(p.battery_soc_pct)}%` : null,
-      formatBatteryCurrent(p.battery_current_a),
-      formatBatteryPower(p.battery_power_w),
-      p.battery_gauge_learned ? formatBatteryCapacity(p.battery_capacity_remain_mah) : null,
-      p.battery_gauge_learned ? formatBatteryTimeRemain(p.battery_time_remain_s) : null,
-    ].filter(Boolean);
-    return parts.join(' · ');
-  }
-  if (p.has_battery) {
-    return `${Number(p.battery_v).toFixed(2)} V`;
-  }
-  return '—';
-}
-
-function renderPodStatus() {
-  const el = document.getElementById('podStatus');
-  if (!el) return;
-  const p = state.podLink;
-  if (!p || !p.enabled) {
-    el.hidden = true;
-    el.innerHTML = '';
-    return;
-  }
-  el.hidden = false;
-  const linkCls = !p.connected
-    ? 'off'
-    : ((p.rx_dropped || 0) > 0 ? 'warn' : 'ok');
-  let rssiText = '—';
-  let rssiCls = '';
-  if (p.has_rssi) {
-    rssiText = formatRssi(p.rssi_dbm);
-    rssiCls = rssiClass(p.rssi_dbm);
-  }
-  let battText = formatBatteryHeadline(p);
-  const battCls = p.has_battery_telemetry && p.battery_gauge_learned
-    ? battSocClass(p.battery_soc_pct)
-    : '';
-  el.className = `podStatus podStatus-${linkCls}`;
-  el.innerHTML =
-    `<span class="podStatusItem"><span class="lbl">Pod</span> ${escapeHtml(podLinkLabel(p))}</span>` +
-    `<span class="podStatusItem ${rssiCls}"><span class="lbl">RSSI</span> ${escapeHtml(rssiText)}</span>` +
-    `<span class="podStatusItem ${battCls}"><span class="lbl">Batt</span> ${escapeHtml(battText)}</span>` +
-    `<span class="podStatusItem"><span class="lbl">Buf</span> ${escapeHtml(String(p.buffer_depth ?? '—'))}</span>`;
 }
 
 function formatTimeOffsetNs(ns) {
@@ -677,64 +625,118 @@ function clockBadgeClass(clock) {
   return 'warn';
 }
 
-function renderClockStatus() {
-  const el = document.getElementById('clockStatus');
+function renderClockStatusFull(el) {
   if (!el) return;
   const c = state.clock;
   if (!c) {
-    el.hidden = true;
     el.innerHTML = '';
     return;
   }
-  el.hidden = false;
   el.className = `clockStatus clockStatus-${clockBadgeClass(c)}`;
-
   const d = c.discipline || {};
   const g = c.gps_check || {};
   const parts = [];
-
   if (d.available && d.synced) {
     const src = disciplineSourceLabel(d);
     parts.push(`<span class="clockStatusItem"><span class="lbl">Pi time</span> <span class="clockSource clockSource-${escapeAttr(d.source || 'unknown')}">${escapeHtml(src)}</span> synced</span>`);
     if (Number.isFinite(d.last_offset_ns)) {
       parts.push(`<span class="clockStatusItem"><span class="lbl">Correction</span> ${escapeHtml(formatTimeOffsetNs(d.last_offset_ns))}</span>`);
     }
-    if (d.pps_present && !d.pps_steering) {
-      parts.push('<span class="clockStatusItem clockHint"><span class="lbl">PPS</span> wired, idle</span>');
-    }
   } else if (d.available) {
     parts.push('<span class="clockStatusItem"><span class="lbl">Pi time</span> not synced</span>');
-    if (d.pps_present) {
-      parts.push('<span class="clockStatusItem clockHint"><span class="lbl">PPS</span> present</span>');
-    }
   } else if (g.has_fix) {
     parts.push('<span class="clockStatusItem"><span class="lbl">Pi time</span> GPS fix only</span>');
-    if (g.baseline_ready && Number.isFinite(g.clock_error_ms)) {
-      parts.push(`<span class="clockStatusItem"><span class="lbl">Est. error</span> ${escapeHtml(formatClockOffsetMs(g.clock_error_ms))}</span>`);
-    } else if (Number.isFinite(g.pipeline_lag_ms)) {
-      parts.push('<span class="clockStatusItem"><span class="lbl">Est. error</span> calibrating…</span>');
-    }
   } else {
     parts.push('<span class="clockStatusItem"><span class="lbl">Pi time</span> no GPS fix</span>');
   }
-
   if (g.has_fix && Number.isFinite(g.fix_age_s)) {
     const stale = g.fresh === false;
     parts.push(`<span class="clockStatusItem${stale ? ' clockWarn' : ''}"><span class="lbl">GPS data</span> ${escapeHtml(formatAgeSeconds(g.fix_age_s))}</span>`);
   }
-
-  if (c.startup_fallback) {
-    parts.push('<span class="clockStatusItem clockHint"><span class="lbl">Boot</span> unsynced start</span>');
-  }
-
   el.title = c.detail || c.startup_reason || '';
   el.innerHTML = parts.join('');
 }
 
-function renderActiveTab() {
-  if (state.activeTab === 'compass') {
+function renderPodStatusFull(el) {
+  if (!el) return;
+  const p = state.podLink;
+  if (!p || !p.enabled) {
+    el.innerHTML = '<span class="dim">Pod ingest disabled</span>';
+    return;
+  }
+  const linkCls = !p.connected ? 'off' : ((p.rx_dropped || 0) > 0 ? 'warn' : 'ok');
+  let rssiText = '—';
+  let rssiCls = '';
+  if (p.has_rssi) {
+    rssiText = formatRssi(p.rssi_dbm);
+    rssiCls = rssiClass(p.rssi_dbm);
+  }
+  const battText = formatBatteryHeadlineFull(p);
+  const battCls = p.has_battery_telemetry && p.battery_gauge_learned
+    ? battSocClass(p.battery_soc_pct)
+    : '';
+  el.className = `podStatus podStatus-${linkCls}`;
+  el.innerHTML =
+    `<span class="podStatusItem"><span class="lbl">Pod</span> ${escapeHtml(podLinkLabel(p))}</span>` +
+    `<span class="podStatusItem ${rssiCls}"><span class="lbl">RSSI</span> ${escapeHtml(rssiText)}</span>` +
+    `<span class="podStatusItem ${battCls}"><span class="lbl">Batt</span> ${escapeHtml(battText)}</span>` +
+    `<span class="podStatusItem"><span class="lbl">Buf</span> ${escapeHtml(String(p.buffer_depth ?? '—'))}</span>`;
+}
+
+function compactClockChip() {
+  const c = state.clock;
+  if (!c) return '';
+  const d = c.discipline || {};
+  const cls = clockBadgeClass(c);
+  let text = 'Time ?';
+  if (d.available && d.synced) {
+    const src = disciplineSourceLabel(d);
+    text = `${src} ✓`;
+  } else if (d.available) {
+    text = 'Time unsynced';
+  } else {
+    text = 'No sync';
+  }
+  return `<button type="button" class="statusChip statusChip-${cls}" data-open-status="clock">${escapeHtml(text)}</button>`;
+}
+
+function compactPodChip() {
+  const p = state.podLink;
+  if (!p || !p.enabled) return '';
+  const linkCls = !p.connected ? 'off' : ((p.rx_dropped || 0) > 0 ? 'warn' : 'ok');
+  let parts = ['Pod'];
+  if (p.has_rssi && Number.isFinite(p.rssi_dbm)) {
+    parts.push(`${p.rssi_dbm} dBm`);
+  } else if (!p.connected) {
+    parts.push('off');
+  }
+  if (p.has_battery_telemetry || p.has_battery) {
+    parts.push(formatBatteryHeadline(p));
+  }
+  return `<button type="button" class="statusChip statusChip-${linkCls}" data-open-status="pod">${escapeHtml(parts.join(' '))}</button>`;
+}
+
+function renderStatusChips() {
+  if (!statusChipsEl) return;
+  const chips = [compactClockChip(), compactPodChip()].filter(Boolean);
+  statusChipsEl.innerHTML = chips.join('') || '<span class="dim">Status loading…</span>';
+  for (const btn of statusChipsEl.querySelectorAll('[data-open-status]')) {
+    btn.addEventListener('click', openStatusDrawer);
+  }
+}
+
+function openStatusDrawer() {
+  renderClockStatusFull(statusDrawerClock);
+  renderPodStatusFull(statusDrawerPod);
+  statusDrawer.showModal();
+}
+
+function renderActiveSensor() {
+  if (!state.activeSensor || !panelRegions) return;
+  const name = state.activeSensor;
+  if (name === 'compass') {
     renderCompassPanel();
-  } else if (state.activeTab === 'airspeed') {
+  } else if (name === 'airspeed') {
     renderAirspeedPanel();
   } else {
     renderLiveValues();
@@ -755,9 +757,17 @@ function renderCompassPanel() {
   KFCompass.renderPanel(panelRegions.kv, geo, compass, compassAlignMethodEffective());
 }
 
+function onWsTick() {
+  if (state.routeView === 'sensors' && !state.activeSensor) {
+    renderOverview();
+  } else if (state.activeSensor) {
+    renderActiveSensor();
+  }
+}
+
 function escapeAttr(s) { return String(s ?? '').replace(/"/g, '&quot;'); }
 function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  return String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 }
 
 function wireAttrEdits(name) {
@@ -810,12 +820,8 @@ async function loadAttrs(name) {
       return;
     }
     applyAttrsResponse(name, await r.json());
-    if (state.activeTab === name) renderAttrs();
+    if (state.activeSensor === name) renderAttrs();
   } catch {}
-}
-
-function fmt(v) {
-  return KFDisplay.fmtDefault(v);
 }
 
 function connect() {
@@ -833,14 +839,14 @@ function connect() {
     let battUpdated = false;
     for (const [name, sample] of Object.entries(snap.devices)) {
       state.devices.set(name, sample);
-      ensureTab(name);
+      ensureDevice(name);
       if (name === 'bq27441') battUpdated = true;
-      if (state.activeTab === name && !SKIP_ATTRS_FETCH.has(name) && !state.attrs.has(name)) {
+      if (state.activeSensor === name && !SKIP_ATTRS_FETCH.has(name) && !state.attrs.has(name)) {
         loadAttrs(name);
       }
     }
-    if (battUpdated) renderPodStatus();
-    renderActiveTab();
+    if (battUpdated) renderStatusChips();
+    onWsTick();
   };
   ws.onerror = () => setServerConnected(false);
   ws.onclose = () => {
@@ -848,12 +854,6 @@ function connect() {
     setTimeout(connect, 1000);
   };
 }
-
-const tailEl     = document.querySelector('#hdr .tail');
-const recDotEl   = document.getElementById('recDot');
-const recLabelEl = document.getElementById('recLabel');
-const recBlockEl = document.querySelector('#hdr .rec');
-const pauseBtn   = document.getElementById('pauseBtn');
 
 function setServerConnected(connected) {
   if (state.serverConnected === connected) return;
@@ -868,7 +868,6 @@ function updateRecordingUI() {
       recDotEl.classList.remove('live', 'paused');
       recDotEl.classList.add('offline');
     }
-    if (recLabelEl) recLabelEl.textContent = 'OFFLINE';
     if (pauseBtn) {
       pauseBtn.disabled = true;
       pauseBtn.title = 'Server unavailable';
@@ -886,7 +885,6 @@ function updateRecordingUI() {
     recDotEl.classList.toggle('paused', state.paused);
     recDotEl.classList.toggle('live', !state.paused);
   }
-  if (recLabelEl) recLabelEl.textContent = state.paused ? 'PAUSED' : 'REC';
 }
 
 function setPausedUI(paused) {
@@ -894,7 +892,7 @@ function setPausedUI(paused) {
   updateRecordingUI();
 }
 
-pauseBtn.addEventListener('click', async () => {
+pauseBtn?.addEventListener('click', async () => {
   if (!state.serverConnected) return;
   const next = !state.paused;
   try {
@@ -914,8 +912,20 @@ function formatPodFooter(pod) {
   if (!pod || !pod.enabled) return '';
   const dropped = pod.rx_dropped || 0;
   const rx = pod.rx_packets || 0;
-  const sent = rx + dropped; // pod SampleBatch seq span (received + gaps)
+  const sent = rx + dropped;
   return ` · Pod: ${dropped} dropped / ${sent} sent`;
+}
+
+function formatBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function formatRecSize(n) {
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)}K`;
+  return `${(n / 1024 / 1024).toFixed(1)}M`;
 }
 
 async function refreshStatus() {
@@ -927,13 +937,9 @@ async function refreshStatus() {
     }
     setServerConnected(true);
     const s = await r.json();
-    if (s.db_size_bytes != null && dbEl) {
-      let dbText = formatBytes(s.db_size_bytes);
-      if (s.db_volume_free_bytes != null) {
-        dbText += ` · ${formatBytes(s.db_volume_free_bytes)} free`;
-      }
-      dbEl.textContent = dbText;
-      dbEl.title = s.db_path ? `Flight DB: ${s.db_path}` : '';
+    if (s.db_size_bytes != null && recSizeEl) {
+      recSizeEl.textContent = formatRecSize(s.db_size_bytes);
+      recSizeEl.title = s.db_path ? `Flight DB: ${s.db_path} (${formatBytes(s.db_size_bytes)})` : formatBytes(s.db_size_bytes);
     }
     let bufText = 'Buffered: — rows';
     if (s.buffered_rows) {
@@ -941,13 +947,12 @@ async function refreshStatus() {
       bufText = `Buffered: ${total} rows`;
     }
     bufText += formatPodFooter(s.pod);
-    if (bufEl) bufEl.textContent = bufText;
-    if (s.aircraft && tailEl) tailEl.textContent = s.aircraft;
+    if (moreBufStatEl) moreBufStatEl.textContent = bufText;
+    if (s.aircraft && hdrTailEl) hdrTailEl.textContent = s.aircraft;
     if (typeof s.recording_paused === 'boolean') setPausedUI(s.recording_paused);
     state.podLink = s.pod || null;
     state.clock = s.clock || null;
-    renderClockStatus();
-    renderPodStatus();
+    renderStatusChips();
   } catch {
     setServerConnected(false);
   }
@@ -957,7 +962,7 @@ let locationsPreloaded = false;
 
 async function preloadDeviceLocations() {
   if (locationsPreloaded) return;
-  const names = [...state.tabs];
+  const names = [...state.deviceNames];
   if (names.length === 0) return;
   locationsPreloaded = true;
   await Promise.all(names.map(async (name) => {
@@ -974,55 +979,17 @@ async function loadIIODevices() {
     const r = await fetch('/api/devices');
     if (!r.ok) return;
     const devices = await r.json();
-    const iio = (devices || []).map(d => d.name).sort();
+    const iio = (devices || []).map((d) => d.name).sort();
     state.iioDevices = new Set(iio);
     for (const name of iio) {
       applyDeviceLocation(name, 'hub');
-      ensureTab(name);
+      ensureDevice(name);
     }
-    if (state.activeTab && !state.attrs.has(state.activeTab)) {
-      loadAttrs(state.activeTab);
+    if (state.activeSensor && !state.attrs.has(state.activeSensor)) {
+      loadAttrs(state.activeSensor);
     }
   } catch {}
 }
-
-function formatBytes(n) {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024*1024) return `${(n/1024).toFixed(1)} KB`;
-  return `${(n/1024/1024).toFixed(1)} MB`;
-}
-
-// Settings dialog (aircraft / notes / flush only — IIO rates live on each sensor tab)
-const dlg = document.getElementById('settingsDlg');
-
-document.getElementById('terminalBtn')?.addEventListener('click', () => {
-  location.href = '/terminal';
-});
-
-document.getElementById('settingsBtn').addEventListener('click', async () => {
-  const cfgR = await fetch('/api/config');
-  const cfg = await cfgR.json();
-  document.getElementById('cfgAircraft').value = cfg.aircraft || '';
-  document.getElementById('cfgNotes').value    = cfg.notes || '';
-  document.getElementById('cfgFlush').value    = cfg.flush_seconds || 5;
-  dlg._cfg = cfg;
-  dlg.showModal();
-});
-
-document.getElementById('cfgSave').addEventListener('click', async (e) => {
-  e.preventDefault();
-  const cfg = dlg._cfg || {};
-  cfg.aircraft      = document.getElementById('cfgAircraft').value;
-  cfg.notes         = document.getElementById('cfgNotes').value;
-  cfg.flush_seconds = parseInt(document.getElementById('cfgFlush').value, 10) || 5;
-  await fetch('/api/config', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(cfg),
-  });
-  if (tailEl) tailEl.textContent = cfg.aircraft || '';
-  dlg.close();
-});
 
 async function loadConfig() {
   try {
@@ -1031,21 +998,88 @@ async function loadConfig() {
   } catch {}
 }
 
+function openSettingsDialog() {
+  fetch('/api/config').then((cfgR) => cfgR.json()).then((cfg) => {
+    document.getElementById('cfgAircraft').value = cfg.aircraft || '';
+    document.getElementById('cfgNotes').value = cfg.notes || '';
+    document.getElementById('cfgFlush').value = cfg.flush_seconds || 5;
+    settingsDlg._cfg = cfg;
+    settingsDlg.showModal();
+  });
+}
+
+detailBackEl?.addEventListener('click', () => {
+  location.hash = '#/';
+});
+
+window.addEventListener('hashchange', applyRoute);
+
+for (const btn of document.querySelectorAll('#bottomNav .bottomNavBtn')) {
+  btn.addEventListener('click', () => {
+    const nav = btn.dataset.nav;
+    if (nav === 'sensors') {
+      location.hash = '#/';
+    } else if (nav === 'instruments') {
+      location.hash = '#/instruments';
+    } else if (nav === 'more') {
+      refreshStatus();
+      moreSheet.showModal();
+    }
+  });
+}
+
+menuBtn?.addEventListener('click', () => {
+  refreshStatus();
+  moreSheet.showModal();
+});
+
+document.getElementById('moreTerminalBtn')?.addEventListener('click', () => {
+  moreSheet.close();
+  location.href = '/terminal';
+});
+
+document.getElementById('moreSettingsBtn')?.addEventListener('click', () => {
+  moreSheet.close();
+  openSettingsDialog();
+});
+
+document.getElementById('moreStatusBtn')?.addEventListener('click', () => {
+  moreSheet.close();
+  openStatusDrawer();
+});
+
+document.getElementById('cfgSave')?.addEventListener('click', async (e) => {
+  e.preventDefault();
+  const cfg = settingsDlg._cfg || {};
+  cfg.aircraft = document.getElementById('cfgAircraft').value;
+  cfg.notes = document.getElementById('cfgNotes').value;
+  cfg.flush_seconds = parseInt(document.getElementById('cfgFlush').value, 10) || 5;
+  await fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cfg),
+  });
+  if (hdrTailEl) hdrTailEl.textContent = cfg.aircraft || '';
+  settingsDlg.close();
+});
+
 (async function init() {
   updateRecordingUI();
-  tabGroupFilterEl?.addEventListener('change', () => {
-    state.tabGroup = tabGroupFilterEl.value;
-    applyTabGroupFilter();
-  });
   await loadConfig();
   if (window.KF_INITIAL_DEVICES) {
-    for (const d of window.KF_INITIAL_DEVICES) ensureTab(d);
+    for (const d of window.KF_INITIAL_DEVICES) ensureDevice(d);
   }
   await loadIIODevices();
-  for (const d of POD_TELEMETRY_DEVICES) ensureTab(d);
+  for (const d of POD_TELEMETRY_DEVICES) ensureDevice(d);
+  for (const d of CALC_DEVICES) ensureDevice(d);
+  ensureDevice('gps');
   await preloadDeviceLocations();
-  applyTabGroupFilter();
+  if (!location.hash || location.hash === '#') {
+    location.hash = '#/';
+  }
+  applyRoute();
   connect();
   refreshStatus();
 })();
+
 setInterval(refreshStatus, 2000);

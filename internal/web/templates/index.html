@@ -10,35 +10,46 @@
 </head>
 <body>
   <header id="hdr">
-    <div class="brand"><img class="brand-icon" src="/static/favicon.svg" width="22" height="22" alt=""> Kingfisher</div>
-    <div id="clockStatus" class="clockStatus" hidden></div>
-    <div id="podStatus" class="podStatus" hidden></div>
-    <div class="tail">{{.Aircraft}}</div>
-    <button id="pauseBtn" class="pauseBtn" title="Pause recording">⏸</button>
-    <div class="rec"><span id="recDot">●</span> <span id="recLabel">REC</span> <span id="dbSize">—</span></div>
+    <div class="hdrRow hdrRow1">
+      <div class="brand" title="Kingfisher">
+        <img class="brand-icon" src="/static/favicon.svg" width="22" height="22" alt="">
+        <span class="brand-text">Kingfisher</span>
+      </div>
+      <div class="tail" id="hdrTail">{{.Aircraft}}</div>
+      <div class="rec" title="Recording">
+        <span id="recDot">●</span>
+        <span id="recSize" class="recSize">—</span>
+      </div>
+      <button id="pauseBtn" class="pauseBtn" type="button" title="Pause recording" aria-label="Pause recording">⏸</button>
+      <button id="menuBtn" class="menuBtn" type="button" title="More" aria-label="More">☰</button>
+    </div>
+    <div class="hdrRow hdrRow2" id="statusChips" role="group" aria-label="System status"></div>
   </header>
 
-  <nav id="tabBar" aria-label="Sensor tabs">
-    <label class="tabGroupFilter" for="tabGroupFilter">
-      <span class="tabGroupFilterLbl">Group</span>
-      <select id="tabGroupFilter" title="Filter sensor tabs by location">
-        <option value="all" selected>All</option>
-        <option value="hub">Hub</option>
-        <option value="pod">Pod</option>
-        <option value="calc">Calc</option>
-      </select>
-    </label>
-    <div id="tabs" role="tablist"></div>
-  </nav>
-  <main id="panel"></main>
-
-  <footer id="ftr">
-    <div id="bufStat">Buffered: — rows</div>
-    <div class="ftrActions">
-      <button type="button" id="terminalBtn">Terminal</button>
-      <button id="settingsBtn">Settings</button>
+  <main id="main">
+    <div id="viewOverview" class="view view-active"></div>
+    <div id="viewDetail" class="view">
+      <div class="detailBar">
+        <button type="button" id="detailBack" class="detailBack">← Sensors</button>
+        <span id="detailTitle" class="detailTitle"></span>
+      </div>
+      <div id="detailPanel"></div>
     </div>
-  </footer>
+    <div id="viewInstruments" class="view">
+      <h2 class="viewHeading">Instruments</h2>
+      <ul class="instList">
+        <li><span class="instIcon">🧭</span> Compass <span class="dim">— use Sensors → compass for now</span></li>
+        <li><span class="instIcon">✈️</span> Attitude (AHRS) <span class="dim">— coming soon</span></li>
+        <li><span class="instIcon">🌬️</span> Wind triangle <span class="dim">— coming soon</span></li>
+      </ul>
+    </div>
+  </main>
+
+  <nav id="bottomNav" aria-label="Main">
+    <button type="button" class="bottomNavBtn active" data-nav="sensors">Sensors</button>
+    <button type="button" class="bottomNavBtn" data-nav="instruments">Instruments</button>
+    <button type="button" class="bottomNavBtn" data-nav="more">More</button>
+  </nav>
 
   <dialog id="settingsDlg">
     <form method="dialog">
@@ -53,10 +64,37 @@
     </form>
   </dialog>
 
+  <dialog id="moreSheet" class="sheet">
+    <form method="dialog">
+      <h2>More</h2>
+      <div id="moreBufStat" class="dim moreStat">Buffered: — rows</div>
+      <div class="moreActions">
+        <button type="button" id="moreStatusBtn">System status</button>
+        <button type="button" id="moreTerminalBtn">Terminal</button>
+        <button type="button" id="moreSettingsBtn">Settings</button>
+      </div>
+      <div class="dlgRow">
+        <button value="cancel">Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="statusDrawer" class="sheet sheet-wide">
+    <form method="dialog">
+      <h2>System status</h2>
+      <div id="statusDrawerClock" class="statusDrawerBlock"></div>
+      <div id="statusDrawerPod" class="statusDrawerBlock"></div>
+      <div class="dlgRow">
+        <button value="cancel">Close</button>
+      </div>
+    </form>
+  </dialog>
+
   <script>window.KF_INITIAL_DEVICES = {{.Devices}};</script>
   <script src="/static/display.js"></script>
   <script src="/static/compass.js"></script>
   <script src="/static/airspeed.js"></script>
+  <script src="/static/overview.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

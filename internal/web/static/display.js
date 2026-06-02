@@ -70,6 +70,16 @@ const KFDisplay = (function () {
 
   const BQ27441_HIDDEN = new Set(['battery_gauge_learned']);
 
+  /** Overview block title overrides (device id unchanged in routes/WS). */
+  const OVERVIEW_DEVICE_NAMES = {
+    press_alt: 'altitude',
+    geo: 'geomagnetic',
+  };
+
+  function overviewDeviceName(device) {
+    return OVERVIEW_DEVICE_NAMES[device] || device;
+  }
+
   const PRESSURE_SOURCE_LABEL = {
     1: 'Wing pod (BMP581)',
     2: 'Cabin baro (e.g. BMP280)',
@@ -84,6 +94,20 @@ const KFDisplay = (function () {
       return n.toLocaleString(undefined, { ...opts, minimumFractionDigits: decimals });
     }
     return n.toFixed(decimals);
+  }
+
+  /** Overview cells: plain fixed decimal, no thousands separators. */
+  function fmtOverviewNum(v, decimals) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return String(v);
+    return n.toFixed(decimals);
+  }
+
+  function fmtOverviewTimeRemain(sec) {
+    if (!Number.isFinite(sec) || sec < 0) return '—';
+    if (sec >= 3600) return fmtOverviewNum(sec / 3600, 1) + ' h';
+    if (sec >= 60) return Math.round(sec / 60) + ' m';
+    return Math.round(sec) + ' s';
   }
 
   /** Fixed-width numeric field (character count includes sign). */
@@ -717,6 +741,215 @@ const KFDisplay = (function () {
     return '<div class="gaugeFootnote dim">Fuel gauge not learned — state of charge and capacity are unavailable until the BQ27441 completes a charge/discharge learning cycle. Design capacity is set under Settings.</div>';
   }
 
+  function cell(_keys, _values, key, header) {
+    return { key, header };
+  }
+
+  function row(rowLabel, cells) {
+    const c = cells.filter(Boolean);
+    if (c.length === 0) return null;
+    return { rowLabel, cells: c };
+  }
+
+  function overviewLayout(device, values) {
+    values = values || {};
+    const keys = Object.keys(values);
+    const subRows = [];
+
+    if (device === 'gps') {
+      subRows.push(
+        row('pos', [
+          cell(keys, values, 'lat', 'Lat'),
+          cell(keys, values, 'lon', 'Lon'),
+          cell(keys, values, 'alt_msl', 'Alt'),
+        ]),
+        row('acc', [
+          cell(keys, values, 'h_acc', 'H'),
+          cell(keys, values, 'v_acc', 'V'),
+          cell(keys, values, 'gs_acc', 'GS'),
+        ]),
+        row('fix', [
+          cell(keys, values, 'fix_time_unix_s', 'Time'),
+          cell(keys, values, 'fix', 'Fix'),
+          cell(keys, values, 'sats', 'Sats'),
+        ]),
+        row('vel', [
+          cell(keys, values, 'gs', 'GS'),
+          cell(keys, values, 'track', 'Trk'),
+          cell(keys, values, 'vs', 'VS'),
+        ]),
+      );
+    } else if (device === 'ahrs') {
+      subRows.push(row('', [
+        cell(keys, values, 'roll', 'Roll'),
+        cell(keys, values, 'pitch', 'Pitch'),
+        cell(keys, values, 'yaw', 'Yaw'),
+      ]));
+    } else if (device === 'compass') {
+      subRows.push(row('', [
+        cell(keys, values, 'heading_mag_deg', 'Hdg'),
+        cell(keys, values, 'align_active', 'Align'),
+      ]));
+    } else if (device === 'airspeed') {
+      subRows.push(row('', [
+        cell(keys, values, 'ias_kt', 'IAS'),
+        cell(keys, values, 'tas_kt', 'TAS'),
+      ]));
+    } else if (device === 'press_alt') {
+      subRows.push(row('', [
+        cell(keys, values, 'indicated_alt_ft', 'IALT'),
+        cell(keys, values, 'pressure_alt_ft', 'PALT'),
+        cell(keys, values, 'density_alt_ft', 'DALT'),
+      ]));
+    } else if (device === 'geo') {
+      subRows.push(row('', [
+        cell(keys, values, 'field_f_nt', 'F'),
+        cell(keys, values, 'declination', 'Dec'),
+        cell(keys, values, 'inclination', 'Incl'),
+      ]));
+    } else if (device === 'mmc5983') {
+      subRows.push(row('', [
+        cell(keys, values, 'mag_x_ut', 'X'),
+        cell(keys, values, 'mag_y_ut', 'Y'),
+        cell(keys, values, 'mag_z_ut', 'Z'),
+      ]));
+    } else if (device === 'bmp581') {
+      subRows.push(row('', [
+        cell(keys, values, 'static_pressure_pa', 'P'),
+        cell(keys, values, 'static_temp_c', 'T'),
+      ]));
+    } else if (device === 'ms4525') {
+      subRows.push(row('', [
+        cell(keys, values, 'airspeed_dp_pa', 'ΔP'),
+        cell(keys, values, 'airspeed_temp_c', 'T'),
+      ]));
+    } else if (device === 'bq27441') {
+      subRows.push(row('', [
+        cell(keys, values, 'battery_voltage_v', 'V'),
+        cell(keys, values, 'battery_soc_pct', 'SOC'),
+        cell(keys, values, 'battery_time_remain_s', 'Rem'),
+      ]));
+    } else if (device.endsWith('-accel')) {
+      subRows.push(row('accel', [
+        cell(keys, values, 'accel_x', 'Ax'),
+        cell(keys, values, 'accel_y', 'Ay'),
+        cell(keys, values, 'accel_z', 'Az'),
+      ]));
+    } else if (device.endsWith('-gyro')) {
+      subRows.push(row('gyro', [
+        cell(keys, values, 'anglvel_x', 'Gx'),
+        cell(keys, values, 'anglvel_y', 'Gy'),
+        cell(keys, values, 'anglvel_z', 'Gz'),
+      ]));
+    } else if (isIMUDevice(device) || hasIMUChannels(keys)) {
+      subRows.push(row('accel', [
+        cell(keys, values, 'accel_x', 'Ax'),
+        cell(keys, values, 'accel_y', 'Ay'),
+        cell(keys, values, 'accel_z', 'Az'),
+      ]));
+      subRows.push(row('gyro', [
+        cell(keys, values, 'anglvel_x', 'Gx'),
+        cell(keys, values, 'anglvel_y', 'Gy'),
+        cell(keys, values, 'anglvel_z', 'Gz'),
+      ]));
+      if (keys.some((k) => /^magn_/.test(k))) {
+        subRows.push(row('mag', [
+          cell(keys, values, 'magn_x', 'Mx'),
+          cell(keys, values, 'magn_y', 'My'),
+          cell(keys, values, 'magn_z', 'Mz'),
+        ]));
+      }
+    } else {
+      const ordered = sortKeys(device, keys).slice(0, 3);
+      if (ordered.length) {
+        subRows.push(row('', ordered.map((k) => ({ key: k, header: k.replace(/_/g, ' ') }))));
+      }
+    }
+
+    return { subRows: subRows.filter(Boolean) };
+  }
+
+  function formatOverviewCell(device, channel, value, allValues) {
+    if (value == null || (typeof value === 'number' && !Number.isFinite(value))) {
+      if (device === 'bq27441' && bq27441UnlearnedField(channel, allValues)) return '—';
+      return '—';
+    }
+    if (device === 'compass' && channel === 'align_active') {
+      return Number(value) ? '✓' : '—';
+    }
+    if (channel === 'fix_time_unix_s') {
+      const d = new Date(value * 1000);
+      if (!Number.isFinite(value) || Number.isNaN(d.getTime())) return '—';
+      const h = String(d.getUTCHours()).padStart(2, '0');
+      const m = String(d.getUTCMinutes()).padStart(2, '0');
+      const s = String(d.getUTCSeconds()).padStart(2, '0');
+      return `${h}:${m}:${s}`;
+    }
+    if (channel === 'lat' || channel === 'lon') return fmtOverviewNum(value, 2) + '°';
+    if (channel === 'alt_msl') return fmtOverviewNum(value * M_TO_FT, 0) + ' ft';
+    if (channel === 'h_acc' || channel === 'v_acc') {
+      const ft = value * M_TO_FT;
+      return '±' + fmtOverviewNum(ft, ft < 10 ? 1 : 0) + ' ft';
+    }
+    if (channel === 'gs_acc') {
+      const kt = value * MPS_TO_KT;
+      return '±' + fmtOverviewNum(kt, 1) + ' kt';
+    }
+    if (channel === 'gs') return fmtOverviewNum(value * MPS_TO_KT, 0) + ' kt';
+    if (channel === 'track') return fmtOverviewNum(value, 0) + '°';
+    if (channel === 'vs') {
+      const fpm = value * MPS_TO_FPM;
+      const sign = fpm >= 0 ? '+' : '';
+      return sign + fmtOverviewNum(fpm, 0) + ' fpm';
+    }
+    if (channel === 'fix') return String(Math.round(value));
+    if (channel === 'sats') return String(Math.round(value));
+    if (channel === 'roll' || channel === 'pitch' || channel === 'yaw') {
+      return fmtOverviewNum(value, 0) + '°';
+    }
+    if (channel === 'heading_mag_deg') return fmtOverviewNum(value, 0) + '°';
+    if (channel === 'ias_kt' || channel === 'tas_kt') return fmtOverviewNum(value, 0) + ' kt';
+    if (channel.endsWith('_ft')) return fmtOverviewNum(value, 0) + ' ft';
+    if (channel === 'field_f_nt') {
+      const n = Number(value);
+      if (n >= 1000) return fmtOverviewNum(n / 1000, 1) + 'k nT';
+      return fmtOverviewNum(n, 0) + ' nT';
+    }
+    if (channel === 'declination' || channel === 'inclination') {
+      return fmtOverviewNum(value, 1) + '°';
+    }
+    if (channel.endsWith('_ut') || channel.startsWith('magn_')) {
+      return fmtOverviewNum(value, 2);
+    }
+    if (channel.match(/^anglvel_[xyz]$/)) {
+      return fmtOverviewNum(value * RAD_TO_DEG, 2) + '°/s';
+    }
+    if (channel.match(/^accel_[xyz]$/)) {
+      return fmtOverviewNum(value, Math.abs(value) >= 10 ? 2 : Math.abs(value) >= 1 ? 3 : 4);
+    }
+    if (channel === 'static_pressure_pa') {
+      return fmtOverviewNum(value / 100, 3) + ' hPa';
+    }
+    if (channel.endsWith('_pa')) {
+      return fmtOverviewNum(value, Math.abs(value) >= 1000 ? 0 : 1) + ' Pa';
+    }
+    if (channel.endsWith('_c') || channel === 'temp') {
+      return fmtOverviewNum(value, 2) + '°';
+    }
+    if (channel === 'battery_voltage_v') return fmtOverviewNum(value, 2) + ' V';
+    if (channel === 'battery_soc_pct') return fmtOverviewNum(value, 0) + '%';
+    if (channel === 'battery_time_remain_s') return fmtOverviewTimeRemain(value);
+    if (channel.endsWith('_dp_pa')) return fmtOverviewNum(value, 0) + ' Pa';
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      const abs = Math.abs(value);
+      if (abs >= 1000) return fmtOverviewNum(value, 1);
+      if (abs >= 1) return fmtOverviewNum(value, 3);
+      if (abs >= 0.01) return fmtOverviewNum(value, 4);
+      return value.toExponential(2);
+    }
+    return String(value);
+  }
+
   return {
     channelLabel,
     formatValue,
@@ -725,5 +958,8 @@ const KFDisplay = (function () {
     gpsFootnote,
     bq27441Footnote,
     fmtDefault,
+    overviewLayout,
+    formatOverviewCell,
+    overviewDeviceName,
   };
 })();
