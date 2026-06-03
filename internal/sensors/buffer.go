@@ -199,7 +199,17 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		runOne(ctx, r, name, holder, hub, buf, st, reg)
 		return
 	}
-	defer iobuf.Close()
+	// Close whatever buffer iobuf points to AT RETURN TIME, not the one
+	// captured now: restartCapture / cooldownAndRetryBuffered reassign
+	// iobuf to a freshly opened buffer, and a bare `defer iobuf.Close()`
+	// would close the original (already-closed) one and leak the live
+	// reopened buffer — leaving buffer/enable=1 and the trigger bound in
+	// sysfs on shutdown. The nil guard covers a failed-reopen exit.
+	defer func() {
+		if iobuf != nil {
+			_ = iobuf.Close()
+		}
+	}()
 
 	clock := iobuf.TimestampClock()
 	triggerLabel := triggerName
