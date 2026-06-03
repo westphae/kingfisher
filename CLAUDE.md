@@ -51,7 +51,7 @@ cargo run --example pod_wire_dump > ../internal/pod/wire/testdata/fixtures.txt
 cd firmware/pod && cargo build --release
 ```
 
-After any change to types in `pod_wire/src/lib.rs`, regenerate `fixtures.txt` and re-run `go test ./internal/pod/wire/`. The Go test loads those fixtures and decodes them — if they diverge, the wire contract is broken.
+After any change to types in `pod_wire/src/lib.rs`, regenerate `fixtures.txt` and re-run `go test ./internal/pod/wire/`. The Go test loads those fixtures and decodes them — if they diverge, the wire contract is broken. `scripts/check-wire.sh` enforces this: it regenerates to a temp file and diffs against the committed fixtures (exit 1 on drift), and `scripts/check-wire.sh --write` regenerates in place. Wire it into CI / a pre-commit hook so the honour-system regen can't be forgotten.
 
 ## Data flow contract
 
