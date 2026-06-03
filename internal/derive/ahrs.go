@@ -52,7 +52,10 @@ func AHRSFromHub(ctx context.Context, rateHz float64, hub *live.Hub, gpsc *gps.C
 			roll, pitch, heading := provider.RollPitchHeading()
 			sm := live.Sample{
 				Device: "ahrs",
-				TsNs:   time.Now().UnixNano(),
+				// TsNs is compute time, not the IMU sample time. See
+				// docs/timestamps.md — use source device rows for tight
+				// kinematic fusion offline.
+				TsNs: time.Now().UnixNano(),
 				Values: map[string]float64{
 					"roll":            radToDeg(roll),
 					"pitch":           radToDeg(pitch),
