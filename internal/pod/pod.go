@@ -187,6 +187,9 @@ func (c *Client) runSend(ctx context.Context) {
 					c.trackPending(seq, set.Sensor, out.PrevHz)
 				}
 			}
+			if out.HasDesign {
+				c.trackPendingDesign(seq)
+			}
 			if err := c.transport.Send(wire.CmdFrame{Seq: seq, Cmd: out.Cmd}); err != nil {
 				log.Printf("pod: send cmd seq=%d: %v", seq, err)
 				if e, ok := c.clearPending(seq); ok {
@@ -254,11 +257,22 @@ func (c *Client) dispatch(frame wire.Frame, peer string) {
 	case wire.Ack:
 		if e, ok := c.clearPending(f.ForSeq); ok {
 			if !f.OK {
-				c.reader.setRateHz(e.rollbackSensor, e.rollbackHz)
-				log.Printf("pod: ack for_seq=%d rejected; reverted %s to %d Hz", f.ForSeq, e.rollbackSensor, e.rollbackHz)
+				if e.rollbackDesign {
+					if mah, ok := c.reader.revertPendingDesign(); ok {
+						c.revertPodBatteryCapacityConfig(mah)
+					}
+					log.Printf("pod: ack for_seq=%d rejected; reverted design capacity", f.ForSeq)
+				} else {
+					c.reader.setRateHz(e.rollbackSensor, e.rollbackHz)
+					log.Printf("pod: ack for_seq=%d rejected; reverted %s to %d Hz", f.ForSeq, e.rollbackSensor, e.rollbackHz)
+				}
 				c.refreshRegistryViews()
 			} else {
-				c.logPodRateAck(e.rollbackSensor)
+				if e.rollbackDesign {
+					log.Printf("pod: ack for_seq=%d design capacity queued on pod", f.ForSeq)
+				} else {
+					c.logPodRateAck(e.rollbackSensor)
+				}
 				c.refreshRegistryViews()
 			}
 		} else {
@@ -328,6 +342,13 @@ func (c *Client) onBatch(b wire.SampleBatch) {
 		var learned bool
 		switch raw := rd.(type) {
 		case wire.BatteryReading:
+			if raw.DesignCapacityMah > 0 {
+				prev := c.reader.designCapacityDisplayMah()
+				if c.reader.syncDesignCapacityChip(raw.DesignCapacityMah) || c.reader.designCapacityDisplayMah() != prev {
+					c.refreshRegistryViews()
+				}
+				designMah = raw.DesignCapacityMah
+			}
 			if raw.CapacityFullMah > 0 && designMah > 0 && !gaugeFullMatchesDesign(raw.CapacityFullMah, designMah) {
 				c.lastPushedBatteryMah = 0
 				c.pushConfiguredBatteryCapacity()

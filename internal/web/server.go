@@ -469,7 +469,13 @@ func (s *Server) deviceAttrViews(device string) []sensors.AttrView {
 		base = s.reg.Get(device)
 	}
 	if device == pod.BatteryDeviceName {
-		base = mergeBatteryCapacityAttr(base, s.cfg.Get().PodBatteryCapacityMah())
+		mah := s.cfg.Get().PodBatteryCapacityMah()
+		if s.pod != nil {
+			if dm := s.pod.DesignCapacityDisplayMah(); dm > 0 {
+				mah = dm
+			}
+		}
+		base = mergeBatteryCapacityAttr(base, mah)
 	}
 	if !s.isIIODevice(device) {
 		return base

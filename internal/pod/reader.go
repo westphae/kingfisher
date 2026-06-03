@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/pod/wire"
@@ -156,10 +157,11 @@ func (r *reader) TelemetryDeviceNames() []string {
 
 // outboundCmd is queued for the send loop; PrevHz supports Ack rollback.
 type outboundCmd struct {
-	Cmd      wire.Cmd
-	Sensor   wire.SensorID
-	PrevHz   uint16
-	HasPrev  bool
+	Cmd        wire.Cmd
+	Sensor     wire.SensorID
+	PrevHz     uint16
+	HasPrev    bool
+	HasDesign  bool // SetAttr design capacity awaiting Ack
 }
 
 // reader implements sensors.Reader for the pod virtual device. It is
@@ -175,9 +177,13 @@ type reader struct {
 	values            map[string]float64       // channel -> latest sample value
 	rates             map[wire.SensorID]uint16 // sensor -> last known sampling Hz
 	caps              map[wire.SensorID]wire.SensorCap
-	designCapacityMah uint16
-	outboundDesignMah uint16 // last mAh sent to pod via SetAttr (0 = never)
-	out               chan<- outboundCmd
+	designCapacityMah  uint16    // Settings display; synced from chip 0x3C when idle
+	designCapacityChip uint16    // last DesignCapacity from battery telemetry
+	pendingDesignMah   uint16    // user value awaiting chip program confirm
+	pendingDesignAt    time.Time
+	prevDesignMah      uint16    // value before pending user edit
+	outboundDesignMah  uint16    // last mAh sent to pod via SetAttr (0 = never)
+	out                chan<- outboundCmd
 }
 
 func newReader(out chan<- outboundCmd) *reader {
@@ -434,12 +440,14 @@ func (r *reader) attrRecords(onlyDevice string, includeCapMeta bool) []store.Att
 			Attr:    "sampling_frequency",
 			Value:   strconv.FormatUint(uint64(hz), 10),
 		})
-		if sid == wire.SensorBattery && r.designCapacityMah > 0 {
-			out = append(out, store.AttrRecord{
-				Channel: "",
-				Attr:    AttrDesignCapacityMah,
-				Value:   strconv.FormatUint(uint64(r.designCapacityMah), 10),
-			})
+		if sid == wire.SensorBattery {
+			if mah := r.designCapacityDisplayLocked(); mah > 0 {
+				out = append(out, store.AttrRecord{
+					Channel: "",
+					Attr:    AttrDesignCapacityMah,
+					Value:   strconv.FormatUint(uint64(mah), 10),
+				})
+			}
 		}
 		if includeCapMeta {
 			out = append(out,
@@ -472,7 +480,7 @@ func (r *reader) ChannelAttr(ch, attr string) (string, error) {
 			return "", fmt.Errorf("pod: attr %q only on battery sensor", attr)
 		}
 		r.mu.RLock()
-		mah := r.designCapacityMah
+		mah := r.designCapacityDisplayLocked()
 		r.mu.RUnlock()
 		if mah == 0 {
 			return "", fmt.Errorf("pod: design capacity not configured yet")
@@ -564,10 +572,7 @@ func (r *reader) setDesignCapacity(ch, value string) error {
 	if mah < minDesignCapacityMah || mah > maxDesignCapacityMah {
 		return fmt.Errorf("pod: design capacity %d out of range [%d, %d]", mah, minDesignCapacityMah, maxDesignCapacityMah)
 	}
-	r.mu.Lock()
-	prev := r.designCapacityMah
-	r.designCapacityMah = mah
-	r.mu.Unlock()
+	r.beginDesignPending(mah)
 	select {
 	case r.out <- outboundCmd{
 		Cmd: wire.CmdSetAttr{
@@ -575,14 +580,13 @@ func (r *reader) setDesignCapacity(ch, value string) error {
 			Key:    wire.AttrDesignCapacity,
 			Value:  float32(mah),
 		},
+		HasDesign: true,
 	}:
 		r.mu.Lock()
 		r.outboundDesignMah = mah
 		r.mu.Unlock()
 	default:
-		r.mu.Lock()
-		r.designCapacityMah = prev
-		r.mu.Unlock()
+		r.revertPendingDesign()
 		return fmt.Errorf("pod: outbound queue full; dropped SetAttr design capacity")
 	}
 	return nil
