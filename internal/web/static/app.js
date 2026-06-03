@@ -106,7 +106,21 @@ function applyRoute() {
     openSensorDetail(r.sensor);
   } else if (onSensors) {
     renderOverview();
+  } else if (r.view === 'instruments') {
+    renderInstruments();
   }
+}
+
+function renderInstruments() {
+  const mount = document.getElementById('pfdMount');
+  if (!mount) return;
+  KFPFD.renderPanel(mount, {
+    ahrs: state.devices.get('ahrs'),
+    compass: state.devices.get('compass'),
+    airspeed: state.devices.get('airspeed'),
+    pressAlt: state.devices.get('press_alt'),
+    gps: state.devices.get('gps'),
+  });
 }
 
 function renderOverview() {
@@ -809,6 +823,8 @@ function onWsTick() {
     renderOverview();
   } else if (state.activeSensor) {
     renderActiveSensor();
+  } else if (state.routeView === 'instruments') {
+    renderInstruments();
   }
 }
 

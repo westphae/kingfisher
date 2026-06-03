@@ -8,6 +8,8 @@
   --good: #5cffa3;
   --warn: #e6c04a;
   --border: #1f2a44;
+  --sky: #2b6cb0;
+  --ground: #6b4a2b;
   /* Type scale tuned for in-flight glance use: vibration, sunglasses,
    * presbyopia. Compared to the original web-typical 1rem/15px values,
    * everything bumps so a single read at arm's length is reliable. The
@@ -18,12 +20,17 @@
   --ov-name:  1.1875rem; /* 19px tile name */
   --stale-opacity: 0.55;
   --stale-color: var(--dim);
+  /* Multiplier applied to the PFD hero numbers (which use viewport
+   * clamp(), not the --ov-* tokens) so the Big-text toggle still bumps
+   * the most glance-critical fields. */
+  --hero-scale: 1;
 }
 
 body.bigtext {
   --ov-value: 1.8rem;    /* 28.8px */
   --ov-label: 1.25rem;   /* 20px */
   --ov-name:  1.4rem;    /* 22.4px */
+  --hero-scale: 1.25;
 }
 
 * { box-sizing: border-box; }
@@ -920,4 +927,154 @@ dialog textarea {
     margin: 0 auto;
     width: 100%;
   }
+}
+
+/* —— PFD (Instruments hero) —— */
+#viewInstruments { padding: 0.5rem; }
+#pfdMount { height: 100%; }
+
+.pfd {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 100%;
+}
+
+.pfd-lbl {
+  font-size: var(--ov-label);
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.pfd-hdg {
+  text-align: center;
+}
+
+.pfd-hdg-val {
+  font-size: calc(clamp(2.6rem, 16vw, 4.5rem) * var(--hero-scale));
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+/* "sensor (not aligned)" is a safety state, not a decorative label —
+ * give it a clearly-distinct warning treatment so an uncalibrated
+ * heading can't read as trustworthy through sunglasses. Empty when aligned. */
+.pfd-hdg-flag {
+  font-size: var(--ov-label);
+  min-height: 1.1em;
+  color: var(--warn);
+  font-weight: 700;
+}
+.pfd-hdg-flag:not(:empty) {
+  display: inline-block;
+  border: 1px solid var(--warn);
+  border-radius: 5px;
+  padding: 0.05rem 0.4rem;
+}
+
+.pfd-mid {
+  display: grid;
+  grid-template-columns: minmax(64px, 1fr) 2.4fr minmax(64px, 1fr);
+  gap: 0.4rem;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+}
+
+.pfd-tape {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.4rem 0.2rem;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pfd-tape-lbl {
+  font-size: var(--ov-label);
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pfd-tick {
+  font-size: var(--ov-label);
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  min-height: 1.1em;
+}
+
+.pfd-box {
+  font-size: calc(clamp(1.8rem, 9vw, 2.8rem) * var(--hero-scale));
+  font-weight: 700;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  border: 2px solid var(--accent);
+  border-radius: 6px;
+  padding: 0.1rem 0.4rem;
+  background: var(--bg);
+}
+
+.pfd-ai {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0; /* allow the AI to shrink to the row, not force a scroll */
+}
+
+/* The SVG fills its grid cell and its viewBox + default xMidYMid meet
+ * keeps the drawing square and centred. height:100% + min-height:0 bind
+ * it to the leftover row height, so the whole PFD never overflows into a
+ * scroll — fit is guaranteed, not incidental. */
+.pfd-ai-svg {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: block;
+}
+
+
+.pfd-sky { fill: var(--sky); }
+.pfd-ground { fill: var(--ground); }
+.pfd-horizon-line { stroke: #ffffff; stroke-width: 0.8; }
+.pfd-ladder { stroke: #ffffff; stroke-width: 0.5; opacity: 0.85; }
+.pfd-bank-tick { stroke: #ffffff; stroke-width: 0.8; }
+.pfd-ac { stroke: var(--warn); stroke-width: 2; fill: var(--warn); }
+.pfd-roll-ptr { fill: #ffffff; }
+
+.pfd-rp {
+  font-size: var(--ov-value);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  margin-top: 0.25rem;
+}
+
+.pfd-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.pfd-vsi {
+  font-size: var(--ov-name);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pfd-caption {
+  font-size: var(--ov-label);
 }
