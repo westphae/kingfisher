@@ -31,6 +31,12 @@ const (
 	// at >10 batches/sec we converge in well under a second from cold
 	// start while staying robust to single-packet transit jitter.
 	emaShift = 4
+	// tsClampPast / tsClampFuture bound a reconstructed reading's TsNs
+	// around its receive time. 10 s past covers a full buffered-uplink
+	// burst plus offset cold-start; 1 s future covers minor clock skew.
+	// Outside this window we fall back to recvNs and bump tsClamped.
+	tsClampPast   = int64(10 * time.Second)
+	tsClampFuture = int64(1 * time.Second)
 )
 
 // Client owns the pod ingest loop. One Client per pod (v1 supports one).
@@ -55,6 +61,11 @@ type Client struct {
 	pendingMu sync.Mutex
 
 	lastRxNs atomic.Int64
+
+	// tsClamped counts readings whose reconstructed timestamp landed
+	// outside [recvNs-10s, recvNs+1s] and were fallback-stamped to recvNs.
+	// Bumped from the recv goroutine, read by the status surface.
+	tsClamped atomic.Uint64
 
 	// offsetNs is (pi_wall_ns at receive) - (pod_uptime_ns of that batch),
 	// EMA-smoothed. Set the first time a SampleBatch lands; updated on
@@ -307,6 +318,11 @@ func (c *Client) onBatch(b wire.SampleBatch) {
 	podUptimeNs := int64(b.PodUptimeUs) * 1000
 	rawOffset := recvNs - podUptimeNs
 
+	// Init/update of offset shares c.mu with linkSeq so concurrent batches
+	// (unlikely with the single runRecv goroutine, but not enforced) can't
+	// interleave first-batch Store with a follow-up EMA read of zero. Other
+	// readers of offsetNs (e.g. status surface) still load atomically.
+	c.mu.Lock()
 	if !c.offsetInited.Load() {
 		c.offsetNs.Store(rawOffset)
 		c.offsetInited.Store(true)
@@ -316,8 +332,6 @@ func (c *Client) onBatch(b wire.SampleBatch) {
 		c.offsetNs.Store(cur + (rawOffset-cur)>>emaShift)
 	}
 	offset := c.offsetNs.Load()
-
-	c.mu.Lock()
 	if b.Seq > c.linkSeq+1 && c.linkSeq != 0 {
 		gap := uint64(b.Seq - c.linkSeq - 1)
 		c.rxDropped.Add(gap)
@@ -372,6 +386,15 @@ func (c *Client) onBatch(b wire.SampleBatch) {
 			continue
 		}
 		readingNs := podUptimeNs - int64(rd.AgeMicros())*1000 + offset
+		// Guard against EMA cold-start, a bogus pod uptime, or anomalous
+		// age values producing timestamps that fall outside the receive
+		// window. A negative readingNs is the worst case (it survives
+		// int64 store unchanged but presents as year 2262 if anything
+		// downstream reads it unsigned).
+		if readingNs < recvNs-tsClampPast || readingNs > recvNs+tsClampFuture {
+			readingNs = recvNs
+			c.tsClamped.Add(1)
+		}
 		sm := live.Sample{
 			Device: dev,
 			TsNs:   readingNs,

@@ -24,6 +24,7 @@ type LinkStats struct {
 	RxPackets  uint64  `json:"rx_packets"` // SampleBatch frames received
 	RxDropped  uint64  `json:"rx_dropped"` // batches inferred lost from seq gaps
 	TxPackets  uint64  `json:"tx_packets"` // Ping/Cmd/Pong frames sent to the pod
+	TsClamped  uint64  `json:"ts_clamped"` // readings whose reconstructed TsNs was clamped to recvNs
 	HasRssi    bool    `json:"has_rssi"`
 	RssiDBm    int8    `json:"rssi_dbm"`    // pod WiFi STA RSSI toward the Pi AP
 	HasBattery bool    `json:"has_battery"` // true when Status reports a non-zero voltage
@@ -56,6 +57,7 @@ func (c *Client) LinkStats() LinkStats {
 		RxPackets: c.rxBatches.Load(),
 		RxDropped: c.rxDropped.Load(),
 		TxPackets: c.txPackets.Load(),
+		TsClamped: c.tsClamped.Load(),
 	}
 	lastStatus := c.lastStatusNs.Load()
 	if lastStatus > 0 && time.Now().UnixNano()-lastStatus < int64(statusStaleTimeout) {
