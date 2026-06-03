@@ -19,6 +19,17 @@ const (
 	SourceUnknown = "unknown"
 )
 
+// Source state labels from chronyc sources (see chronyc sources -v legend).
+const (
+	SourceStateActive      = "active"
+	SourceStateCombined    = "combined"
+	SourceStateAlternate   = "alternate"
+	SourceStateError       = "error"
+	SourceStateVariable    = "variable"
+	SourceStateUnreachable = "unreachable"
+	SourceStateAbsent      = "absent"
+)
+
 // DisciplineStatus is chrony's view of how the Pi wall clock is steered.
 type DisciplineStatus struct {
 	Available   bool
@@ -30,14 +41,20 @@ type DisciplineStatus struct {
 	RMSOffset   time.Duration
 	PPSPresent  bool
 	PPSSteering bool
+	GPSState    string
+	PPSState    string
+	GPSOffsetMs float64
+	PPSOffsetMs float64
 }
 
 var (
-	reRefID     = regexp.MustCompile(`(?m)^Reference ID\s+:\s+\S+\s+\(([^)]*)\)\s*$`)
-	reStratum   = regexp.MustCompile(`(?m)^Stratum\s+:\s+(\d+)\s*$`)
-	reLastOff   = regexp.MustCompile(`(?m)^Last offset\s+:\s+([+-]?[\d.]+)\s+seconds\s*$`)
-	reRMSOff    = regexp.MustCompile(`(?m)^RMS offset\s+:\s+([\d.]+)\s+seconds\s*$`)
-	reActiveSrc = regexp.MustCompile(`(?m)^#\*\s+(\S+)`)
+	reRefID      = regexp.MustCompile(`(?m)^Reference ID\s+:\s+\S+\s+\(([^)]*)\)\s*$`)
+	reStratum    = regexp.MustCompile(`(?m)^Stratum\s+:\s+(\d+)\s*$`)
+	reLastOff    = regexp.MustCompile(`(?m)^Last offset\s+:\s+([+-]?[\d.]+)\s+seconds\s*$`)
+	reRMSOff     = regexp.MustCompile(`(?m)^RMS offset\s+:\s+([\d.]+)\s+seconds\s*$`)
+	reActiveSrc  = regexp.MustCompile(`(?m)^#\*\s+(\S+)`)
+	reSourceLine = regexp.MustCompile(`(?m)^#([*+\-x~?])\s+(GPS|PPS)\b`)
+	reSourceStat = regexp.MustCompile(`(?m)^(\S+)\s+\d+\s+\d+\s+\d+\s+[\d.-]+\s+[\d.-]+\s+([+-]?[\d.]+(?:ms|us|ns|s))\b`)
 )
 
 // PPSPresent reports whether the kernel PPS device node exists.
@@ -64,9 +81,101 @@ func QueryDiscipline(ctx context.Context) DisciplineStatus {
 	parseTracking(string(out), &st)
 
 	if srcOut, err := exec.CommandContext(qctx, "chronyc", "sources").Output(); err == nil {
-		parseActiveSource(string(srcOut), &st)
+		text := string(srcOut)
+		parseActiveSource(text, &st)
+		parseSourceLines(text, &st)
+	}
+	if statsOut, err := exec.CommandContext(qctx, "chronyc", "sourcestats").Output(); err == nil {
+		parseSourceStats(string(statsOut), &st)
 	}
 	return st
+}
+
+func parseSourceLines(text string, st *DisciplineStatus) {
+	for _, m := range reSourceLine.FindAllStringSubmatch(text, -1) {
+		if len(m) != 3 {
+			continue
+		}
+		state := classifySourceMark(m[1])
+		switch strings.ToUpper(m[2]) {
+		case "GPS":
+			st.GPSState = state
+		case "PPS":
+			st.PPSState = state
+		}
+	}
+}
+
+func classifySourceMark(mark string) string {
+	switch mark {
+	case "*":
+		return SourceStateActive
+	case "+":
+		return SourceStateCombined
+	case "-":
+		return SourceStateAlternate
+	case "x":
+		return SourceStateError
+	case "~":
+		return SourceStateVariable
+	case "?":
+		return SourceStateUnreachable
+	default:
+		return SourceStateAbsent
+	}
+}
+
+func parseSourceStats(text string, st *DisciplineStatus) {
+	for _, m := range reSourceStat.FindAllStringSubmatch(text, -1) {
+		if len(m) != 3 {
+			continue
+		}
+		name := strings.ToUpper(m[1])
+		d := parseChronyDuration(m[2])
+		ms := float64(d) / float64(time.Millisecond)
+		switch name {
+		case "GPS":
+			st.GPSOffsetMs = ms
+		case "PPS":
+			st.PPSOffsetMs = ms
+		}
+	}
+}
+
+func parseChronyDuration(s string) time.Duration {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	sign := time.Duration(1)
+	if strings.HasPrefix(s, "-") {
+		sign = -1
+		s = strings.TrimPrefix(s, "-")
+	} else if strings.HasPrefix(s, "+") {
+		s = strings.TrimPrefix(s, "+")
+	}
+	var unit time.Duration
+	switch {
+	case strings.HasSuffix(s, "ms"):
+		unit = time.Millisecond
+		s = strings.TrimSuffix(s, "ms")
+	case strings.HasSuffix(s, "us"):
+		unit = time.Microsecond
+		s = strings.TrimSuffix(s, "us")
+	case strings.HasSuffix(s, "ns"):
+		unit = time.Nanosecond
+		s = strings.TrimSuffix(s, "ns")
+	case strings.HasSuffix(s, "s"):
+		unit = time.Second
+		s = strings.TrimSuffix(s, "s")
+	default:
+		return 0
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil {
+		return 0
+	}
+	return time.Duration(f*float64(unit)) * sign
 }
 
 func parseTracking(text string, st *DisciplineStatus) {

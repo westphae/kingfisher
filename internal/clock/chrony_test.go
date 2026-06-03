@@ -1,6 +1,9 @@
 package clock
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 const sampleTrackingPPS = `Reference ID    : 50505300 (PPS)
 Stratum         : 1
@@ -30,8 +33,17 @@ Last offset     : +0.000000000 seconds
 RMS offset      : 0.000000000 seconds
 `
 
-const sampleSourcesGPS = `
-#* GPS                           0   4   377    11  -4571us[-4571us] +/-  150ms
+const sampleSourcesUnsynced = `
+MS Name/IP address         Stratum Poll Reach LastRx Last sample
+===============================================================================
+#x GPS                           0   4   377    22   -572ms[ -572ms] +/-  150ms
+#x PPS                           0   4   377    23    -29us[  -29us] +/-  506ns
+`
+
+const sampleSourceStats = `Name/IP Address            NP  NR  Span  Frequency  Freq Skew  Offset  Std Dev
+==============================================================================
+GPS                        18  11   274    -11.533     16.341   -573ms  1432us
+PPS                         8   5   110     -0.087      0.049    -31us   998ns
 `
 
 func TestParseTrackingPPS(t *testing.T) {
@@ -86,6 +98,46 @@ func TestParseActiveSourceGPS(t *testing.T) {
 		t.Fatalf("source=%q", st.Source)
 	}
 }
+
+func TestParseSourceLinesUnsynced(t *testing.T) {
+	var st DisciplineStatus
+	parseSourceLines(sampleSourcesUnsynced, &st)
+	if st.GPSState != SourceStateError {
+		t.Fatalf("gps state=%q", st.GPSState)
+	}
+	if st.PPSState != SourceStateError {
+		t.Fatalf("pps state=%q", st.PPSState)
+	}
+}
+
+func TestParseSourceStats(t *testing.T) {
+	var st DisciplineStatus
+	parseSourceStats(sampleSourceStats, &st)
+	if st.GPSOffsetMs > -572 || st.GPSOffsetMs < -574 {
+		t.Fatalf("gps offset ms=%v want ~-573", st.GPSOffsetMs)
+	}
+	if st.PPSOffsetMs > -0.02 || st.PPSOffsetMs < -0.04 {
+		t.Fatalf("pps offset ms=%v want ~-0.031", st.PPSOffsetMs)
+	}
+}
+
+func TestParseChronyDuration(t *testing.T) {
+	cases := map[string]time.Duration{
+		"-573ms": -573 * time.Millisecond,
+		"+620ms": 620 * time.Millisecond,
+		"-31us":  -31 * time.Microsecond,
+		"+12ns":  12 * time.Nanosecond,
+	}
+	for s, want := range cases {
+		if got := parseChronyDuration(s); got != want {
+			t.Fatalf("%q: got %v want %v", s, got, want)
+		}
+	}
+}
+
+const sampleSourcesGPS = `
+#* GPS                           0   4   377    11  -4571us[-4571us] +/-  150ms
+`
 
 func TestStartupMetaPPS(t *testing.T) {
 	disc := DisciplineStatus{
