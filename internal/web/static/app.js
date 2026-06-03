@@ -677,7 +677,8 @@ function renderPodStatusFull(el) {
     el.innerHTML = '<span class="dim">Pod ingest disabled</span>';
     return;
   }
-  const linkCls = !p.connected ? 'off' : ((p.rx_dropped || 0) > 0 ? 'warn' : 'ok');
+  const dropped = (p.rx_dropped || 0) + (p.dropped_readings || 0) + (p.ts_clamped || 0);
+  const linkCls = !p.connected ? 'off' : (dropped > 0 ? 'warn' : 'ok');
   let rssiText = '—';
   let rssiCls = '';
   if (p.has_rssi) {
@@ -689,11 +690,15 @@ function renderPodStatusFull(el) {
     ? battSocClass(p.battery_soc_pct)
     : '';
   el.className = `podStatus podStatus-${linkCls}`;
+  const droppedReadCls = (p.dropped_readings || 0) > 0 ? 'warn' : '';
+  const tsClampCls = (p.ts_clamped || 0) > 0 ? 'warn' : '';
   el.innerHTML =
     `<span class="podStatusItem"><span class="lbl">Pod</span> ${escapeHtml(podLinkLabel(p))}</span>` +
     `<span class="podStatusItem ${rssiCls}"><span class="lbl">RSSI</span> ${escapeHtml(rssiText)}</span>` +
     `<span class="podStatusItem ${battCls}"><span class="lbl">Batt</span> ${escapeHtml(battText)}</span>` +
-    `<span class="podStatusItem"><span class="lbl">Buf</span> ${escapeHtml(String(p.buffer_depth ?? '—'))}</span>`;
+    `<span class="podStatusItem"><span class="lbl">Buf</span> ${escapeHtml(String(p.buffer_depth ?? '—'))}</span>` +
+    `<span class="podStatusItem ${droppedReadCls}" title="Pod sensor buffer overruns"><span class="lbl">Drop</span> ${escapeHtml(String(p.dropped_readings ?? 0))}</span>` +
+    `<span class="podStatusItem ${tsClampCls}" title="Pod readings whose timestamp was clamped to recv time"><span class="lbl">TsClamp</span> ${escapeHtml(String(p.ts_clamped ?? 0))}</span>`;
 }
 
 function compactClockChip() {
@@ -722,7 +727,8 @@ function compactPodChip() {
   if (!state.serverConnected) {
     return '<button type="button" class="statusChip statusChip-offline" data-open-status="pod">Pod offline</button>';
   }
-  const linkCls = !p.connected ? 'off' : ((p.rx_dropped || 0) > 0 ? 'warn' : 'ok');
+  const dropped = (p.rx_dropped || 0) + (p.dropped_readings || 0) + (p.ts_clamped || 0);
+  const linkCls = !p.connected ? 'off' : (dropped > 0 ? 'warn' : 'ok');
   let parts = ['Pod'];
   if (p.has_rssi && Number.isFinite(p.rssi_dbm)) {
     parts.push(`${p.rssi_dbm} dBm`);
