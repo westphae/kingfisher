@@ -1,8 +1,6 @@
 package pod
 
 import (
-	"math"
-
 	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/pod/wire"
 )
@@ -31,7 +29,7 @@ func BatteryGaugeLearned(r wire.BatteryReading, designMah uint16) bool {
 }
 
 // NormalizeBatteryReading adjusts learned gauge readings (design-capacity fallback,
-// derived remain/time). When unlearned, capacity/SOC/time are left at zero for
+// derived remain from SOC when missing). When unlearned, capacity/SOC/time are left at zero for
 // hub/DB; battery_gauge_learned flags the state for the UI.
 func NormalizeBatteryReading(r wire.BatteryReading, designMah uint16) (wire.BatteryReading, bool) {
 	if !BatteryGaugeLearned(r, designMah) {
@@ -50,9 +48,6 @@ func NormalizeBatteryReading(r wire.BatteryReading, designMah uint16) (wire.Batt
 	}
 	if r.CapacityRemainMah <= 0 && r.SocPct > 0 && r.CapacityFullMah > 0 {
 		r.CapacityRemainMah = r.SocPct / 100 * r.CapacityFullMah
-	}
-	if r.TimeRemainS <= 0 && r.CurrentA < -0.001 && r.CapacityRemainMah > 0 {
-		r.TimeRemainS = (r.CapacityRemainMah / float32(math.Abs(float64(r.CurrentA)))) * 3600
 	}
 	return r, true
 }

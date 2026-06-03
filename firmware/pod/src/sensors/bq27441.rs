@@ -155,8 +155,9 @@ impl Bq27441 {
         let capacity_full_mah = capacity_full as f32;
         let soc_pct = soc as f32;
 
-        let time_remain_s = if current_a < -0.001 {
-            (capacity_remain_mah / current_a.abs()) * 3600.0
+        // mAh / mA -> hours; ×3600 -> seconds (not mAh/A, which is 1000× too large).
+        let time_remain_s = if current_ma < -1 {
+            (capacity_remain_mah / (current_ma as f32).abs()) * 3600.0
         } else {
             -1.0
         };

@@ -24,8 +24,8 @@ func TestNormalizeBatteryReading_zeroFullUsesDesign(t *testing.T) {
 	if math.Abs(float64(r.CapacityRemainMah-612)) > 1 {
 		t.Fatalf("remain=%v want ~612", r.CapacityRemainMah)
 	}
-	if r.TimeRemainS <= 0 {
-		t.Fatalf("time_remain=%v want positive", r.TimeRemainS)
+	if r.TimeRemainS != -1 {
+		t.Fatalf("time_remain=%v want pod value unchanged (-1)", r.TimeRemainS)
 	}
 }
 
