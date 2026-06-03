@@ -162,21 +162,32 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		hz = 10
 	}
 	tname := triggerName(name)
-	bindTrigger := r.hasPath("trigger/current_trigger")
+	hasTriggerSysfs := r.hasPath("trigger/current_trigger")
+	hwFIFO := !hasTriggerSysfs && usesHWFIFOBuffer(r.Name())
 	var (
 		trig        *iio.HRTrigger
 		triggerName string
 		err         error
 	)
-	if bindTrigger {
-		trig, err = iio.EnsureHRTimer(tname, hz)
-		if err != nil {
-			log.Printf("sensors: %s: buffer trigger: %v — using polled reads", name, err)
-			runOne(ctx, r, name, holder, hub, buf, st, reg)
-			return
+	if hasTriggerSysfs {
+		if chipTrig := discoverIIOTrigger(r.Name()); chipTrig != "" {
+			triggerName = chipTrig
+			log.Printf("sensors: %s: binding chip trigger %q", name, chipTrig)
+		} else {
+			trig, err = iio.EnsureHRTimer(tname, hz)
+			if err != nil {
+				log.Printf("sensors: %s: buffer trigger: %v — using polled reads", name, err)
+				runOne(ctx, r, name, holder, hub, buf, st, reg)
+				return
+			}
+			triggerName = trig.Name()
+			defer releaseHRTimer(trig)
 		}
-		triggerName = trig.Name()
-		defer releaseHRTimer(trig)
+	} else if hwFIFO {
+		if err := syncDeviceSamplingHz(r, effectiveHz); err != nil {
+			log.Printf("sensors: %s: sampling_frequency: %v", name, err)
+		}
+		log.Printf("sensors: %s: hwfifo buffer (INT1); no trigger/current_trigger", name)
 	} else {
 		log.Printf("sensors: %s: no trigger/current_trigger; trying device-native buffer", name)
 	}
@@ -192,7 +203,11 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 
 	clock := iobuf.TimestampClock()
 	triggerLabel := triggerName
-	if triggerLabel == "" {
+	switch {
+	case triggerLabel != "":
+	case hwFIFO:
+		triggerLabel = "hwfifo-int1"
+	default:
 		triggerLabel = "device-native"
 	}
 	log.Printf("sensors: %s: IIO buffer %d frames @ %d Hz (trigger %s, clock %q, channels %v)",
@@ -207,9 +222,11 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 	recs := make([]iio.Record, readBatch)
 
 	var (
-		consecutiveStalls int
-		fallbackToPolled  bool
+		consecutiveStalls   int
+		stallRestartCycles  int
+		fallbackToPolled    bool
 	)
+	const maxStallRestartCycles = 8
 
 	restartCapture := func(newDev config.Device) bool {
 		_ = iobuf.Close()
@@ -217,6 +234,11 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 			log.Printf("sensors: %s reapply attrs: %v", name, err)
 		}
 		effectiveHz := clampBufferedHz(r, newDev.SampleHz)
+		if hwFIFO {
+			if err := syncDeviceSamplingHz(r, effectiveHz); err != nil {
+				log.Printf("sensors: %s: sampling_frequency: %v", name, err)
+			}
+		}
 		if effectiveHz != newDev.SampleHz {
 			log.Printf("sensors: %s: sample_hz %.0f exceeds max %.1f for oversampling — using %.1f Hz",
 				name, newDev.SampleHz, effectiveHz, effectiveHz)
@@ -252,14 +274,20 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		}
 		consecutiveStalls++
 		if consecutiveStalls >= 3 {
-			if !bindTrigger {
-				log.Printf("sensors: %s: device-native buffer stalled (%v) — using polled reads", name, err)
-				fallbackToPolled = true
-				return false, true
-			}
 			log.Printf("sensors: %s: buffer stalled (%v) — restarting capture", name, err)
 			consecutiveStalls = 0
-			return restartCapture(dev), false
+			if restartCapture(dev) {
+				stallRestartCycles++
+				if stallRestartCycles >= maxStallRestartCycles {
+					log.Printf("sensors: %s: buffer restarts exhausted — using polled reads", name)
+					fallbackToPolled = true
+					return false, true
+				}
+				return true, false
+			}
+			log.Printf("sensors: %s: buffer restart failed — using polled reads", name)
+			fallbackToPolled = true
+			return false, true
 		}
 		if consecutiveStalls == 1 {
 			log.Printf("sensors: %s: buffer read: %v", name, err)
@@ -302,7 +330,9 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 
 		readTimeout := bufferReadTimeout(hz)
 		frame := iobuf.Layout().FrameBytes
-		if frame > 0 {
+		// hwfifo drivers (inv_icm45600) push frames on read(); data_available
+		// may stay zero until then — do not treat that as a stall.
+		if frame > 0 && !hwFIFO {
 			waitDeadline := time.Now().Add(readTimeout)
 			for time.Now().Before(waitDeadline) {
 				if ctx.Err() != nil {
@@ -348,6 +378,7 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 			continue
 		}
 		consecutiveStalls = 0
+		stallRestartCycles = 0
 		for i := 0; i < n; i++ {
 			values := recordToValues(recs[i], colMap)
 			if len(values) == 0 {
