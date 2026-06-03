@@ -73,6 +73,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("store: %v", err)
 	}
+	// Shutdown ordering: buf.Run is one of the workers in wg, so wg.Wait()
+	// below blocks until its final Flush() returns. Only after that does
+	// this deferred st.Close() run, which means flushed rows reach disk
+	// (via the WAL checkpoint in Close) before the DB handle is released.
+	// Do not reorder these.
 	defer st.Close()
 	log.Printf("kingfisher v%s flight DB: %s", version, st.Path())
 	if err := st.SetMeta("clock_startup_state", startupClock.State); err != nil {
