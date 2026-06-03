@@ -17,19 +17,30 @@ import (
 // RAM on a long flight. Sized for ~5 minutes at 100 Hz per device.
 const MaxPendingPerDevice = 30000
 
+// flushTarget is the subset of *Store the buffer needs. Kept as an
+// interface so the failure paths (re-queue on flush error, degraded
+// surfacing) can be unit-tested with a fake that fails on demand.
+type flushTarget interface {
+	EnsureTable(device string, columns []string) error
+	FlushBatch(device string, columns []string, samples []live.Sample) error
+	CheckpointWAL() error
+}
+
 // Buffer batches Samples per device and flushes every FlushInterval in a
 // single transaction. EnsureTable is called automatically on first sight of
 // a device or column.
 type Buffer struct {
-	store         *Store
+	store         flushTarget
 	flushInterval time.Duration
 	paused        atomic.Bool
 
-	consecutiveFailures atomic.Int32
-	droppedRows         atomic.Uint64
+	droppedRows atomic.Uint64
 
-	flushErrMu   sync.Mutex
-	lastFlushErr string
+	// flushMu guards lastFlushErr AND consecutiveFailures together so
+	// RecordingState always returns a coherent (count, error) pair.
+	flushMu             sync.Mutex
+	lastFlushErr        string
+	consecutiveFailures int
 
 	mu      sync.Mutex
 	pending map[string][]live.Sample // device → rows
@@ -51,15 +62,15 @@ type RecordingState struct {
 
 // RecordingState returns a copy of the current recording health snapshot.
 func (b *Buffer) RecordingState() RecordingState {
-	b.flushErrMu.Lock()
+	b.flushMu.Lock()
 	last := b.lastFlushErr
-	b.flushErrMu.Unlock()
-	fails := b.consecutiveFailures.Load()
+	fails := b.consecutiveFailures
+	b.flushMu.Unlock()
 	return RecordingState{
 		Paused:              b.paused.Load(),
 		Degraded:            fails >= 3,
 		LastError:           last,
-		ConsecutiveFailures: fails,
+		ConsecutiveFailures: int32(fails),
 		DroppedRows:         b.droppedRows.Load(),
 	}
 }
@@ -74,8 +85,10 @@ func (b *Buffer) SetPaused(p bool) error {
 		return nil
 	}
 	if err := b.Flush(); err != nil {
+		b.noteFlushErr(err)
 		return err
 	}
+	b.noteFlushOK()
 	return b.store.CheckpointWAL()
 }
 
@@ -165,13 +178,21 @@ func (b *Buffer) Flush() error {
 	}
 	sort.Strings(devs)
 
-	for _, d := range devs {
+	for i, d := range devs {
 		samples := pending[d]
 		colList := cols[d]
 		if err := b.store.EnsureTable(d, colList); err != nil {
+			// Re-queue the failing device and everything not yet
+			// attempted so a transient write error (full disk, locked
+			// DB) doesn't silently discard buffered rows. The pending
+			// swap above already exposed an empty map to Append, so
+			// new samples may have arrived; the failed (older) rows are
+			// prepended ahead of them.
+			b.requeue(pending, devs[i:])
 			return err
 		}
 		if err := b.store.FlushBatch(d, colList, samples); err != nil {
+			b.requeue(pending, devs[i:])
 			return err
 		}
 	}
@@ -204,19 +225,40 @@ func (b *Buffer) Run(stop <-chan struct{}) {
 	}
 }
 
+// requeue merges un-flushed device rows back into b.pending after a flush
+// failure, prepending the failed (older) rows ahead of any samples that
+// arrived during the flush, and re-applying the per-device cap so memory
+// stays bounded under sustained failure (dropping oldest, counted).
+func (b *Buffer) requeue(pending map[string][]live.Sample, devs []string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, d := range devs {
+		old := pending[d]
+		if len(old) == 0 {
+			continue
+		}
+		merged := append(old, b.pending[d]...)
+		if len(merged) > MaxPendingPerDevice {
+			drop := len(merged) - MaxPendingPerDevice
+			b.droppedRows.Add(uint64(drop))
+			merged = merged[drop:]
+		}
+		b.pending[d] = merged
+	}
+}
+
 func (b *Buffer) noteFlushErr(err error) {
-	b.consecutiveFailures.Add(1)
-	b.flushErrMu.Lock()
+	b.flushMu.Lock()
+	b.consecutiveFailures++
 	b.lastFlushErr = err.Error()
-	b.flushErrMu.Unlock()
+	b.flushMu.Unlock()
 }
 
 func (b *Buffer) noteFlushOK() {
-	if b.consecutiveFailures.Load() == 0 {
-		return
+	b.flushMu.Lock()
+	if b.consecutiveFailures != 0 {
+		b.consecutiveFailures = 0
+		b.lastFlushErr = ""
 	}
-	b.consecutiveFailures.Store(0)
-	b.flushErrMu.Lock()
-	b.lastFlushErr = ""
-	b.flushErrMu.Unlock()
+	b.flushMu.Unlock()
 }
