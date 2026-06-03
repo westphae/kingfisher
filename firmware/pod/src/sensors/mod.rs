@@ -288,6 +288,7 @@ fn drain_one_battery(
             capacity_full_mah,
             soc_pct,
             time_remain_s,
+            design_capacity_mah,
             ..
         } => Reading::Battery {
             voltage_v,
@@ -297,6 +298,7 @@ fn drain_one_battery(
             capacity_full_mah,
             soc_pct,
             time_remain_s,
+            design_capacity_mah,
             age_us: age,
         },
         _ => {
@@ -557,6 +559,7 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
                                 capacity_full_mah: s.capacity_full_mah,
                                 soc_pct: s.soc_pct,
                                 time_remain_s: s.time_remain_s,
+                                design_capacity_mah: s.design_capacity_mah,
                                 age_us: 0,
                             },
                             cap_us,
