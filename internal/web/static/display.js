@@ -48,7 +48,7 @@ const KFDisplay = (function () {
   const PRESS_ALT_SORT = [
     'pressure_alt_m', 'pressure_alt_ft',
     'indicated_alt_m', 'indicated_alt_ft',
-    'density_alt_ft',
+    'density_alt_ft', 'vs_ms',
     'pressure_pa', 'pressure_source',
   ];
 
@@ -348,6 +348,11 @@ const KFDisplay = (function () {
     density_alt_ft: {
       label: 'Density altitude',
       fmt(v) { return `${fmtNum(v, 0)} ft`; },
+    },
+    vs_ms: {
+      label: 'Vertical speed',
+      // Stored in m/s; displayed in ft/min (aviation VSI convention).
+      fmt(v) { return `${fmtNum(v * MPS_TO_FPM, 0)} ft/min`; },
     },
     pressure_source: {
       label: 'Pressure source',
