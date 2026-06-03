@@ -12,7 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTO_VERSION: u8 = 3;
+pub const PROTO_VERSION: u8 = 4;
 pub const MAX_DEVICE_NAME: usize = 12;
 pub const MAX_READINGS: usize = 8;
 pub const MAX_SENSORS: usize = 4;
@@ -148,6 +148,8 @@ pub enum Reading {
         capacity_full_mah: f32,
         soc_pct: f32,
         time_remain_s: f32,
+        /// Data-memory DesignCapacity (0x3C), not learned FullChargeCapacity (0x0E).
+        design_capacity_mah: u16,
         age_us: u32,
     },
 }
@@ -312,6 +314,7 @@ mod tests {
                 capacity_full_mah: 850.0,
                 soc_pct: 72.0,
                 time_remain_s: 15_120.0,
+                design_capacity_mah: 850,
                 age_us: 50,
             })
             .unwrap();

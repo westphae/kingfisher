@@ -5,7 +5,7 @@
 package wire
 
 const (
-	ProtoVersion     = 3
+	ProtoVersion     = 4
 	MaxDeviceNameLen = 12
 	MaxReadings      = 8
 	MaxSensors       = 4
@@ -178,6 +178,7 @@ type BatteryReading struct {
 	CapacityFullMah   float32
 	SocPct            float32
 	TimeRemainS       float32
+	DesignCapacityMah uint16 // data-memory 0x3C
 	AgeUs             uint32
 }
 

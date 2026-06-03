@@ -74,6 +74,7 @@ fn main() {
             capacity_full_mah: 850.0,
             soc_pct: 72.0,
             time_remain_s: 15_120.0,
+            design_capacity_mah: 850,
             age_us: 50,
         })
         .unwrap();

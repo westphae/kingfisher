@@ -385,6 +385,10 @@ func (d *decoder) decodeReading(disc byte) (Reading, error) {
 		if err != nil {
 			return nil, err
 		}
+		designMah, err := d.uvarint()
+		if err != nil {
+			return nil, err
+		}
 		age, err := d.uvarint()
 		if err != nil {
 			return nil, err
@@ -397,6 +401,7 @@ func (d *decoder) decodeReading(disc byte) (Reading, error) {
 			CapacityFullMah:   capFull,
 			SocPct:            soc,
 			TimeRemainS:       timeRemain,
+			DesignCapacityMah: uint16(designMah),
 			AgeUs:             uint32(age),
 		}, nil
 	default:
@@ -743,6 +748,9 @@ func (e *encoder) encodeReading(r Reading) error {
 			return err
 		}
 		if err := e.f32(v.TimeRemainS); err != nil {
+			return err
+		}
+		if err := e.uvarint(uint64(v.DesignCapacityMah)); err != nil {
 			return err
 		}
 		return e.uvarint(uint64(v.AgeUs))
