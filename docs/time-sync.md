@@ -281,6 +281,15 @@ Hover the badge for a full tooltip. This is complementary to `chronyc tracking`:
 the header answers "what steers the Pi clock and by how much?" while the GPS
 cross-check catches gpsd outages or gross wall-clock drift.
 
+When chrony shows **Time unsynced**, open the status drawer: kingfisher auto-runs
+`chronyc reselect` on a cooldown (config `clock.auto_resync`; requires passwordless
+`sudo chronyc` — see `deploy/time-sync/verify.md` §6), offers **Retry sync**
+manually, and **Restart time services** when the deploy helper is installed.
+**Restart** auto-corrects a mis-tuned GPS `offset` (when `sourcestats` residual
+exceeds ~150 ms) before restarting chronyd and gpsd. These recover stale SOCK
+connections or GPS/PPS falseticker states; they do **not** replace a full NTP
+cross-check offset tune on the ground when hardware or baud changes.
+
 For what each flight DB **`ts_ns`** column means (including GPS row time vs
 **`fix_time_unix_s`**), see **`docs/timestamps.md`**.
 
