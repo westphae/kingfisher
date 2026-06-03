@@ -222,14 +222,26 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 	recs := make([]iio.Record, readBatch)
 
 	var (
-		consecutiveStalls   int
-		stallRestartCycles  int
-		fallbackToPolled    bool
+		consecutiveStalls  int
+		stallRestartCycles int
+		fallbackToPolled   bool
 	)
-	const maxStallRestartCycles = 8
+	const (
+		maxStallRestartCycles = 8
+		// initialFallbackCooldown is the first polled-mode burst length
+		// after a buffered-capture exhaustion. Each successive failed
+		// recovery attempt doubles the cooldown up to maxFallbackCooldown,
+		// so a transient DMA stall no longer permanently drops the device
+		// from 100 Hz buffered to ~10 Hz polled for the rest of the flight.
+		initialFallbackCooldown = 30 * time.Second
+		maxFallbackCooldown     = 5 * time.Minute
+	)
 
 	restartCapture := func(newDev config.Device) bool {
-		_ = iobuf.Close()
+		if iobuf != nil {
+			_ = iobuf.Close()
+			iobuf = nil
+		}
 		if err := applyConfiguredAttrs(r, newDev); err != nil {
 			log.Printf("sensors: %s reapply attrs: %v", name, err)
 		}
@@ -348,8 +360,12 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 				retry, stop := handleStall(context.DeadlineExceeded)
 				if stop {
 					if fallbackToPolled {
-						_ = iobuf.Close()
-						runOne(ctx, r, name, holder, hub, buf, st, reg)
+						if !cooldownAndRetryBuffered(ctx, r, name, holder, hub, buf, st, reg, &iobuf, restartCapture, dev) {
+							return
+						}
+						stallRestartCycles = 0
+						fallbackToPolled = false
+						continue
 					}
 					return
 				}
@@ -367,8 +383,12 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 			retry, stop := handleStall(err)
 			if stop {
 				if fallbackToPolled {
-					_ = iobuf.Close()
-					runOne(ctx, r, name, holder, hub, buf, st, reg)
+					if !cooldownAndRetryBuffered(ctx, r, name, holder, hub, buf, st, reg, &iobuf, restartCapture, dev) {
+						return
+					}
+					stallRestartCycles = 0
+					fallbackToPolled = false
+					continue
 				}
 				return
 			}
@@ -402,6 +422,52 @@ func filterDataChannels(chans []string) []string {
 		}
 	}
 	return out
+}
+
+// cooldownAndRetryBuffered handles the post-exhaustion recovery loop. We
+// close the current buffer, run polled mode for a bounded burst, then try
+// to reopen the buffer; on success the caller resumes buffered capture,
+// on failure the cooldown doubles up to maxFallbackCooldown. Returns true
+// when buffered capture is back, false on ctx cancellation.
+func cooldownAndRetryBuffered(
+	ctx context.Context,
+	r *iioReader, name string,
+	holder *config.Holder, hub *live.Hub, buf *store.Buffer, st *store.Store, reg *Registry,
+	iobuf **iio.Buffer,
+	restartCapture func(config.Device) bool,
+	dev config.Device,
+) bool {
+	if *iobuf != nil {
+		_ = (*iobuf).Close()
+		*iobuf = nil
+	}
+	cooldown := 30 * time.Second
+	const maxCooldown = 5 * time.Minute
+	for ctx.Err() == nil {
+		log.Printf("sensors: %s: falling back to polled reads for %s before retrying buffered", name, cooldown)
+		pctx, pcancel := context.WithTimeout(ctx, cooldown)
+		runOne(pctx, r, name, holder, hub, buf, st, reg)
+		pcancel()
+		if ctx.Err() != nil {
+			return false
+		}
+		// Live config may have changed during the polled burst — pick up
+		// the current device snapshot so the reopen uses fresh attrs.
+		curDev := holder.Get().DeviceOrDefault(r.Name(), 10)
+		if !curDev.Enabled {
+			return false
+		}
+		log.Printf("sensors: %s: retrying buffered capture", name)
+		if restartCapture(curDev) {
+			log.Printf("sensors: %s: buffered capture restored", name)
+			return true
+		}
+		cooldown *= 2
+		if cooldown > maxCooldown {
+			cooldown = maxCooldown
+		}
+	}
+	return false
 }
 
 // sampleTimeNs preserves kernel capture time when the driver timestamps the
