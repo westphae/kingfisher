@@ -24,6 +24,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -46,6 +47,24 @@ import (
 
 //go:embed templates/*.html static/*
 var assets embed.FS
+
+// sameOriginCheck accepts a WebSocket upgrade only when the Origin header
+// matches the request Host (or is absent — Origin is browser-only and
+// non-browser clients legitimately omit it). This is defence-in-depth on
+// top of session cookies for /ws and the terminal route: a third-party
+// page can't trick a logged-in browser into opening a WebSocket back to
+// kingfisher behind the pilot's back.
+func sameOriginCheck(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Host, r.Host)
+}
 
 type Server struct {
 	cfg     *config.Holder
@@ -90,7 +109,7 @@ func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, 
 		compass:    compass,
 		tpl:        tpl,
 		devWebRoot: devWebRoot,
-		up:         websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
+		up:         websocket.Upgrader{CheckOrigin: sameOriginCheck},
 		term:       terminal.New(func() config.Terminal { return cfg.Get().Terminal }, tpl),
 	}, nil
 }

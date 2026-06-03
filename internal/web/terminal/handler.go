@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"syscall"
@@ -35,7 +36,22 @@ func New(cfgFn func() config.Terminal, tpl *template.Template) *Handler {
 		limiter:   newLoginLimiter(),
 		tpl:       tpl,
 		up: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			// Defence-in-depth on top of session cookies: only accept an
+			// upgrade when Origin matches Host (browser path) or is absent
+			// (non-browser clients). Without this, a malicious third-party
+			// page open in the pilot's browser could open a terminal WS
+			// behind their back.
+			CheckOrigin: func(r *http.Request) bool {
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true
+				}
+				u, err := url.Parse(origin)
+				if err != nil {
+					return false
+				}
+				return strings.EqualFold(u.Host, r.Host)
+			},
 		},
 	}
 }
