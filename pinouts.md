@@ -27,7 +27,7 @@ Other side of board: PPS
 
 ### Notes:
 * Enable UART0 (GPIO 14/15) on RPI5 with `/boot/firmware/config.txt: dtoverlay=uart0-pi5`
-* Reserve GPIO 18 (physical pin 12) as the preferred future PPS input with `dtoverlay=pps-gpio,gpiopin=18`
+* GPIO 18 (physical pin 12) is the PPS input with `dtoverlay=pps-gpio,gpiopin=18`
 
 ## ICM45686 Pinout
 -------
@@ -47,11 +47,7 @@ Other side of board: PPS
 * 1 MHz I2C
 * User-configurable internal pull-up/pull-downs
 * User-configurable ODR & FDR (FIFO Data Rate)
+* GPIO 17 (physical pin 11) is the INT for the ICM45686 (GPIO 17 is the default in the driver).
 
 ## Case
 * PLA+ not good for temp, PETG a little better, ASA might be optimal
-* Use generous standoffs to allow airflow around boards
-* Include case fan
-* Include ventilation slots
-* Can get M3 or M2.5 heat-set inserts for screws instead of just plasic friction fit
-* Braces for GPS & MPU boards with screw holes
