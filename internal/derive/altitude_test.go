@@ -10,6 +10,26 @@ import (
 	"github.com/westphae/kingfisher/internal/pod"
 )
 
+func TestValidPressurePaBounds(t *testing.T) {
+	cases := []struct {
+		v    float64
+		want bool
+	}{
+		{101325, true},  // standard sea level
+		{50000, true},   // ~18000 ft
+		{1013, false},   // hPa mistaken for Pa
+		{101.3, false},  // kPa mistaken for Pa
+		{250000, false}, // glitch / double kPa->Pa conversion
+		{120000, false}, // just over the ceiling
+		{math.NaN(), false},
+	}
+	for _, c := range cases {
+		if got := validPressurePa(c.v); got != c.want {
+			t.Errorf("validPressurePa(%v)=%v want %v", c.v, got, c.want)
+		}
+	}
+}
+
 func TestPressureAltitudeAtSeaLevelIsZero(t *testing.T) {
 	got := bmp280.CalcAltitude(1013.25)
 	if math.Abs(got) > 1.0 {

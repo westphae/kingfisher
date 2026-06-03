@@ -176,7 +176,10 @@ func cabinPressurePa(sm live.Sample) (float64, bool) {
 }
 
 func validPressurePa(v float64) bool {
-	return !math.IsNaN(v) && v > 10_000 // reject hPa/kPa mistaken for Pa
+	// Lower bound rejects hPa/kPa mistaken for Pa; upper bound rejects a
+	// glitch or a double kPa->Pa conversion (sea-level static maxes around
+	// ~108 kPa even in a dive, so 120 kPa is generous headroom).
+	return !math.IsNaN(v) && v > 10_000 && v < 120_000
 }
 
 func validTempC(v float64) bool {
