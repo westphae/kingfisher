@@ -71,11 +71,13 @@ func TestOnBatchClampsOutOfWindowTs(t *testing.T) {
 	})
 
 	before := c.tsClamped.Load()
-	// AgeUs huge enough to drive readingNs negative on the first batch.
-	const huge = uint32(60_000_000) // 60 s
+	// AgeUs beyond the 5-min corruption ceiling (a wedged buffer or bogus
+	// age) — well past any legitimate deep-buffer backlog, so it must be
+	// clamped to recvNs rather than written as a stale/garbage timestamp.
+	const huge = uint32(360_000_000) // 6 min
 	tBefore := time.Now().UnixNano()
 	c.onBatch(wire.SampleBatch{
-		PodUptimeUs: 1_000_000,
+		PodUptimeUs: 400_000_000, // 400 s uptime, no underflow
 		Seq:         1,
 		Samples: []wire.Reading{
 			wire.StaticReading{PPa: 98_000, TempC: 17, AgeUs: huge},
@@ -91,5 +93,48 @@ func TestOnBatchClampsOutOfWindowTs(t *testing.T) {
 	}
 	if sm.TsNs < tBefore || sm.TsNs > tAfter {
 		t.Fatalf("published TsNs %d not in [%d, %d] (should fall back to recvNs)", sm.TsNs, tBefore, tAfter)
+	}
+}
+
+// TestOnBatchPreservesDeepBufferTs guards against the clamp window being too
+// narrow: a reading drained from a full pod ring after a link outage can be
+// ~13 s old (128 samples / 10 Hz). Its reconstructed TsNs is LEGITIMATE and
+// must be preserved, not collapsed onto recvNs. Regression guard for the
+// tsClampPast widening.
+func TestOnBatchPreservesDeepBufferTs(t *testing.T) {
+	hub := live.NewHub()
+	c := New("", nil, hub, nil, nil, nil, nil)
+	c.reader.applyHello(wire.Hello{
+		FwVersion:    1,
+		ProtoVersion: wire.ProtoVersion,
+		Caps: wire.Capabilities{Sensors: []wire.SensorCap{
+			helloCap(wire.SensorStatic, 1, 50, 10),
+		}},
+	})
+
+	// PodUptimeUs large enough that a 12 s age does not underflow. The
+	// offset on the first batch is exact (recvNs - podUptimeNs), so the
+	// 12 s-old reading reconstructs to recvNs - 12 s, comfortably inside
+	// the 5-min past window.
+	const ageUs = uint32(12_000_000) // 12 s
+	tBefore := time.Now().UnixNano()
+	c.onBatch(wire.SampleBatch{
+		PodUptimeUs: 100_000_000, // 100 s uptime, no underflow
+		Seq:         1,
+		Samples: []wire.Reading{
+			wire.StaticReading{PPa: 98_000, TempC: 17, AgeUs: ageUs},
+		},
+	})
+	if got := c.tsClamped.Load(); got != 0 {
+		t.Fatalf("tsClamped=%d, want 0 (12 s-old reading is legitimate)", got)
+	}
+	sm, ok := hub.SnapshotNow().Devices["bmp581"]
+	if !ok {
+		t.Fatal("hub missing bmp581 after onBatch")
+	}
+	// Should sit ~12 s before receive, NOT at recvNs.
+	ageNs := tBefore - sm.TsNs
+	if ageNs < 11*int64(time.Second) || ageNs > 13*int64(time.Second) {
+		t.Fatalf("reconstructed age %d ns not ~12 s — deep-buffer TsNs was clamped/lost", ageNs)
 	}
 }

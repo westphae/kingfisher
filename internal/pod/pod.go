@@ -32,10 +32,16 @@ const (
 	// start while staying robust to single-packet transit jitter.
 	emaShift = 4
 	// tsClampPast / tsClampFuture bound a reconstructed reading's TsNs
-	// around its receive time. 10 s past covers a full buffered-uplink
-	// burst plus offset cold-start; 1 s future covers minor clock skew.
-	// Outside this window we fall back to recvNs and bump tsClamped.
-	tsClampPast   = int64(10 * time.Second)
+	// around receive time. This is a CORRUPTION sanity ceiling (catch a
+	// negative/underflowed TsNs that would store as a year-2262 row, or a
+	// bogus pod uptime), NOT a legitimate-age limit: the pod's per-sensor
+	// ring buffers up to BUFFER_MAX_READINGS (128) samples, so during a
+	// link outage the oldest legitimately-buffered reading can be
+	// 128 / min_rate ≈ 128/10 Hz ≈ 13 s old. tsClampPast must stay well
+	// above that so a real buffered backlog is preserved, not collapsed
+	// onto recvNs. 5 min leaves huge margin while still catching insane
+	// values. 1 s future covers minor offset overshoot / clock skew.
+	tsClampPast   = int64(5 * time.Minute)
 	tsClampFuture = int64(1 * time.Second)
 )
 
