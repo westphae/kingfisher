@@ -36,12 +36,24 @@ const (
 // Wing pod static pressure is preferred over cabin IIO. Pressure is Pa;
 // pressure altitudes in ft and m. density_alt_ft uses the paired OAT when
 // available (pod static_temp_c or cabin temp_c).
+// baroVSITauS is the EMA time constant (seconds) for baro-derived vertical
+// speed. Baro altitude is noisy, so the raw per-tick rate is heavily
+// smoothed; ~2 s gives a responsive-but-stable VSI trend (real IVSIs lag
+// similarly) that beats GPS climb's ~600-700 ms pipeline lag.
+const baroVSITauS = 2.0
+
 func AltitudeFromHub(ctx context.Context, holder *config.Holder, hub *live.Hub, buf *store.Buffer, st *store.Store) {
 	t := time.NewTicker(200 * time.Millisecond)
 	defer t.Stop()
 	reload := holder.Subscribe()
 	kollsman := holder.Get().KollsmanInHg()
 	logPressAltAttrs(st, kollsman)
+	var (
+		prevAltM float64
+		prevT    time.Time
+		vsMs     float64
+		haveVS   bool
+	)
 	for {
 		select {
 		case <-ctx.Done():
@@ -75,9 +87,34 @@ func AltitudeFromHub(ctx context.Context, holder *config.Holder, hub *live.Hub, 
 			if tempC, ok := findOATC(snap, source); ok {
 				vals["density_alt_ft"] = DensityAltFt(altFt, tempC)
 			}
+			// Baro vertical speed: EMA-smoothed rate of pressure altitude
+			// (independent of altimeter setting). Reset across long gaps so
+			// a skipped/stale interval can't produce a spurious spike.
+			now := time.Now()
+			if !prevT.IsZero() {
+				dtSec := now.Sub(prevT).Seconds()
+				switch {
+				case dtSec > 0 && dtSec < 2.0:
+					rate := (altM - prevAltM) / dtSec
+					if haveVS {
+						alpha := dtSec / (baroVSITauS + dtSec)
+						vsMs += alpha * (rate - vsMs)
+					} else {
+						vsMs = rate
+						haveVS = true
+					}
+				case dtSec >= 2.0:
+					haveVS = false
+				}
+			}
+			prevAltM = altM
+			prevT = now
+			if haveVS {
+				vals["vs_ms"] = vsMs
+			}
 			sm := live.Sample{
 				Device: pressAltDeviceName,
-				TsNs:   time.Now().UnixNano(),
+				TsNs:   now.UnixNano(),
 				Values: vals,
 			}
 			hub.Publish(sm)
