@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS LaunchAgent — copy, edit STATUS_URL to your Pi, then:
+
+    PLIST=~/Library/LaunchAgents/com.kingfisher.pod-battery-alert.plist
+    sed "s|__REPO__|$HOME/go/src/github.com/westphae/kingfisher|g; \
+         s|__PI_URL__|http://192.168.10.1:8080|g" \
+      scripts/pod-battery-alert.launchd.plist.example > "$PLIST"
+    launchctl load "$PLIST"
+    launchctl start com.kingfisher.pod-battery-alert
+    tail -f ~/Library/Logs/kingfisher-battery-alert.log
+
+  Stop: launchctl unload "$PLIST"
+
+  No extra packages required (uses say + osascript). Optional:
+    brew install terminal-notifier
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.kingfisher.pod-battery-alert</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__REPO__/scripts/pod_battery_alert.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>STATUS_URL</key>
+    <string>__PI_URL__/api/status</string>
+    <key>THRESHOLD_V</key>
+    <string>3.40</string>
+    <key>RECOVER_V</key>
+    <string>3.45</string>
+    <key>INTERVAL_S</key>
+    <string>5</string>
+    <key>VOICE</key>
+    <string>1</string>
+    <key>NOTIFY</key>
+    <string>1</string>
+    <key>HEARTBEAT</key>
+    <string>0</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/kingfisher-battery-alert.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/kingfisher-battery-alert.log</string>
+</dict>
+</plist>

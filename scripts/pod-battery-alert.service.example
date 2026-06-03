@@ -1,0 +1,31 @@
+# Linux (Pi) systemd user unit — copy and enable on the Pi:
+# macOS: use pod-battery-alert.launchd.plist.example instead.
+#
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp scripts/pod-battery-alert.service.example ~/.config/systemd/user/pod-battery-alert.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now pod-battery-alert.service
+#   journalctl --user -u pod-battery-alert.service -f
+#
+# Install voice: sudo apt install espeak-ng
+
+[Unit]
+Description=Kingfisher pod battery low-voltage alert
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=THRESHOLD_V=3.40
+Environment=RECOVER_V=3.45
+Environment=INTERVAL_S=5
+Environment=STATUS_URL=http://127.0.0.1:8080/api/status
+Environment=VOICE=1
+Environment=NOTIFY=0
+ExecStart=%h/go/src/github.com/westphae/kingfisher/scripts/pod_battery_alert.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

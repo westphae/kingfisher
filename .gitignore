@@ -1,5 +1,6 @@
 # Local working files — kept out of the repo.
 datasheets/
+docs/reports/
 
 # Build artefacts.
 /kingfisher
