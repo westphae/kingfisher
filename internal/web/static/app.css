@@ -8,9 +8,22 @@
   --good: #5cffa3;
   --warn: #e6c04a;
   --border: #1f2a44;
-  --ov-value: 1rem;
-  --ov-label: 0.9375rem;
-  --ov-name: 1.0625rem;
+  /* Type scale tuned for in-flight glance use: vibration, sunglasses,
+   * presbyopia. Compared to the original web-typical 1rem/15px values,
+   * everything bumps so a single read at arm's length is reliable. The
+   * Big text toggle in settings multiplies these to give pilots whose
+   * near vision is worse than mine more headroom. */
+  --ov-value: 1.5rem;    /* 24px hero numbers */
+  --ov-label: 1.0625rem; /* 17px labels */
+  --ov-name:  1.1875rem; /* 19px tile name */
+  --stale-opacity: 0.55;
+  --stale-color: var(--dim);
+}
+
+body.bigtext {
+  --ov-value: 1.8rem;    /* 28.8px */
+  --ov-label: 1.25rem;   /* 20px */
+  --ov-name:  1.4rem;    /* 22.4px */
 }
 
 * { box-sizing: border-box; }
@@ -21,7 +34,41 @@ html, body {
   background: var(--bg);
   color: var(--fg);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-weight: 500;
+  line-height: 1.5;
   min-height: 100vh;
+}
+
+/* Stale: a value that hasn't updated in a while. Dimmed and de-saturated so
+ * the eye picks it up as "not now" without removing the value entirely. */
+.kf-stale {
+  opacity: var(--stale-opacity);
+  color: var(--stale-color);
+}
+
+/* The header banner that announces "Disconnected — values N s old" so a
+ * pilot is never quietly reading stale numbers. */
+.staleBanner {
+  background: #ff7ce0;
+  color: #1b0e1a;
+  font-weight: 700;
+  text-align: center;
+  padding: 0.35rem 0.5rem;
+  font-size: var(--ov-label);
+}
+
+.cfgCheckbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--ov-label);
+  padding: 0.35rem 0;
+}
+
+.cfgCheckbox input {
+  width: 22px;
+  height: 22px;
+  margin: 0;
 }
 
 body {

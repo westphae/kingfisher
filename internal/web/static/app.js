@@ -523,9 +523,13 @@ function battSocClass(soc) {
 
 function formatBatteryHeadline(p) {
   if (p.has_battery_telemetry) {
+    // For the compact chip a pilot glances at: SOC + estimated time
+    // remaining is the dispatch-relevant pair. Voltage is in the full
+    // panel for diagnostics.
     const parts = [
       `${Number(p.battery_v).toFixed(2)} V`,
       p.battery_gauge_learned ? `${Math.round(p.battery_soc_pct)}%` : null,
+      p.battery_gauge_learned ? formatBatteryTimeRemainCompact(p.battery_time_remain_s) : null,
     ].filter(Boolean);
     return parts.join(' ');
   }
@@ -533,6 +537,14 @@ function formatBatteryHeadline(p) {
     return `${Number(p.battery_v).toFixed(2)} V`;
   }
   return '—';
+}
+
+function formatBatteryTimeRemainCompact(s) {
+  if (!Number.isFinite(s) || s <= 0) return null;
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h > 0) return `~${h}h${String(m).padStart(2, '0')}`;
+  return `~${m}m`;
 }
 
 function formatBatteryHeadlineFull(p) {
@@ -1049,10 +1061,66 @@ function openSettingsDialog() {
     document.getElementById('cfgAircraft').value = cfg.aircraft || '';
     document.getElementById('cfgNotes').value = cfg.notes || '';
     document.getElementById('cfgFlush').value = cfg.flush_seconds || 5;
+    const bt = document.getElementById('cfgBigText');
+    if (bt) bt.checked = bigTextEnabled();
     settingsDlg._cfg = cfg;
     settingsDlg.showModal();
   });
 }
+
+const BIGTEXT_KEY = 'kf.bigtext';
+function bigTextEnabled() {
+  try { return localStorage.getItem(BIGTEXT_KEY) === '1'; } catch { return false; }
+}
+function setBigText(on) {
+  try { localStorage.setItem(BIGTEXT_KEY, on ? '1' : '0'); } catch {}
+  document.body.classList.toggle('bigtext', !!on);
+}
+setBigText(bigTextEnabled());
+
+// A value is "stale" once its source sample's ts_ns is older than this.
+// Lower thresholds (e.g. 1 s) cause flicker on slower sensors (gps at 1 Hz,
+// derive devices at 5 Hz); 3 s comfortably covers normal cadence.
+const STALENESS_MS = 3000;
+
+function markStaleness() {
+  const now = Date.now();
+  for (const [name, sample] of state.devices) {
+    if (!sample || !sample.ts_ns) continue;
+    const ageMs = now - sample.ts_ns / 1e6;
+    const stale = ageMs > STALENESS_MS;
+    for (const el of document.querySelectorAll(`[data-device="${CSS.escape(name)}"]`)) {
+      el.classList.toggle('kf-stale', stale);
+      if (stale) {
+        const ageS = Math.round(ageMs / 1000);
+        el.dataset.staleSec = String(ageS);
+      } else {
+        delete el.dataset.staleSec;
+      }
+    }
+  }
+  // Disconnect banner shows the WORST-case staleness so a pilot sees a
+  // single signal ("values from N s ago") rather than per-tile maths.
+  const banner = document.getElementById('staleBanner');
+  if (!banner) return;
+  if (state.serverConnected) {
+    banner.hidden = true;
+    return;
+  }
+  let oldestMs = 0;
+  for (const [, sample] of state.devices) {
+    if (!sample || !sample.ts_ns) continue;
+    const age = now - sample.ts_ns / 1e6;
+    if (age > oldestMs) oldestMs = age;
+  }
+  if (oldestMs < 2000) {
+    banner.hidden = true;
+    return;
+  }
+  banner.hidden = false;
+  banner.textContent = `Disconnected — values ${Math.round(oldestMs / 1000)} s old`;
+}
+setInterval(markStaleness, 1000);
 
 detailBackEl?.addEventListener('click', () => {
   location.hash = '#/';
@@ -1100,6 +1168,8 @@ document.getElementById('cfgSave')?.addEventListener('click', async (e) => {
   cfg.aircraft = document.getElementById('cfgAircraft').value;
   cfg.notes = document.getElementById('cfgNotes').value;
   cfg.flush_seconds = parseInt(document.getElementById('cfgFlush').value, 10) || 5;
+  const bt = document.getElementById('cfgBigText');
+  if (bt) setBigText(bt.checked);
   await fetch('/api/config', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
