@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"syscall"
@@ -25,6 +26,27 @@ import (
 	"github.com/westphae/kingfisher/internal/store"
 	"github.com/westphae/kingfisher/internal/web"
 )
+
+// safeGo runs fn in a new goroutine that recovers from panics. A single
+// bad worker (nil-map access in a derive loop, sensor read crash, etc.)
+// should not take down the flight recorder mid-flight — the other
+// workers keep recording. The panicking worker still exits; we don't try
+// to restart it because its state may be unsafe to reuse.
+func safeGo(wg *sync.WaitGroup, name string, st *store.Store, fn func()) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("PANIC in %s: %v\n%s", name, r, debug.Stack())
+				if st != nil {
+					_ = st.SetMeta("panic_"+name, fmt.Sprintf("%v", r))
+				}
+			}
+		}()
+		fn()
+	}()
+}
 
 const version = "0.1.0"
 
@@ -143,38 +165,24 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() { defer wg.Done(); hub.Run(stop) }()
-	wg.Add(1)
-	go func() { defer wg.Done(); buf.Run(stop) }()
-	wg.Add(1)
-	go func() { defer wg.Done(); gpsClient.Run(stop) }()
+	safeGo(&wg, "hub", st, func() { hub.Run(stop) })
+	safeGo(&wg, "store_buffer", st, func() { buf.Run(stop) })
+	safeGo(&wg, "gps", st, func() { gpsClient.Run(stop) })
 	if podClient != nil {
-		wg.Add(1)
-		go func() { defer wg.Done(); podClient.Run(stop) }()
+		safeGo(&wg, "pod", st, func() { podClient.Run(stop) })
 	}
-	wg.Add(1)
-	go func() { defer wg.Done(); derive.AltitudeFromHub(ctx, holder, hub, buf, st) }()
-	wg.Add(1)
-	go func() { defer wg.Done(); derive.AirspeedFromHub(ctx, holder, hub, buf) }()
-	wg.Add(1)
-	go func() { defer wg.Done(); derive.DeclinationFromGPS(ctx, gpsClient, hub, buf) }()
+	safeGo(&wg, "derive_altitude", st, func() { derive.AltitudeFromHub(ctx, holder, hub, buf, st) })
+	safeGo(&wg, "derive_airspeed", st, func() { derive.AirspeedFromHub(ctx, holder, hub, buf) })
+	safeGo(&wg, "derive_declination", st, func() { derive.DeclinationFromGPS(ctx, gpsClient, hub, buf) })
 	if cfg.AHRS.Enabled {
-		wg.Add(1)
-		go func() { defer wg.Done(); derive.AHRSFromHub(ctx, cfg.AHRS.RateHz, hub, gpsClient, buf) }()
+		safeGo(&wg, "derive_ahrs", st, func() { derive.AHRSFromHub(ctx, cfg.AHRS.RateHz, hub, gpsClient, buf) })
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		sensors.Run(ctx, holder, readers, hub, buf, st, registry)
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	safeGo(&wg, "sensors", st, func() { sensors.Run(ctx, holder, readers, hub, buf, st, registry) })
+	safeGo(&wg, "web", st, func() {
 		if err := srv.Run(cfg.HTTPAddr, stop); err != nil {
 			log.Printf("web: %v", err)
 		}
-	}()
+	})
 
 	wg.Wait()
 	log.Printf("kingfisher: shutdown complete")
