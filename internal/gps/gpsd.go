@@ -94,8 +94,13 @@ func (c *Client) ClockStatus() ClockStatus {
 	return st
 }
 
-// gpsdDialTimeout bounds how long a single Dial may block before we give
-// up and retry. Defensive against shutdown hangs when gpsd is unreachable.
+// gpsdDialTimeout bounds the TCP connect of a single Dial before we give
+// up and retry. NOTE: go-gpsd's DialTimeout only times the connect, not the
+// blocking banner ReadString that follows on a successful connect — so a
+// gpsd that accepts the socket but never sends its banner (wedged daemon)
+// can still stall this goroutine, including at shutdown. Acceptable for now:
+// the common failure (gpsd fully down) is bounded here, and the wedged case
+// only delays graceful shutdown of this one goroutine.
 const gpsdDialTimeout = 5 * time.Second
 
 // Run dials gpsd, watches for reports, and republishes them as live.Samples.
@@ -130,8 +135,15 @@ func (c *Client) Run(stop <-chan struct{}) {
 	}
 }
 
-// connectOnce returns true if the watcher ran (i.e. we connected); false
-// if we never got past Dial. The caller uses that to reset/grow backoff.
+// minGpsdSession is how long a connection must last to count as "good"
+// (reset the backoff). A gpsd that accepts the TCP connect but drops the
+// watcher almost immediately (crash-looping / flapping) would otherwise
+// reset backoff to 1s every cycle, producing a tight busy reconnect loop.
+const minGpsdSession = 3 * time.Second
+
+// connectOnce returns true only if the connection lasted at least
+// minGpsdSession (a genuine session); a failed Dial or an immediate
+// connect-then-drop returns false so the caller grows the backoff.
 func (c *Client) connectOnce(stop <-chan struct{}) bool {
 	s, err := gpsd.DialTimeout(c.addr, gpsdDialTimeout)
 	if err != nil {
@@ -140,6 +152,7 @@ func (c *Client) connectOnce(stop <-chan struct{}) bool {
 	}
 	defer s.Close()
 	log.Printf("gps: connected to %s", c.addr)
+	start := time.Now()
 
 	s.AddFilter("TPV", func(r any) {
 		rep, ok := r.(*gpsd.TPVReport)
@@ -160,12 +173,14 @@ func (c *Client) connectOnce(stop <-chan struct{}) bool {
 	done := s.Watch()
 	select {
 	case <-done:
-		log.Printf("gps: watcher returned (gpsd disconnect)")
+		elapsed := time.Since(start)
+		log.Printf("gps: watcher returned after %s (gpsd disconnect)", elapsed.Round(time.Millisecond))
+		return elapsed >= minGpsdSession
 	case <-stop:
 		_ = s.Close()
 		<-done
+		return true
 	}
-	return true
 }
 
 // skipForRate reports whether this TPV should be dropped to honor the
