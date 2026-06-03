@@ -133,12 +133,31 @@ const KFCompass = (function () {
     return s;
   }
 
+  // Presentation-only dead-band: only redraw the needle when the displayed
+  // heading would shift by more than NEEDLE_DEADBAND_DEG. The DB still
+  // gets every unfiltered sample; this just calms the needle in turbulence
+  // and saves a per-WS-tick SVG attribute write.
+  const NEEDLE_DEADBAND_DEG = 0.5;
+
   function updateNeedle(root, headingDeg, hMeasNt, hModelNt, vehicleOK) {
     const g = root.querySelector('[data-compass-needle]');
     if (!g) return;
     const hdg = Number(headingDeg);
     const rot = Number.isFinite(hdg) ? hdg : 0;
-    g.setAttribute('transform', `rotate(${rot} 100 100)`);
+    const prev = Number(g.dataset.rot);
+    if (Number.isFinite(prev)) {
+      let delta = Math.abs(rot - prev);
+      if (delta > 180) delta = 360 - delta;
+      if (delta <= NEEDLE_DEADBAND_DEG) {
+        // Skip the SVG write but still update length/dim below.
+      } else {
+        g.setAttribute('transform', `rotate(${rot} 100 100)`);
+        g.dataset.rot = String(rot);
+      }
+    } else {
+      g.setAttribute('transform', `rotate(${rot} 100 100)`);
+      g.dataset.rot = String(rot);
+    }
     const len = needleLength(hMeasNt, hModelNt);
     const tailLen = len * 0.35;
     const needle = g.querySelector('.compass-needle');
