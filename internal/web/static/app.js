@@ -662,6 +662,120 @@ function clockBadgeClass(clock) {
   return 'warn';
 }
 
+function clockUnsyncedDetail(d, resync) {
+  const parts = [];
+  if (d.gps_state === 'error' && Number.isFinite(d.gps_offset_ms)) {
+    parts.push(`GPS refclock error (${formatOffsetMs(d.gps_offset_ms)})`);
+  } else if (d.gps_state === 'error') {
+    parts.push('GPS refclock error');
+  }
+  if (d.pps_present && !d.pps_steering) {
+    if (d.pps_state === 'error') {
+      parts.push('PPS idle (lock GPS)');
+    } else if (d.pps_state === 'unreachable') {
+      parts.push('PPS unreachable');
+    } else if (d.pps_present) {
+      parts.push('PPS wired, not steering');
+    }
+  }
+  if (d.gps_state === 'error' && Math.abs(d.gps_offset_ms || 0) > 200) {
+    parts.push('Use Restart time services to auto-correct GPS offset (requires Pi setup)');
+  }
+  if (resync?.last_result && resync.last_result.includes('error')) {
+    const err = resync.last_result.split(':error:').pop();
+    if (err) parts.push(`Last retry failed: ${err}`);
+  }
+  return parts;
+}
+
+function formatOffsetMs(ms) {
+  if (!Number.isFinite(ms)) return '—';
+  const sign = ms >= 0 ? '+' : '';
+  if (Math.abs(ms) >= 1) return `${sign}${ms.toFixed(0)} ms`;
+  return `${sign}${ms.toFixed(2)} ms`;
+}
+
+function formatResyncAutoLine(resync) {
+  if (!resync?.auto_enabled) return '';
+  if (Number.isFinite(resync.next_auto_eligible_s) && resync.next_auto_eligible_s > 0) {
+    const mins = Math.ceil(resync.next_auto_eligible_s / 60);
+    return `Auto-retry in ${mins} min`;
+  }
+  if (resync.last_attempt_utc) {
+    if (resync.last_result && resync.last_result.includes('synced')) {
+      return 'Auto-retry succeeded';
+    }
+    return 'Auto-retry attempted recently';
+  }
+  return 'Auto-retry enabled';
+}
+
+let clockResyncBusy = false;
+
+async function clockResync(level) {
+  if (clockResyncBusy) return null;
+  clockResyncBusy = true;
+  try {
+    const r = await fetch('/api/clock/resync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ level }),
+    });
+    const ct = r.headers.get('content-type') || '';
+    let body = {};
+    if (ct.includes('application/json')) {
+      body = await r.json().catch(() => ({}));
+    } else if (!r.ok) {
+      throw new Error((await r.text().catch(() => '')) || r.statusText);
+    }
+    if (!r.ok) {
+      throw new Error(body.error || r.statusText);
+    }
+    if (body.clock) state.clock = body.clock;
+    else if (body.discipline && state.clock) {
+      state.clock.discipline = body.discipline;
+    }
+    await refreshStatus();
+    return body;
+  } finally {
+    clockResyncBusy = false;
+    renderClockStatusFull(statusDrawerClock);
+    renderStatusChips();
+  }
+}
+
+function wireClockResyncButtons(root) {
+  if (!root) return;
+  const retryBtn = root.querySelector('[data-clock-resync="light"]');
+  const fullBtn = root.querySelector('[data-clock-resync="full"]');
+  if (retryBtn) {
+    retryBtn.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      retryBtn.disabled = true;
+      try {
+        await clockResync('light');
+      } catch (e) {
+        alert(String(e.message || e));
+      }
+    });
+  }
+  if (fullBtn) {
+    fullBtn.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      const ok = confirm(
+        'Restart chronyd and gpsd? If GPS offset is far off, the offset will be auto-corrected first. Discipline may pause for a few seconds.'
+      );
+      if (!ok) return;
+      fullBtn.disabled = true;
+      try {
+        await clockResync('full');
+      } catch (e) {
+        alert(String(e.message || e));
+      }
+    });
+  }
+}
+
 function renderClockStatusFull(el) {
   if (!el) return;
   if (!state.serverConnected) {
@@ -686,7 +800,26 @@ function renderClockStatusFull(el) {
       parts.push(`<span class="clockStatusItem"><span class="lbl">Correction</span> ${escapeHtml(formatTimeOffsetNs(d.last_offset_ns))}</span>`);
     }
   } else if (d.available) {
+    const resync = c.resync || {};
     parts.push('<span class="clockStatusItem"><span class="lbl">Pi time</span> not synced</span>');
+    for (const line of clockUnsyncedDetail(d, resync)) {
+      parts.push(`<span class="clockStatusItem clockWarn"><span class="lbl">Cause</span> ${escapeHtml(line)}</span>`);
+    }
+    const autoLine = formatResyncAutoLine(resync);
+    if (autoLine) {
+      parts.push(`<span class="clockStatusItem dim">${escapeHtml(autoLine)}</span>`);
+    }
+    const btnDisabled = clockResyncBusy ? ' disabled' : '';
+    parts.push(
+      '<span class="clockResyncActions">' +
+      `<button type="button" class="clockResyncBtn" data-clock-resync="light"${btnDisabled}>Retry sync</button>`
+    );
+    if (resync.full_available) {
+      parts.push(
+        `<button type="button" class="clockResyncBtn clockResyncBtn-warn" data-clock-resync="full"${btnDisabled}>Restart time services</button>`
+      );
+    }
+    parts.push('</span>');
   } else if (g.has_fix) {
     parts.push('<span class="clockStatusItem"><span class="lbl">Pi time</span> GPS fix only</span>');
   } else {
@@ -698,6 +831,7 @@ function renderClockStatusFull(el) {
   }
   el.title = c.detail || c.startup_reason || '';
   el.innerHTML = parts.join('');
+  wireClockResyncButtons(el);
 }
 
 function renderPodStatusFull(el) {
@@ -750,7 +884,7 @@ function compactClockChip() {
     const src = disciplineSourceLabel(d);
     text = `${src} ✓`;
   } else if (d.available) {
-    text = 'Time unsynced';
+    text = 'Time unsynced ↻';
   } else {
     text = 'No sync';
   }

@@ -6,6 +6,7 @@
 //	GET  /api/config  — current config JSON.
 //	POST /api/config  — replace config; persists to disk + signals reload.
 //	GET  /api/status  — DB path, size, buffered rows, GPS fix state, clock health.
+//	POST /api/clock/resync — light chronyc reselect or full chronyd+gpsd restart.
 //	POST /api/compass/align — capture sensor→vehicle alignment (manual or GPS taxi).
 //	POST /api/airspeed/zero — average pitot ΔP over 15s and save as zero offset.
 //	GET  /terminal — browser shell (opt-in via config terminal.enabled).
@@ -75,6 +76,7 @@ type Server struct {
 	pod     *pod.Client
 	reg     *sensors.Registry
 	compass derive.CompassAligner
+	nudger  *clock.AutoNudger
 
 	tpl        *template.Template
 	devWebRoot string // non-empty: serve static/templates from disk each request
@@ -87,7 +89,7 @@ type Server struct {
 // on disk (parent of static/ and templates/). UI assets are read on each
 // request with Cache-Control: no-cache — no go build/restart needed for CSS/JS
 // edits. Production binaries leave devWebRoot empty and use go:embed instead.
-func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, gpsc *gps.Client, podc *pod.Client, reg *sensors.Registry, compass derive.CompassAligner, devWebRoot string) (*Server, error) {
+func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, gpsc *gps.Client, podc *pod.Client, reg *sensors.Registry, compass derive.CompassAligner, nudger *clock.AutoNudger, devWebRoot string) (*Server, error) {
 	tpl, err := template.ParseFS(assets, "templates/*.html")
 	if err != nil {
 		return nil, err
@@ -107,6 +109,7 @@ func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, 
 		pod:        podc,
 		reg:        reg,
 		compass:    compass,
+		nudger:     nudger,
 		tpl:        tpl,
 		devWebRoot: devWebRoot,
 		up:         websocket.Upgrader{CheckOrigin: sameOriginCheck},
@@ -121,6 +124,7 @@ func (s *Server) Run(addr string, stop <-chan struct{}) error {
 	mux.HandleFunc("/ws", s.handleWS)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/api/clock/resync", s.handleClockResync)
 	mux.HandleFunc("/api/devices", s.handleDevices)
 	mux.HandleFunc("/api/devices/", s.handleDeviceSub)
 	mux.HandleFunc("/api/recording", s.handleRecording)
@@ -282,7 +286,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			gpsView["fix_time_utc"] = fix.Time.UTC().Format(time.RFC3339Nano)
 		}
 		st["gps"] = gpsView
-		st["clock"] = clockStatusView(r.Context(), s.gps.ClockStatus())
+		st["clock"] = clockStatusView(r.Context(), s.gps.ClockStatus(), s.nudger)
 	}
 	if s.pod != nil {
 		st["pod"] = s.pod.LinkStats()
@@ -759,6 +763,52 @@ func (s *Server) handleRecording(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleClockResync(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.nudger == nil {
+		http.Error(w, "clock resync unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		Level string `json:"level"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	level := clock.ResyncLevel(strings.TrimSpace(body.Level))
+	switch level {
+	case clock.ResyncLight, clock.ResyncFull:
+	default:
+		http.Error(w, `level must be "light" or "full"`, http.StatusBadRequest)
+		return
+	}
+	if level == clock.ResyncFull && !clock.HelperInstalled(s.cfg.Get().Clock.ResyncHelper) {
+		http.Error(w, "full resync helper not installed (see deploy/time-sync/verify.md §6)", http.StatusBadRequest)
+		return
+	}
+
+	result := s.nudger.ManualResync(r.Context(), level)
+	out := map[string]any{
+		"level":          result.Level,
+		"synced_after":   result.SyncedAfter,
+		"offset_fixed":   result.OffsetFixed,
+		"before":         disciplineView(result.Before),
+		"after":          disciplineView(result.After),
+		"discipline":     disciplineView(result.After),
+	}
+	if result.Err != "" {
+		out["error"] = result.Err
+	}
+	if s.gps != nil {
+		out["clock"] = clockStatusView(r.Context(), s.gps.ClockStatus(), s.nudger)
+	}
+	writeJSON(w, out)
+}
+
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
@@ -766,7 +816,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = enc.Encode(v)
 }
 
-func clockStatusView(ctx context.Context, st gps.ClockStatus) map[string]any {
+func clockStatusView(ctx context.Context, st gps.ClockStatus, nudger *clock.AutoNudger) map[string]any {
 	disc := clock.QueryDiscipline(ctx)
 
 	out := map[string]any{
@@ -774,6 +824,9 @@ func clockStatusView(ctx context.Context, st gps.ClockStatus) map[string]any {
 		"startup_state":    st.StartupCheck.State,
 		"discipline":       disciplineView(disc),
 		"gps_check":        gpsCrosscheckView(st),
+	}
+	if nudger != nil {
+		out["resync"] = resyncView(nudger.State(time.Now()))
 	}
 	if !st.StartupCheck.CheckedAt.IsZero() {
 		out["startup_checked_at_utc"] = st.StartupCheck.CheckedAt.UTC().Format(time.RFC3339Nano)
@@ -798,11 +851,47 @@ func disciplineView(disc clock.DisciplineStatus) map[string]any {
 		"pps_present":  disc.PPSPresent,
 		"pps_steering": disc.PPSSteering,
 	}
+	if disc.GPSState != "" {
+		v["gps_state"] = disc.GPSState
+	}
+	if disc.PPSState != "" {
+		v["pps_state"] = disc.PPSState
+	}
+	if disc.GPSOffsetMs != 0 || disc.GPSState != "" {
+		v["gps_offset_ms"] = disc.GPSOffsetMs
+	}
+	if disc.PPSOffsetMs != 0 || disc.PPSState != "" {
+		v["pps_offset_ms"] = disc.PPSOffsetMs
+	}
 	if disc.LastOffset != 0 || disc.Synced {
 		v["last_offset_ns"] = disc.LastOffset.Nanoseconds()
 	}
 	if disc.RMSOffset != 0 || disc.Synced {
 		v["rms_offset_ns"] = disc.RMSOffset.Nanoseconds()
+	}
+	return v
+}
+
+func resyncView(st clock.NudgeState) map[string]any {
+	v := map[string]any{
+		"auto_enabled":    st.AutoEnabled,
+		"attempt_count":   st.AttemptCount,
+		"max_attempts":    st.MaxAttempts,
+		"full_available":  st.FullAvailable,
+		"cooldown_s":      st.Cooldown.Seconds(),
+	}
+	if st.LastResult != "" {
+		v["last_result"] = st.LastResult
+	}
+	if !st.LastAttempt.IsZero() {
+		v["last_attempt_utc"] = st.LastAttempt.UTC().Format(time.RFC3339)
+	}
+	if !st.NextEligibleAt.IsZero() {
+		remain := time.Until(st.NextEligibleAt).Seconds()
+		if remain < 0 {
+			remain = 0
+		}
+		v["next_auto_eligible_s"] = remain
 	}
 	return v
 }
@@ -837,6 +926,12 @@ func clockDetailTooltip(disc clock.DisciplineStatus, st gps.ClockStatus) string 
 		}
 	} else if disc.Available {
 		parts = append(parts, "chrony is not synchronized to a time reference.")
+		if disc.PPSPresent && !disc.PPSSteering && disc.PPSState == clock.SourceStateError {
+			parts = append(parts, "PPS is present but marked in error (often waiting on GPS lock).")
+		}
+		if disc.GPSState == clock.SourceStateError && disc.GPSOffsetMs != 0 {
+			parts = append(parts, fmt.Sprintf("GPS refclock offset %.0f ms — may need ground offset retune if persistent.", disc.GPSOffsetMs))
+		}
 	} else {
 		parts = append(parts, "chrony status unavailable.")
 	}
