@@ -203,7 +203,8 @@ Pre-condition: Pi WiFi AP running; `~/.config/kingfisher/config.json`
 ### BQ27441 gauge learning
 
 Design capacity (`pod.battery_capacity_mah`, default **850**) is a **config write** to
-the gauge (ITPOR / `SetAttr`). **Impedance Track learning** (Qmax, resistance profile)
+the gauge (ITPOR / `SetAttr`). Each battery telemetry frame includes **0x3C** so the
+Pi Settings field tracks the chip. **Impedance Track learning** (Qmax, resistance profile)
 happens separately during real charge/discharge at representative load — the ROM
 gauge does not need a BQStudio “golden image” cycle.
 
@@ -218,9 +219,10 @@ gauge does not need a BQStudio “golden image” cycle.
 One or two such cycles is usually enough. After that, partial cycles maintain
 accuracy; repeat a full anchor cycle every few months or after long storage.
 
-**Pass criteria:** serial `bq27441 design capacity programmed 850 mAh`; kingfisher
-`battery_gauge_learned` and `battery_capacity_full_mah` within ~±15% of design; SOC
-tracks voltage sensibly on the next partial cycle.
+**Pass criteria:** serial `bq27441 design capacity programmed 850 mAh` (data memory
+`DesignCapacity` at 0x3C, not learned `FullChargeCapacity` at 0x0E); kingfisher
+`battery_gauge_learned` and `battery_capacity_full_mah` within ~±15% of design after
+Impedance Track cycles; SOC tracks voltage sensibly on the next partial cycle.
 
 **Cell note:** a single deep discharge to ~3.1 V loaded is unlikely to harm the pack
 if it charges normally afterward, but it adds wear without much extra gauge benefit.
