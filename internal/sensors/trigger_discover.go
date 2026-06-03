@@ -2,8 +2,11 @@ package sensors
 
 import (
 	"fmt"
+	"log"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -50,8 +53,34 @@ func usesHWFIFOBuffer(kernelName string) bool {
 	return strings.HasPrefix(low, "icm45686")
 }
 
+// snapSamplingFrequency picks the nearest rate from sampling_frequency_available
+// and returns the exact sysfs token so the driver accepts the write.
+func snapSamplingFrequency(hz float64, available string) (token string, snappedHz float64, err error) {
+	if hz <= 0 {
+		return "", 0, fmt.Errorf("sensors: snap sampling_frequency: hz must be > 0")
+	}
+	bestDiff := math.MaxFloat64
+	for _, tok := range strings.Fields(available) {
+		v, perr := strconv.ParseFloat(tok, 64)
+		if perr != nil || v <= 0 {
+			continue
+		}
+		diff := math.Abs(v - hz)
+		if diff < bestDiff {
+			bestDiff = diff
+			token = tok
+			snappedHz = v
+		}
+	}
+	if token == "" {
+		return "", 0, fmt.Errorf("sensors: snap sampling_frequency: no rates in %q", available)
+	}
+	return token, snappedHz, nil
+}
+
 // syncDeviceSamplingHz aligns the chip ODR with kingfisher's buffered publish
-// rate so FIFO watermark IRQs fire near the requested sample_hz.
+// rate so FIFO watermark IRQs fire near the requested sample_hz. The inv driver
+// only accepts discrete ODR values from sampling_frequency_available.
 func syncDeviceSamplingHz(r *iioReader, hz float64) error {
 	if hz <= 0 || !usesHWFIFOBuffer(r.Name()) {
 		return nil
@@ -59,5 +88,17 @@ func syncDeviceSamplingHz(r *iioReader, hz float64) error {
 	if !r.WritableAttr("", "sampling_frequency") {
 		return nil
 	}
-	return r.SetChannelAttr("", "sampling_frequency", fmt.Sprintf("%.0f", hz))
+	avail, err := r.Attr("sampling_frequency_available")
+	if err != nil {
+		return fmt.Errorf("sampling_frequency_available: %w", err)
+	}
+	token, snapped, err := snapSamplingFrequency(hz, avail)
+	if err != nil {
+		return err
+	}
+	if math.Abs(snapped-hz) > 1e-9 {
+		log.Printf("sensors: %s: sample_hz %.4g -> chip sampling_frequency %s",
+			r.Name(), hz, token)
+	}
+	return r.SetChannelAttr("", "sampling_frequency", token)
 }
