@@ -3,17 +3,19 @@
 // Glass-cockpit layout for an in-flight glance: a big magnetic-heading
 // number on top, an SVG attitude indicator in the centre, and IAS / ALT
 // "tapes" on the flanks. The number the eye lands on is always a large,
-// static centre box; the tape context labels around it are dim and only
-// relabel when the rounded value changes (a dead-band), so nothing slews
-// or jitters in turbulence. The DB still records every raw sample — all
-// smoothing here is presentation-only.
+// static centre box; TAS sits smaller under IAS and VSI smaller under ALT.
+// The tape context labels are dim and only relabel when the rounded value
+// changes (a dead-band), so nothing slews or jitters in turbulence. The DB
+// still records every raw sample — all smoothing here is presentation-only.
 //
 // Static DOM is built once (mount); each WS tick only mutates text and the
 // horizon transform. Sources: ahrs(roll,pitch), compass(heading_mag_deg /
-// heading_sensor_deg + align_active), airspeed(ias_kt), press_alt
-// (indicated_alt_ft / pressure_alt_ft), gps(vs). Each sub-panel carries a
-// data-device attribute so the shared markStaleness pass dims it when its
-// source goes quiet. Absent/NaN sources render "—", never a bogus 0.
+// heading_sensor_deg + align_active), airspeed(ias_kt, tas_kt), press_alt
+// (indicated_alt_ft / pressure_alt_ft, vs_ms). VSI prefers baro vs_ms
+// (responsive, no GPS pipeline lag) and falls back to gps(vs); the unit
+// label and the staleness data-device follow the source actually used.
+// Each sub-panel carries a data-device attribute so the shared markStaleness
+// pass dims it when its source goes quiet. Absent/NaN sources render "—".
 //
 // SAFETY: the attitude indicator and pre-align heading are TREND/awareness
 // aids stamped at compute time (see docs/timestamps.md), NOT certified
@@ -26,7 +28,7 @@ const KFPFD = (function () {
   // Smoothed/last-shown state across ticks (single PFD instance). The
   // *Txt fields cache the last rendered string so every readout follows
   // the same dead-band discipline (only touch the DOM on a real change).
-  const s = { roll: null, pitch: null, hdg: null, ias: null, alt: null, rpTxt: null, flagTxt: null, vsiTxt: null };
+  const s = { roll: null, pitch: null, hdg: null, ias: null, alt: null, rpTxt: null, flagTxt: null, vsiTxt: null, tasTxt: null, vsiSrc: null };
 
   function num(sample, ch) {
     const v = sample?.values?.[ch];
@@ -57,12 +59,13 @@ const KFPFD = (function () {
           `<div class="pfd-hdg-flag" data-pfd-hdg-flag></div>` +
         `</div>` +
         `<div class="pfd-mid">` +
-          // IAS tape
+          // IAS tape (TAS shown smaller, below the IAS box)
           `<div class="pfd-tape" data-device="airspeed">` +
             `<div class="pfd-tape-lbl">IAS kt</div>` +
             `<div class="pfd-tick" data-pfd-ias-hi>—</div>` +
             `<div class="pfd-box" data-pfd-ias>—</div>` +
             `<div class="pfd-tick" data-pfd-ias-lo>—</div>` +
+            `<div class="pfd-sub"><span data-pfd-tas>—</span> <span class="pfd-sub-unit">TAS</span></div>` +
           `</div>` +
           // Attitude indicator
           `<div class="pfd-ai" data-device="ahrs">` +
@@ -95,16 +98,16 @@ const KFPFD = (function () {
             `</svg>` +
             `<div class="pfd-rp" data-pfd-rp>—</div>` +
           `</div>` +
-          // ALT tape
+          // ALT tape (VSI shown smaller, below the ALT box)
           `<div class="pfd-tape" data-device="press_alt">` +
             `<div class="pfd-tape-lbl">ALT ft</div>` +
             `<div class="pfd-tick" data-pfd-alt-hi>—</div>` +
             `<div class="pfd-box" data-pfd-alt>—</div>` +
             `<div class="pfd-tick" data-pfd-alt-lo>—</div>` +
+            `<div class="pfd-sub" data-pfd-vsi-wrap><span data-pfd-vsi>—</span> <span class="pfd-sub-unit" data-pfd-vsi-src>fpm</span></div>` +
           `</div>` +
         `</div>` +
         `<div class="pfd-foot">` +
-          `<span class="pfd-vsi" data-device="gps"><span class="pfd-lbl">VSI</span> <span data-pfd-vsi>—</span> <span class="dim">fpm (GPS)</span></span>` +
           `<span class="pfd-caption dim">AHRS trend — not for primary nav</span>` +
         `</div>` +
       `</div>`;
@@ -135,8 +138,15 @@ const KFPFD = (function () {
       s.flagTxt = flagTxt;
     }
 
-    // ---- IAS tape ----
+    // ---- IAS tape (+ TAS below) ----
     setTape(root, 'ias', num(src.airspeed, 'ias_kt'), 1, 10, (v) => String(v));
+    const tasEl = root.querySelector('[data-pfd-tas]');
+    const tas = num(src.airspeed, 'tas_kt');
+    const tasTxt = tas == null ? '—' : String(Math.round(tas));
+    if (tasEl && s.tasTxt !== tasTxt) {
+      tasEl.textContent = tasTxt;
+      s.tasTxt = tasTxt;
+    }
 
     // ---- ALT tape (indicated preferred, pressure-alt fallback) ----
     let alt = num(src.pressAlt, 'indicated_alt_ft');
@@ -175,19 +185,34 @@ const KFPFD = (function () {
       s.rpTxt = rpTxt;
     }
 
-    // ---- VSI (GPS-derived trend) ----
+    // ---- VSI: prefer baro (responsive, no GPS pipeline lag) over GPS ----
     const vsiEl = root.querySelector('[data-pfd-vsi]');
-    const vs = num(src.gps, 'vs');
+    const vsiWrap = root.querySelector('[data-pfd-vsi-wrap]');
+    const vsiSrcEl = root.querySelector('[data-pfd-vsi-src]');
+    let vsMs = num(src.pressAlt, 'vs_ms');
+    let vsiSrc = 'baro';
+    if (vsMs == null) {
+      vsMs = num(src.gps, 'vs');
+      vsiSrc = 'gps';
+    }
     let vsiTxt;
-    if (vs == null) {
+    if (vsMs == null) {
       vsiTxt = '—';
+      vsiSrc = null;
     } else {
-      const fpm = Math.round(vs * MPS_TO_FPM / 10) * 10;
+      const fpm = Math.round(vsMs * MPS_TO_FPM / 10) * 10;
       vsiTxt = (fpm > 0 ? '+' : '') + fpm.toLocaleString('en-US');
     }
     if (vsiEl && s.vsiTxt !== vsiTxt) {
       vsiEl.textContent = vsiTxt;
       s.vsiTxt = vsiTxt;
+    }
+    if (s.vsiSrc !== vsiSrc) {
+      // Label the source and point staleness at whichever device feeds it
+      // (baro=press_alt, gps=gps) so a frozen source dims this readout.
+      if (vsiSrcEl) vsiSrcEl.textContent = vsiSrc === 'gps' ? 'fpm (GPS)' : 'fpm';
+      if (vsiWrap) vsiWrap.dataset.device = vsiSrc === 'gps' ? 'gps' : 'press_alt';
+      s.vsiSrc = vsiSrc;
     }
   }
 

@@ -1061,20 +1061,32 @@ dialog textarea {
   margin-top: 0.25rem;
 }
 
-.pfd-foot {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.pfd-vsi {
+/* Secondary readout under a tape's hero box: TAS under IAS, VSI under ALT.
+ * Smaller than the box, tabular so a sign/width change can't shift layout. */
+.pfd-sub {
   font-size: var(--ov-name);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  margin-top: 0.15rem;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.pfd-sub-unit {
+  font-size: var(--ov-label);
+  font-weight: 400;
+  color: var(--dim);
+}
+
+/* Footer holds only the static safety caption now — centred, no wrap-jump. */
+.pfd-foot {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
 }
 
 .pfd-caption {
   font-size: var(--ov-label);
+  text-align: center;
 }
