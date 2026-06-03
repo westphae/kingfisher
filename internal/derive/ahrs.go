@@ -9,17 +9,24 @@ import (
 
 	"github.com/westphae/goflying/ahrs"
 
+	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/gps"
 	"github.com/westphae/kingfisher/internal/live"
 	"github.com/westphae/kingfisher/internal/store"
 )
+
+// ahrsMagMaxAgeNs is how stale a magnetometer sample may be before AHRS
+// stops fusing it. Without this, a dropped pod link (frozen pod-mag sample
+// in the hub, which never evicts) would silently lock the fused heading to
+// a stale magnetic reference while accel/gyro keep updating.
+const ahrsMagMaxAgeNs = int64(2 * time.Second)
 
 // AHRSFromHub builds AHRS Measurements from the latest IMU + GPS samples at
 // rateHz and publishes attitude on the "ahrs" virtual device. Angles are
 // degrees (roll, pitch, yaw from mag+IMU fusion — not a raw sensor channel).
 // The simple AHRS implementation is chosen because it has the smallest
 // dependency surface; the Kalman variants can be swapped in later.
-func AHRSFromHub(ctx context.Context, rateHz float64, hub *live.Hub, gpsc *gps.Client, buf *store.Buffer) {
+func AHRSFromHub(ctx context.Context, holder *config.Holder, rateHz float64, hub *live.Hub, gpsc *gps.Client, buf *store.Buffer) {
 	if rateHz <= 0 {
 		rateHz = 20
 	}
@@ -33,7 +40,12 @@ func AHRSFromHub(ctx context.Context, rateHz float64, hub *live.Hub, gpsc *gps.C
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			m, magSrc := buildMeasurement(hub.SnapshotNow(), gpsc.LastFix())
+			var magCfg *config.Compass
+			if holder != nil {
+				c := holder.Get()
+				magCfg = &c.Compass
+			}
+			m, magSrc := buildMeasurement(hub.SnapshotNow(), gpsc.LastFix(), magCfg)
 			if magSrc != lastMagSrc {
 				if magSrc == "" {
 					log.Print("ahrs: no mag source — running attitude-only")
@@ -79,7 +91,9 @@ func radToDeg(r float64) float64 { return r * 180.0 / math.Pi }
 // (anything with accel + gyro channels) and a GPS fix. Returns nil if
 // neither is available. magSrc names the device whose magnetometer was
 // used (empty if none was found) so callers can log the active wiring.
-func buildMeasurement(snap live.Snapshot, fix gps.Fix) (*ahrs.Measurement, string) {
+// magCfg supplies the sensor→fuselage mount rotation for a cross-device
+// (pod) magnetometer; may be nil.
+func buildMeasurement(snap live.Snapshot, fix gps.Fix, magCfg *config.Compass) (*ahrs.Measurement, string) {
 	m := ahrs.NewMeasurement()
 	m.T = float64(snap.ServerTsNs) / 1e9
 
@@ -111,17 +125,36 @@ func buildMeasurement(snap live.Snapshot, fix gps.Fix) (*ahrs.Measurement, strin
 			m.B2 = radToDeg(gy)
 			m.B3 = radToDeg(gz)
 		}
-		// Magnetometer first try the IMU device itself (single-chip
-		// IMU+mag), then fall back to any mag-bearing device in the
-		// snapshot (cabin IMU + pod MMC5983 split).
+		// Magnetometer. First try the IMU device itself (single-chip
+		// IMU+mag): it is already in the IMU/body frame, so it is used
+		// raw — applying a mount rotation here would desync it from the
+		// co-located accel/gyro. Otherwise fall back to any mag-bearing
+		// device (cabin IMU + pod MMC5983 split) and bring it into the
+		// fuselage frame with the SAME mount/Z-inversion correction the
+		// compass path uses; fusing a raw pod-axis mag against cabin-frame
+		// accel/gyro yields a wrong heading. Either source is rejected if
+		// its sample is stale (a frozen pod-mag must not lock the heading).
 		if v, ok := extractMag(imu.Values); ok {
-			m.M1, m.M2, m.M3 = v.X, v.Y, v.Z
-			m.MValid = true
-			magSrc = imuName
+			if snap.ServerTsNs-imu.TsNs <= ahrsMagMaxAgeNs {
+				m.M1, m.M2, m.M3 = v.X, v.Y, v.Z
+				m.MValid = true
+				magSrc = imuName
+			} else {
+				magSrc = imuName + " (stale)"
+			}
 		} else if name, v, ok := pickMag(snap, ""); ok {
-			m.M1, m.M2, m.M3 = v.X, v.Y, v.Z
-			m.MValid = true
-			magSrc = name
+			magTsNs := int64(0)
+			if msm, ok := snap.Devices[name]; ok {
+				magTsNs = msm.TsNs
+			}
+			if snap.ServerTsNs-magTsNs <= ahrsMagMaxAgeNs {
+				cv := applySensorMount(magCfg, name, v)
+				m.M1, m.M2, m.M3 = cv.X, cv.Y, cv.Z
+				m.MValid = true
+				magSrc = name
+			} else {
+				magSrc = name + " (stale)"
+			}
 		}
 	}
 

@@ -32,7 +32,14 @@ import (
 // should not take down the flight recorder mid-flight — the other
 // workers keep recording. The panicking worker still exits; we don't try
 // to restart it because its state may be unsafe to reuse.
-func safeGo(wg *sync.WaitGroup, name string, st *store.Store, fn func()) {
+//
+// critical workers are the exception: hub and store_buffer have no
+// redundancy and their silent death turns the recorder into a zombie that
+// looks alive (green UI) while recording nothing or freezing the live feed.
+// For those, after logging+recording the panic we os.Exit(1) so the
+// supervisor (systemd) restarts the process onto a fresh flight DB — a
+// clean crash is strictly better than a silent zombie for a data recorder.
+func safeGo(wg *sync.WaitGroup, name string, critical bool, st *store.Store, fn func()) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -41,6 +48,10 @@ func safeGo(wg *sync.WaitGroup, name string, st *store.Store, fn func()) {
 				log.Printf("PANIC in %s: %v\n%s", name, r, debug.Stack())
 				if st != nil {
 					_ = st.SetMeta("panic_"+name, fmt.Sprintf("%v", r))
+				}
+				if critical {
+					log.Printf("FATAL: critical worker %s died; exiting for supervisor restart", name)
+					os.Exit(1)
 				}
 			}
 		}()
@@ -170,20 +181,23 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
-	safeGo(&wg, "hub", st, func() { hub.Run(stop) })
-	safeGo(&wg, "store_buffer", st, func() { buf.Run(stop) })
-	safeGo(&wg, "gps", st, func() { gpsClient.Run(stop) })
+	// hub and store_buffer are critical: their silent death zombifies the
+	// recorder, so a panic there is fatal (systemd restarts). All others
+	// are isolated — losing one source/derived stream still records the rest.
+	safeGo(&wg, "hub", true, st, func() { hub.Run(stop) })
+	safeGo(&wg, "store_buffer", true, st, func() { buf.Run(stop) })
+	safeGo(&wg, "gps", false, st, func() { gpsClient.Run(stop) })
 	if podClient != nil {
-		safeGo(&wg, "pod", st, func() { podClient.Run(stop) })
+		safeGo(&wg, "pod", false, st, func() { podClient.Run(stop) })
 	}
-	safeGo(&wg, "derive_altitude", st, func() { derive.AltitudeFromHub(ctx, holder, hub, buf, st) })
-	safeGo(&wg, "derive_airspeed", st, func() { derive.AirspeedFromHub(ctx, holder, hub, buf) })
-	safeGo(&wg, "derive_declination", st, func() { derive.DeclinationFromGPS(ctx, gpsClient, hub, buf) })
+	safeGo(&wg, "derive_altitude", false, st, func() { derive.AltitudeFromHub(ctx, holder, hub, buf, st) })
+	safeGo(&wg, "derive_airspeed", false, st, func() { derive.AirspeedFromHub(ctx, holder, hub, buf) })
+	safeGo(&wg, "derive_declination", false, st, func() { derive.DeclinationFromGPS(ctx, gpsClient, hub, buf) })
 	if cfg.AHRS.Enabled {
-		safeGo(&wg, "derive_ahrs", st, func() { derive.AHRSFromHub(ctx, cfg.AHRS.RateHz, hub, gpsClient, buf) })
+		safeGo(&wg, "derive_ahrs", false, st, func() { derive.AHRSFromHub(ctx, holder, cfg.AHRS.RateHz, hub, gpsClient, buf) })
 	}
-	safeGo(&wg, "sensors", st, func() { sensors.Run(ctx, holder, readers, hub, buf, st, registry) })
-	safeGo(&wg, "web", st, func() {
+	safeGo(&wg, "sensors", false, st, func() { sensors.Run(ctx, holder, readers, hub, buf, st, registry) })
+	safeGo(&wg, "web", false, st, func() {
 		if err := srv.Run(cfg.HTTPAddr, stop); err != nil {
 			log.Printf("web: %v", err)
 		}
