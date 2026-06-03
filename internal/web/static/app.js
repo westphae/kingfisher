@@ -627,6 +627,12 @@ function clockBadgeClass(clock) {
 
 function renderClockStatusFull(el) {
   if (!el) return;
+  if (!state.serverConnected) {
+    el.className = 'clockStatus clockStatus-offline';
+    el.innerHTML = '<span class="clockStatusItem"><span class="lbl">Pi time</span> server offline</span>';
+    el.title = 'No connection to kingfisher';
+    return;
+  }
   const c = state.clock;
   if (!c) {
     el.innerHTML = '';
@@ -659,6 +665,12 @@ function renderClockStatusFull(el) {
 
 function renderPodStatusFull(el) {
   if (!el) return;
+  if (!state.serverConnected) {
+    el.className = 'podStatus podStatus-offline';
+    el.innerHTML = '<span class="dim">Server offline</span>';
+    el.title = 'No connection to kingfisher';
+    return;
+  }
   const p = state.podLink;
   if (!p || !p.enabled) {
     el.innerHTML = '<span class="dim">Pod ingest disabled</span>';
@@ -684,6 +696,9 @@ function renderPodStatusFull(el) {
 }
 
 function compactClockChip() {
+  if (!state.serverConnected) {
+    return '<button type="button" class="statusChip statusChip-offline" data-open-status="clock">Time offline</button>';
+  }
   const c = state.clock;
   if (!c) return '';
   const d = c.discipline || {};
@@ -703,6 +718,9 @@ function compactClockChip() {
 function compactPodChip() {
   const p = state.podLink;
   if (!p || !p.enabled) return '';
+  if (!state.serverConnected) {
+    return '<button type="button" class="statusChip statusChip-offline" data-open-status="pod">Pod offline</button>';
+  }
   const linkCls = !p.connected ? 'off' : ((p.rx_dropped || 0) > 0 ? 'warn' : 'ok');
   let parts = ['Pod'];
   if (p.has_rssi && Number.isFinite(p.rssi_dbm)) {
@@ -859,6 +877,7 @@ function setServerConnected(connected) {
   if (state.serverConnected === connected) return;
   state.serverConnected = connected;
   updateRecordingUI();
+  renderStatusChips();
 }
 
 function updateRecordingUI() {
@@ -933,6 +952,7 @@ async function refreshStatus() {
     const r = await fetch('/api/status');
     if (!r.ok) {
       setServerConnected(false);
+      renderStatusChips();
       return;
     }
     setServerConnected(true);
@@ -955,6 +975,7 @@ async function refreshStatus() {
     renderStatusChips();
   } catch {
     setServerConnected(false);
+    renderStatusChips();
   }
 }
 
@@ -1065,6 +1086,7 @@ document.getElementById('cfgSave')?.addEventListener('click', async (e) => {
 
 (async function init() {
   updateRecordingUI();
+  renderStatusChips();
   await loadConfig();
   if (window.KF_INITIAL_DEVICES) {
     for (const d of window.KF_INITIAL_DEVICES) ensureDevice(d);

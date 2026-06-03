@@ -162,6 +162,13 @@ body {
   background: rgba(255, 92, 92, 0.1);
 }
 
+.statusChip-offline {
+  border-color: var(--border);
+  background: var(--panel);
+  color: var(--dim);
+  cursor: default;
+}
+
 /* Status drawer (full detail) */
 .clockStatus,
 .podStatus {
@@ -182,6 +189,11 @@ body {
 .podStatus.podStatus-off { color: var(--rec); }
 
 .clockStatusItem .lbl,
+.clockStatus-offline,
+.podStatus-offline {
+  color: var(--dim);
+}
+
 .podStatusItem .lbl { color: var(--dim); margin-right: 0.25rem; }
 
 .clockSource {
