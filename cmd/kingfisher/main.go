@@ -136,6 +136,13 @@ func main() {
 
 	gpsClient := gps.New(cfg.GPSDAddr, hub, buf, func() float64 { return holder.Get().GPS.RateHz }, startupClock)
 
+	autoNudger := clock.NewAutoNudger(
+		func() config.Clock { return holder.Get().Clock },
+		func() string { return holder.Get().Clock.ResyncHelper },
+		func() gps.ClockStatus { return gpsClient.ClockStatus() },
+		st,
+	)
+
 	var podClient *pod.Client
 	podAddr := cfg.PodListenAddr()
 	if podAddr != "" {
@@ -175,7 +182,7 @@ func main() {
 		}
 	}
 
-	srv, err := web.New(holder, hub, st, buf, gpsClient, podClient, registry, compassEngine, devRoot)
+	srv, err := web.New(holder, hub, st, buf, gpsClient, podClient, registry, compassEngine, autoNudger, devRoot)
 	if err != nil {
 		log.Fatalf("web: %v", err)
 	}
@@ -187,6 +194,7 @@ func main() {
 	safeGo(&wg, "hub", true, st, func() { hub.Run(stop) })
 	safeGo(&wg, "store_buffer", true, st, func() { buf.Run(stop) })
 	safeGo(&wg, "gps", false, st, func() { gpsClient.Run(stop) })
+	safeGo(&wg, "clock_auto_nudge", false, st, func() { autoNudger.Run(ctx, stop) })
 	if podClient != nil {
 		safeGo(&wg, "pod", false, st, func() { podClient.Run(stop) })
 	}
