@@ -25,6 +25,7 @@ const statusChipsEl = document.getElementById('statusChips');
 const hdrTailEl = document.getElementById('hdrTail');
 const recDotEl = document.getElementById('recDot');
 const recSizeEl = document.getElementById('recSize');
+const recLabelEl = document.getElementById('recLabel');
 const recBlockEl = document.querySelector('#hdr .rec');
 const pauseBtn = document.getElementById('pauseBtn');
 const menuBtn = document.getElementById('menuBtn');
@@ -883,8 +884,9 @@ function setServerConnected(connected) {
 function updateRecordingUI() {
   if (!state.serverConnected) {
     if (recBlockEl) recBlockEl.classList.add('rec-offline');
+    if (recBlockEl) recBlockEl.classList.remove('rec-error');
     if (recDotEl) {
-      recDotEl.classList.remove('live', 'paused');
+      recDotEl.classList.remove('live', 'paused', 'degraded');
       recDotEl.classList.add('offline');
     }
     if (pauseBtn) {
@@ -895,14 +897,29 @@ function updateRecordingUI() {
   }
   if (recBlockEl) recBlockEl.classList.remove('rec-offline');
   if (recDotEl) recDotEl.classList.remove('offline');
+  const degraded = !!(state.recording && state.recording.degraded);
+  if (recBlockEl) recBlockEl.classList.toggle('rec-error', degraded);
+  if (recDotEl) recDotEl.classList.toggle('degraded', degraded);
   if (pauseBtn) {
     pauseBtn.disabled = false;
     pauseBtn.textContent = state.paused ? '▶' : '⏸';
     pauseBtn.title = state.paused ? 'Resume recording' : 'Pause recording';
   }
   if (recDotEl) {
-    recDotEl.classList.toggle('paused', state.paused);
-    recDotEl.classList.toggle('live', !state.paused);
+    recDotEl.classList.toggle('paused', state.paused && !degraded);
+    recDotEl.classList.toggle('live', !state.paused && !degraded);
+  }
+  if (recLabelEl) {
+    if (degraded) {
+      const e = state.recording && state.recording.last_error ? ` (${state.recording.last_error})` : '';
+      recLabelEl.textContent = `REC ERROR${e}`;
+      recLabelEl.title = `${state.recording.consecutive_failures} consecutive flush failures${e}`;
+      recLabelEl.hidden = false;
+    } else {
+      recLabelEl.textContent = '';
+      recLabelEl.title = '';
+      recLabelEl.hidden = true;
+    }
   }
 }
 
@@ -970,6 +987,8 @@ async function refreshStatus() {
     if (moreBufStatEl) moreBufStatEl.textContent = bufText;
     if (s.aircraft && hdrTailEl) hdrTailEl.textContent = s.aircraft;
     if (typeof s.recording_paused === 'boolean') setPausedUI(s.recording_paused);
+    state.recording = s.recording || null;
+    updateRecordingUI();
     state.podLink = s.pod || null;
     state.clock = s.clock || null;
     renderStatusChips();

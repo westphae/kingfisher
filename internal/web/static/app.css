@@ -101,12 +101,20 @@ body {
 }
 
 #hdr .rec.rec-offline { color: var(--dim); font-weight: 500; }
+#hdr .rec.rec-error { color: #ff7ce0; font-weight: 700; }
 #hdr #recDot.live { animation: pulse 1.6s infinite; }
 #hdr #recDot.paused,
 #hdr #recDot.offline { animation: none; color: var(--dim); }
+#hdr #recDot.degraded { animation: pulse 0.8s infinite; color: #ff7ce0; }
 
 .recSize {
   font-size: var(--ov-label);
+}
+
+.recLabel {
+  font-size: var(--ov-label);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 @keyframes pulse { 50% { opacity: 0.3; } }

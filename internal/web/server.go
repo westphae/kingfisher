@@ -244,6 +244,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"db_size_bytes":    s.store.Size(),
 		"buffered_rows":    s.buf.BufferedRows(),
 		"recording_paused": s.buf.Paused(),
+		"recording":        s.buf.RecordingState(),
 	}
 	if free, err := s.store.VolumeFreeBytes(); err == nil {
 		st["db_volume_free_bytes"] = free
