@@ -535,7 +535,7 @@ func pickAccel(snap live.Snapshot, want, magDevice string) (field.Vec3, bool) {
 			}
 		}
 	}
-	if imu, ok := findIMU(snap); ok {
+	if _, imu, ok := findIMU(snap); ok {
 		return extractAccel(imu.Values)
 	}
 	return field.Vec3{}, false

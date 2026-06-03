@@ -2,6 +2,7 @@ package derive
 
 import (
 	"context"
+	"log"
 	"math"
 	"strings"
 	"time"
@@ -26,12 +27,21 @@ func AHRSFromHub(ctx context.Context, rateHz float64, hub *live.Hub, gpsc *gps.C
 	interval := time.Duration(float64(time.Second) / rateHz)
 	t := time.NewTicker(interval)
 	defer t.Stop()
+	var lastMagSrc string
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			m := buildMeasurement(hub.SnapshotNow(), gpsc.LastFix())
+			m, magSrc := buildMeasurement(hub.SnapshotNow(), gpsc.LastFix())
+			if magSrc != lastMagSrc {
+				if magSrc == "" {
+					log.Print("ahrs: no mag source — running attitude-only")
+				} else {
+					log.Printf("ahrs: mag source = %s", magSrc)
+				}
+				lastMagSrc = magSrc
+			}
 			if m == nil {
 				continue
 			}
@@ -64,12 +74,15 @@ func radToDeg(r float64) float64 { return r * 180.0 / math.Pi }
 
 // buildMeasurement looks for an IMU-flavoured sample in the snapshot
 // (anything with accel + gyro channels) and a GPS fix. Returns nil if
-// neither is available.
-func buildMeasurement(snap live.Snapshot, fix gps.Fix) *ahrs.Measurement {
+// neither is available. magSrc names the device whose magnetometer was
+// used (empty if none was found) so callers can log the active wiring.
+func buildMeasurement(snap live.Snapshot, fix gps.Fix) (*ahrs.Measurement, string) {
 	m := ahrs.NewMeasurement()
 	m.T = float64(snap.ServerTsNs) / 1e9
 
-	if imu, ok := findIMU(snap); ok {
+	var magSrc string
+	imuName, imu, haveIMU := findIMU(snap)
+	if haveIMU {
 		ax, hasAx := imu.Values["accel_x"]
 		ay, hasAy := imu.Values["accel_y"]
 		az, hasAz := imu.Values["accel_z"]
@@ -95,13 +108,17 @@ func buildMeasurement(snap live.Snapshot, fix gps.Fix) *ahrs.Measurement {
 			m.B2 = radToDeg(gy)
 			m.B3 = radToDeg(gz)
 		}
-		// Magnetometer (optional)
-		mx, hasMx := imu.Values["magn_x"]
-		my, hasMy := imu.Values["magn_y"]
-		mz, hasMz := imu.Values["magn_z"]
-		if hasMx && hasMy && hasMz {
-			m.M1, m.M2, m.M3 = mx, my, mz
+		// Magnetometer first try the IMU device itself (single-chip
+		// IMU+mag), then fall back to any mag-bearing device in the
+		// snapshot (cabin IMU + pod MMC5983 split).
+		if v, ok := extractMag(imu.Values); ok {
+			m.M1, m.M2, m.M3 = v.X, v.Y, v.Z
 			m.MValid = true
+			magSrc = imuName
+		} else if name, v, ok := pickMag(snap, ""); ok {
+			m.M1, m.M2, m.M3 = v.X, v.Y, v.Z
+			m.MValid = true
+			magSrc = name
 		}
 	}
 
@@ -118,7 +135,10 @@ func buildMeasurement(snap live.Snapshot, fix gps.Fix) *ahrs.Measurement {
 			m.TW = m.T
 		}
 	}
-	return m
+	if !haveIMU && !m.WValid {
+		return nil, magSrc
+	}
+	return m, magSrc
 }
 
 func firstFloat(vals map[string]float64, existing float64, has bool, keys ...string) (float64, bool) {
@@ -137,18 +157,21 @@ func degToRad(d float64) float64 { return d * math.Pi / 180.0 }
 
 // findIMU picks the first device whose values look like an IMU (has any
 // accel_* or anglvel_* channel), preferring devices with a known IMU name
-// prefix.
-func findIMU(s live.Snapshot) (live.Sample, bool) {
+// prefix. Returns the chosen device name alongside its sample so callers
+// can log the active wiring or skip self-matches.
+func findIMU(s live.Snapshot) (string, live.Sample, bool) {
 	var best live.Sample
+	bestName := ""
 	bestScore := 0
 	for name, sm := range s.Devices {
 		score := imuScore(name, sm)
 		if score > bestScore {
 			bestScore = score
+			bestName = name
 			best = sm
 		}
 	}
-	return best, bestScore > 0
+	return bestName, best, bestScore > 0
 }
 
 func imuScore(name string, sm live.Sample) int {
