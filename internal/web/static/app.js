@@ -111,6 +111,11 @@ function applyRoute() {
 
 function renderOverview() {
   KFOverview.render(viewOverviewEl, (name) => state.devices.get(name));
+  // The render above rewrites innerHTML, wiping any kf-stale classes the
+  // 1 Hz markStaleness pass applied. Re-apply in the same frame so stale
+  // tiles stay dimmed instead of flickering back to full brightness on
+  // every ~10 Hz WS tick.
+  markStaleness();
 }
 
 let panelRegions = null;
@@ -136,6 +141,11 @@ function openSensorDetail(name) {
   const label = KFDisplay.overviewDeviceName(name);
   detailTitleEl.textContent = loc ? `${label} (${loc})` : label;
   rebuildDetailPanel();
+  // Tag the (persistent) detail container with the source device whose
+  // freshness should dim this view, so markStaleness covers the in-flight
+  // glance tabs (compass/airspeed/any sensor), not just overview tiles.
+  // compass/airspeed are multi-source panels keyed to their derived device.
+  detailPanelEl.dataset.device = name;
   if (name === 'compass') {
     if (!state.attrs.has('compass')) state.attrs.set('compass', []);
   } else if (name === 'airspeed') {
