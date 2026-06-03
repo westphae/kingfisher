@@ -121,6 +121,7 @@ func (e *Engine) rebuildFilter(cfg *config.Config) {
 		kf.SeedKLWithP(cal.K, cal.L, matrixToKalman(cal.P))
 	}
 	e.mu.Lock()
+	wasAligned := e.alignActive
 	e.kf = kf
 	e.prevMode = kf.Mode()
 	if a := c.Align; field.IsValidRot(a.R) {
@@ -140,7 +141,15 @@ func (e *Engine) rebuildFilter(cfg *config.Config) {
 	if m := c.AlignMethod; m == compassAlignWMM || m == compassAlignAccel {
 		e.alignMethod = m
 	}
+	lostAlign := wasAligned && !e.alignActive
 	e.mu.Unlock()
+	// A config reload that drops a previously-learned alignment leaves the
+	// heading on its unaligned sensor value until re-aligned — make that
+	// loud so it isn't discovered silently in flight. (UI already flags
+	// align_active=0; this is the operator-log counterpart.)
+	if lostAlign {
+		log.Print("compass: alignment reset by config change — re-align needed (taxi 2-40 kt or manual)")
+	}
 }
 
 func matrixToKalman(p [][]float64) kalman.Matrix {
