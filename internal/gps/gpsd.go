@@ -94,32 +94,49 @@ func (c *Client) ClockStatus() ClockStatus {
 	return st
 }
 
+// gpsdDialTimeout bounds how long a single Dial may block before we give
+// up and retry. Defensive against shutdown hangs when gpsd is unreachable.
+const gpsdDialTimeout = 5 * time.Second
+
 // Run dials gpsd, watches for reports, and republishes them as live.Samples.
-// Reconnects every 2s on error until stop is closed. Satellite count is
-// refreshed periodically from UBX NAV-PVT via brief gpsd polls when SKY is
-// absent (u-blox native binary mode).
+// Reconnects with exponential backoff (1 s → 30 s) on error until stop is
+// closed; backoff resets after a successful watcher run. Satellite count
+// is refreshed periodically from UBX NAV-PVT via brief gpsd polls when SKY
+// is absent (u-blox native binary mode).
 func (c *Client) Run(stop <-chan struct{}) {
 	go c.pollUBXSats(stop)
+	backoff := time.Second
+	const maxBackoff = 30 * time.Second
 	for {
 		select {
 		case <-stop:
 			return
 		default:
 		}
-		c.connectOnce(stop)
+		ran := c.connectOnce(stop)
+		if ran {
+			backoff = time.Second
+		} else {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
 		select {
 		case <-stop:
 			return
-		case <-time.After(2 * time.Second):
+		case <-time.After(backoff):
 		}
 	}
 }
 
-func (c *Client) connectOnce(stop <-chan struct{}) {
-	s, err := gpsd.Dial(c.addr)
+// connectOnce returns true if the watcher ran (i.e. we connected); false
+// if we never got past Dial. The caller uses that to reset/grow backoff.
+func (c *Client) connectOnce(stop <-chan struct{}) bool {
+	s, err := gpsd.DialTimeout(c.addr, gpsdDialTimeout)
 	if err != nil {
 		log.Printf("gps: dial %s: %v", c.addr, err)
-		return
+		return false
 	}
 	defer s.Close()
 	log.Printf("gps: connected to %s", c.addr)
@@ -148,6 +165,7 @@ func (c *Client) connectOnce(stop <-chan struct{}) {
 		_ = s.Close()
 		<-done
 	}
+	return true
 }
 
 // skipForRate reports whether this TPV should be dropped to honor the
