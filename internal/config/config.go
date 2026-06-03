@@ -53,6 +53,56 @@ type GPS struct {
 	RateHz float64 `json:"rate_hz"`
 }
 
+// Clock configures in-flight chrony recovery (auto reselect + manual helper).
+type Clock struct {
+	AutoResync          *bool  `json:"auto_resync,omitempty"`
+	AutoResyncCooldownS int    `json:"auto_resync_cooldown_s,omitempty"`
+	AutoResyncMaxTries  int    `json:"auto_resync_max_tries,omitempty"`
+	ResyncHelper        string `json:"resync_helper,omitempty"`
+}
+
+const (
+	DefaultAutoResyncCooldownS = 300
+	DefaultAutoResyncMaxTries  = 6
+	DefaultResyncHelper        = "/usr/local/bin/kingfisher-resync-time.sh"
+)
+
+func (c *Clock) AutoResyncEffective() bool {
+	if c == nil || c.AutoResync == nil {
+		return true
+	}
+	return *c.AutoResync
+}
+
+func (c *Clock) AutoResyncCooldownDuration() time.Duration {
+	if c == nil || c.AutoResyncCooldownS <= 0 {
+		return DefaultAutoResyncCooldownS * time.Second
+	}
+	return time.Duration(c.AutoResyncCooldownS) * time.Second
+}
+
+func (c *Clock) AutoResyncMaxAttemptsEffective() int {
+	if c == nil || c.AutoResyncMaxTries <= 0 {
+		return DefaultAutoResyncMaxTries
+	}
+	return c.AutoResyncMaxTries
+}
+
+func MergeClockDefaults(c *Clock) {
+	if c == nil {
+		return
+	}
+	if c.AutoResyncCooldownS <= 0 {
+		c.AutoResyncCooldownS = DefaultAutoResyncCooldownS
+	}
+	if c.AutoResyncMaxTries <= 0 {
+		c.AutoResyncMaxTries = DefaultAutoResyncMaxTries
+	}
+	if strings.TrimSpace(c.ResyncHelper) == "" {
+		c.ResyncHelper = DefaultResyncHelper
+	}
+}
+
 type PressAlt struct {
 	KollsmanInHg float64 `json:"kollsman_inhg"`
 }
@@ -283,6 +333,7 @@ type Config struct {
 	GPSFields  []string          `json:"gps_fields,omitempty"`
 	Devices    map[string]Device `json:"devices,omitempty"`
 	GPS        GPS               `json:"gps"`
+	Clock      Clock             `json:"clock,omitempty"`
 	PressAlt   PressAlt          `json:"press_alt"`
 	Airspeed   Airspeed          `json:"airspeed"`
 	AHRS       AHRS              `json:"ahrs"`
@@ -358,6 +409,12 @@ func Defaults() *Config {
 		},
 		Devices:  map[string]Device{},
 		GPS:      GPS{RateHz: 5},
+		Clock: Clock{
+			AutoResync:          boolPtr(true),
+			AutoResyncCooldownS: DefaultAutoResyncCooldownS,
+			AutoResyncMaxTries:  DefaultAutoResyncMaxTries,
+			ResyncHelper:        DefaultResyncHelper,
+		},
 		PressAlt: PressAlt{KollsmanInHg: DefaultKollsmanInHg},
 		Airspeed: Airspeed{
 			LowSpeedFloorKt: DefaultAirspeedLowSpeedFloorKt,
@@ -513,6 +570,7 @@ func Load(path string) (*Config, error) {
 	MergeCompassKalman(&c.Compass.Kalman)
 	MergeAirspeedDefaults(&c.Airspeed)
 	MergePodDefaults(&c.Pod)
+	MergeClockDefaults(&c.Clock)
 	return c, nil
 }
 
