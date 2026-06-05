@@ -38,7 +38,7 @@ func Open(dir, tail string) (*Store, error) {
 		safeTail = "unknown"
 	}
 	path := filepath.Join(dir, fmt.Sprintf("%s_%s.db", stamp, safeTail))
-	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)")
+	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
