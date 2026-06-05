@@ -529,20 +529,14 @@ func (s *Store) InsertRow(logID string, tsNs int64, values map[string]string) (*
 			colNames = append(colNames, key)
 		}
 	}
-	fieldType := map[string]string{}
-	for _, f := range meta.Fields {
-		key := store.Sanitize(f.Key)
-		if key != "" {
-			fieldType[key] = f.Type
-		}
-	}
+	fieldMeta := fieldByKey(meta.Fields)
 	colList := []string{`"ts_ns"`}
 	placeholders := []string{"?"}
 	args := []any{tsNs}
 	for _, c := range colNames {
 		colList = append(colList, fmt.Sprintf("%q", c))
 		placeholders = append(placeholders, "?")
-		args = append(args, sqlValue(fieldType[c], values[c]))
+		args = append(args, sqlValue(fieldMeta[c], values[c]))
 	}
 	stmt := fmt.Sprintf(`INSERT INTO %q (%s) VALUES (%s)`,
 		meta.TableName, strings.Join(colList, ","), strings.Join(placeholders, ","))
@@ -556,11 +550,13 @@ func (s *Store) InsertRow(logID string, tsNs int64, values map[string]string) (*
 	}
 	outVals := make(map[string]string, len(colNames))
 	for _, c := range colNames {
-		if v, ok := values[c]; ok {
-			outVals[c] = v
-		} else if v, ok := values[unsanitizeKey(meta.Fields, c)]; ok {
-			outVals[c] = v
+		raw := values[c]
+		if raw == "" {
+			if v, ok := values[unsanitizeKey(meta.Fields, c)]; ok {
+				raw = v
+			}
 		}
+		_, outVals[c] = formatCellString(fieldMeta[c], raw)
 	}
 	return &Row{RowID: rid, TsNs: tsNs, Values: outVals}, nil
 }
@@ -574,24 +570,46 @@ func unsanitizeKey(fields []config.HowgozitField, sanitized string) string {
 	return sanitized
 }
 
-func sqlValue(fieldType, s string) any {
+func fieldByKey(fields []config.HowgozitField) map[string]config.HowgozitField {
+	out := make(map[string]config.HowgozitField, len(fields))
+	for _, f := range fields {
+		key := store.Sanitize(f.Key)
+		if key != "" {
+			out[key] = f
+		}
+	}
+	return out
+}
+
+// formatCellString normalizes a manual-log cell for storage/display.
+func formatCellString(f config.HowgozitField, s string) (sql any, stored string) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return nil
+		return nil, ""
 	}
-	switch fieldType {
-	case "text", "select":
-		return s
+	switch f.Type {
+	case "text":
+		if f.Uppercase {
+			s = strings.ToUpper(s)
+		}
+		return s, s
+	case "select":
+		return s, s
 	default:
-		f, err := strconv.ParseFloat(s, 64)
+		v, err := strconv.ParseFloat(s, 64)
 		if err != nil {
-			return nil
+			return nil, ""
 		}
-		if math.IsNaN(f) || math.IsInf(f, 0) {
-			return nil
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return nil, ""
 		}
-		return f
+		return v, s
 	}
+}
+
+func sqlValue(f config.HowgozitField, s string) any {
+	v, _ := formatCellString(f, s)
+	return v
 }
 
 // UpdateRow patches ts_ns and/or field values.
@@ -606,20 +624,14 @@ func (s *Store) UpdateRow(logID string, rowID int64, tsNs *int64, values map[str
 		sets = append(sets, "ts_ns=?")
 		args = append(args, *tsNs)
 	}
-	fieldType := map[string]string{}
-	for _, f := range meta.Fields {
-		key := store.Sanitize(f.Key)
-		if key != "" {
-			fieldType[key] = f.Type
-		}
-	}
+	fieldMeta := fieldByKey(meta.Fields)
 	for k, v := range values {
 		col := store.Sanitize(k)
 		if col == "" || col == "ts_ns" || col == "rowid" {
 			continue
 		}
 		sets = append(sets, fmt.Sprintf("%q=?", col))
-		args = append(args, sqlValue(fieldType[col], v))
+		args = append(args, sqlValue(fieldMeta[col], v))
 	}
 	if len(sets) == 0 {
 		return fmt.Errorf("howgozit: nothing to update")

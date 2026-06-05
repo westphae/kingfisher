@@ -327,6 +327,7 @@ type HowgozitField struct {
 	Unit      string   `json:"unit,omitempty"`
 	Step      string   `json:"step,omitempty"`       // HTML step for number spinners (e.g. "0.01")
 	InputMode string   `json:"input_mode,omitempty"` // decimal, numeric, text
+	Uppercase bool     `json:"uppercase,omitempty"`  // text: store/display as ALL CAPS; ICAO, etc.
 	Options   []string `json:"options,omitempty"`
 }
 
@@ -375,6 +376,23 @@ func DefaultHowgozitTemplates() []HowgozitTemplate {
 				{Key: "kias", Label: "KIAS", Type: "number", Unit: "kt"},
 				{Key: "ktas", Label: "KTAS", Type: "number", Unit: "kt"},
 				{Key: "kgs", Label: "KGS", Type: "number", Unit: "kt"},
+			},
+		},
+		{
+			ID:   "atis",
+			Name: "ATIS",
+			Fields: []HowgozitField{
+				{Key: "airport", Label: "Airport", Type: "text", Uppercase: true},
+				{Key: "information", Label: "Information", Type: "text", Uppercase: true},
+				{Key: "time", Label: "Time", Type: "number", Unit: "Z", Step: "1", InputMode: "numeric"},
+				{Key: "wind", Label: "Wind", Type: "text"},
+				{Key: "visibility", Label: "Visibility", Type: "number", Unit: "sm", Step: "1", InputMode: "numeric"},
+				{Key: "weather", Label: "Weather", Type: "text"},
+				{Key: "sky", Label: "Sky Condition", Type: "text"},
+				{Key: "temperature", Label: "Temperature", Type: "number", Unit: "C", Step: "1", InputMode: "numeric"},
+				{Key: "dewpoint", Label: "Dewpoint", Type: "number", Unit: "C", Step: "1", InputMode: "numeric"},
+				{Key: "altimeter", Label: "Altimeter", Type: "number", Unit: "inHg", Step: "0.01", InputMode: "decimal"},
+				{Key: "rmk", Label: "Remark", Type: "text"},
 			},
 		},
 	}

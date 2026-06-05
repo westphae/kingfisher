@@ -130,13 +130,13 @@ var KFHowgozit = (function () {
       renderTabs();
       await loadRows();
       renderRows();
-    });
+    }, { stableKey: 'logId', slop: 12 });
 
     KFTap.bindPress(document, '[data-hgz-add-row]', () => addRow());
     KFTap.bindPress(document, '.hgz-row-card', (ev, card) => {
       if (ev.target.closest('[data-del-row], .hgz-delBtn')) return;
       openRowDialog(Number(card.dataset.rowid));
-    });
+    }, { stableKey: 'rowid', slop: 12 });
     KFTap.bindPress(document, '[data-del-row]', (ev, btn) => deleteRow(Number(btn.dataset.delRow)));
 
     KFTap.bindPress(document, '[data-pick-new]', () => {
@@ -252,7 +252,28 @@ var KFHowgozit = (function () {
     if (f.step) out.step = f.step;
     if (inputMode) out.input_mode = inputMode;
     if (f.options?.length) out.options = [...f.options];
+    if (f.uppercase) out.uppercase = true;
     return out;
+  }
+
+  function lookupField(log, key) {
+    return fieldsForLog(log).find((f) => f.key === key) || null;
+  }
+
+  function normalizeFieldValue(val, field) {
+    if (val == null || !field?.uppercase) return val;
+    return String(val).toUpperCase();
+  }
+
+  function applyUppercaseInput(inp) {
+    if (!inp?.dataset?.uppercase) return;
+    const start = inp.selectionStart;
+    const end = inp.selectionEnd;
+    const upper = inp.value.toUpperCase();
+    if (upper !== inp.value) {
+      inp.value = upper;
+      if (start != null && end != null) inp.setSelectionRange(start, end);
+    }
   }
 
   function syncRowAddFieldPanelType() {
@@ -265,6 +286,8 @@ var KFHowgozit = (function () {
     }
     const unitEl = ui.rowAddFieldPanel.querySelector('[data-hgz-add-field-unit]');
     if (unitEl) unitEl.hidden = type === 'select';
+    const textEl = ui.rowAddFieldPanel.querySelector('[data-hgz-add-field-text]');
+    if (textEl) textEl.hidden = type !== 'text';
     const optEl = ui.rowAddFieldPanel.querySelector('[data-hgz-add-field-select]');
     if (optEl) optEl.hidden = type !== 'select';
   }
@@ -282,15 +305,17 @@ var KFHowgozit = (function () {
     const stepInp = ui.rowAddFieldPanel.querySelector('[data-hgz-af-step]');
     const modeSel = ui.rowAddFieldPanel.querySelector('[data-hgz-af-input-mode]');
     const optInp = ui.rowAddFieldPanel.querySelector('[data-hgz-af-options]');
+    const upperInp = ui.rowAddFieldPanel.querySelector('[data-hgz-af-uppercase]');
     if (labelInp) labelInp.value = '';
     if (typeSel) typeSel.value = 'number';
     if (unitInp) unitInp.value = '';
     if (stepInp) stepInp.value = '';
     if (modeSel) modeSel.value = 'decimal';
     if (optInp) optInp.value = '';
+    if (upperInp) upperInp.checked = false;
     syncRowAddFieldPanelType();
     ui.rowAddFieldPanel.hidden = false;
-    labelInp?.focus({ preventScroll: true });
+    KFTap.focusFormControl(labelInp);
   }
 
   function labelToKey(label) {
@@ -337,6 +362,9 @@ var KFHowgozit = (function () {
       if (field.options.length === 0) {
         throw new Error('Select fields need at least one option (comma-separated).');
       }
+    }
+    if (type === 'text' && ui.rowAddFieldPanel.querySelector('[data-hgz-af-uppercase]')?.checked) {
+      field.uppercase = true;
     }
     return field;
   }
@@ -444,6 +472,11 @@ var KFHowgozit = (function () {
     return f.unit ? `${f.label} (${f.unit})` : f.label;
   }
 
+  function textFieldAttrs(field) {
+    if (!field.uppercase) return ' inputmode="text"';
+    return ' inputmode="text" autocapitalize="characters" autocorrect="off" spellcheck="false"';
+  }
+
   function fieldInputHtml(rowid, field, val, prefilled) {
     const pf = prefilled ? ' hgz-prefill' : '';
     const rid = ` data-rowid="${rowid}"`;
@@ -461,12 +494,15 @@ var KFHowgozit = (function () {
     if (kind === 'number') {
       return `<input class="hgz-row-input${pf}"${rid}${df} value="${escapeHtml(val)}"${numberFieldAttrs(field)}${ph} />`;
     }
-    return `<input type="text" class="hgz-row-input${pf}"${rid}${df} value="${escapeHtml(val)}" inputmode="text"${ph} />`;
+    const upperCls = field.uppercase ? ' hgz-upper' : '';
+    const upperData = field.uppercase ? ' data-uppercase="1"' : '';
+    const displayVal = normalizeFieldValue(val, field) ?? val;
+    return `<input type="text" class="hgz-row-input${upperCls}${pf}"${rid}${df}${upperData} value="${escapeHtml(displayVal)}"${textFieldAttrs(field)}${ph} />`;
   }
 
   function formatFieldDisplay(val, field) {
     if (val == null || String(val).trim() === '') return null;
-    const s = String(val);
+    const s = String(normalizeFieldValue(val, field));
     return field.unit ? `${s} ${field.unit}` : s;
   }
 
@@ -501,9 +537,10 @@ var KFHowgozit = (function () {
         const val = row.values?.[f.key];
         const display = formatFieldDisplay(val, f);
         const emptyCls = display ? '' : ' hgz-empty-val';
+        const upperCls = f.uppercase ? ' hgz-upper' : '';
         const text = display || '—';
         html += `<div class="hgz-field-line"><span class="lbl">${escapeHtml(f.label)}</span>`;
-        html += `<span class="val${emptyCls}">${escapeHtml(text)}</span></div>`;
+        html += `<span class="val${emptyCls}${upperCls}">${escapeHtml(text)}</span></div>`;
       }
       html += `</div></div>`;
     }
@@ -512,7 +549,10 @@ var KFHowgozit = (function () {
 
   function wireRowInputs(container) {
     for (const inp of container.querySelectorAll('.hgz-row-input')) {
-      const handler = () => onCellEdit(inp);
+      const handler = () => {
+        applyUppercaseInput(inp);
+        onCellEdit(inp);
+      };
       inp.addEventListener('input', handler);
       inp.addEventListener('change', handler);
       inp.addEventListener('focus', () => {
@@ -559,7 +599,7 @@ var KFHowgozit = (function () {
     if (focusFieldKey) {
       requestAnimationFrame(() => {
         const focusEl = fieldsEl.querySelector(`[data-field="${CSS.escape(focusFieldKey)}"]`);
-        focusEl?.focus({ preventScroll: true });
+        KFTap.focusFormControl(focusEl);
       });
     }
   }
@@ -581,7 +621,7 @@ var KFHowgozit = (function () {
       const fieldsEl = ui.rowDlg.querySelector('[data-hgz-row-fields]');
       const firstEmpty = fieldsEl?.querySelector('.hgz-row-input:not(.hgz-row-input-time)');
       const focusEl = firstEmpty && !firstEmpty.value ? firstEmpty : fieldsEl?.querySelector('.hgz-row-input');
-      focusEl?.focus({ preventScroll: true });
+      KFTap.focusFormControl(focusEl);
     });
   }
 
@@ -677,12 +717,13 @@ var KFHowgozit = (function () {
       return;
     }
 
-    const val = inp.value;
+    const val = normalizeFieldValue(inp.value, lookupField(log, field));
+    if (inp.value !== val) inp.value = val ?? '';
     if (row.values == null) row.values = {};
-    row.values[field] = val;
+    row.values[field] = val ?? '';
     try {
       await api('PATCH', `/logs/${encodeURIComponent(log.log_id)}/rows/${rowid}`, {
-        values: { [field]: val },
+        values: { [field]: val ?? '' },
       });
     } catch (e) {
       console.error('howgozit patch', e);
@@ -780,8 +821,15 @@ var KFHowgozit = (function () {
     if (field.type === 'select') {
       const raw = rowEl.querySelector('[data-f-options]')?.value || '';
       field.options = raw.split(',').map((s) => s.trim()).filter(Boolean);
+      delete field.uppercase;
     } else {
       delete field.options;
+    }
+    if (field.type === 'text') {
+      if (rowEl.querySelector('[data-f-uppercase]')?.checked) field.uppercase = true;
+      else delete field.uppercase;
+    } else {
+      delete field.uppercase;
     }
     if (!field.unit) delete field.unit;
     if (!field.step) delete field.step;
@@ -846,6 +894,7 @@ var KFHowgozit = (function () {
         `<label>Step <input data-f-step value="${escapeHtml(f.step || '')}" autocomplete="off" placeholder="e.g. 0.01" /></label>` +
         `<label>Input mode <select data-f-input-mode>${imOpts}</select></label>` +
         `<label data-f-options-row${fieldType === 'select' ? '' : ' hidden'}>Options <input data-f-options value="${escapeHtml(optionsVal)}" autocomplete="off" placeholder="comma-separated" /></label>` +
+        `<label data-f-uppercase-row${fieldType === 'text' ? '' : ' hidden'} class="cfgCheckbox"><input type="checkbox" data-f-uppercase${f.uppercase ? ' checked' : ''} /> Uppercase</label>` +
         `</div></div>`;
     });
     list.innerHTML = html;
@@ -854,7 +903,9 @@ var KFHowgozit = (function () {
       sel.addEventListener('change', () => {
         const row = sel.closest('[data-hgz-field-row]');
         const optRow = row?.querySelector('[data-f-options-row]');
+        const upperRow = row?.querySelector('[data-f-uppercase-row]');
         if (optRow) optRow.hidden = sel.value !== 'select';
+        if (upperRow) upperRow.hidden = sel.value !== 'text';
       });
     });
   }
@@ -879,7 +930,9 @@ var KFHowgozit = (function () {
     }
     const typeSel = form?.querySelector('[name="new_type"]');
     const optRow = form?.querySelector('[data-hgz-edit-new-options]');
+    const upperRow = form?.querySelector('[data-hgz-edit-new-uppercase]');
     if (typeSel && optRow) optRow.hidden = typeSel.value !== 'select';
+    if (typeSel && upperRow) upperRow.hidden = typeSel.value !== 'text';
     renderEditFields();
     ui.editDlg.showModal();
   }
@@ -903,6 +956,9 @@ var KFHowgozit = (function () {
     if (field.type === 'select') {
       const raw = String(form.querySelector('[name="new_options"]')?.value || '');
       field.options = raw.split(',').map((s) => s.trim()).filter(Boolean);
+    }
+    if (field.type === 'text' && form.querySelector('[name="new_uppercase"]')?.checked) {
+      field.uppercase = true;
     }
     if (!field.unit) delete field.unit;
     if (!field.step) delete field.step;
@@ -937,8 +993,10 @@ var KFHowgozit = (function () {
 
     const typeSel = form.querySelector('[name="new_type"]');
     const optRow = form.querySelector('[data-hgz-edit-new-options]');
+    const upperRow = form.querySelector('[data-hgz-edit-new-uppercase]');
     typeSel?.addEventListener('change', () => {
       if (optRow) optRow.hidden = typeSel.value !== 'select';
+      if (upperRow) upperRow.hidden = typeSel.value !== 'text';
     });
 
     form.addEventListener('submit', (ev) => {

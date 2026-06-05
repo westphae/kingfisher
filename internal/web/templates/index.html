@@ -117,6 +117,7 @@
           <label>Step <input name="new_step" autocomplete="off" placeholder="e.g. 0.01" /></label>
           <label>Input mode <select name="new_input_mode"><option value="">default</option><option value="decimal">decimal</option><option value="numeric">numeric</option><option value="text">text</option></select></label>
           <label data-hgz-edit-new-options hidden>Options (comma-separated) <input name="new_options" autocomplete="off" /></label>
+          <label data-hgz-edit-new-uppercase hidden class="cfgCheckbox"><input name="new_uppercase" type="checkbox" /> Uppercase (e.g. ICAO)</label>
         </div>
         <button type="button" class="hgz-edit-addBtn" data-hgz-edit-add-col>+ Add column</button>
       </div>
@@ -176,6 +177,10 @@
         <label class="hgz-row-field" data-hgz-add-field-select hidden>
           <span class="hgz-row-label">Options (comma-separated)</span>
           <input type="text" class="hgz-row-input" data-hgz-af-options autocomplete="off" placeholder="L, R, Both" />
+        </label>
+        <label class="hgz-row-field" data-hgz-add-field-text hidden>
+          <span class="hgz-row-label">Text options</span>
+          <label class="cfgCheckbox"><input type="checkbox" data-hgz-af-uppercase /> Uppercase (e.g. ICAO)</label>
         </label>
         <div class="hgz-row-add-field-actions">
           <button type="button" class="hgz-row-add-field-cancel" data-hgz-row-add-field-cancel>Cancel</button>

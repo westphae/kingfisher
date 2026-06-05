@@ -151,7 +151,10 @@ func TestAddFieldConcurrentSensorFlush(t *testing.T) {
 	buf := store.NewBuffer(st, 10*time.Millisecond)
 	stop := make(chan struct{})
 	go buf.Run(stop)
-	defer close(stop)
+	defer func() {
+		close(stop)
+		time.Sleep(30 * time.Millisecond)
+	}()
 
 	hs := howgozit.NewStore(st)
 	meta, err := hs.CreateLog("Test", nil, "", "")
@@ -209,6 +212,23 @@ func TestGetLogNormalizesLegacyDecimalType(t *testing.T) {
 	}
 	if got.Fields[0].InputMode != "decimal" {
 		t.Fatalf("input_mode: got %q want decimal", got.Fields[0].InputMode)
+	}
+}
+
+func TestInsertRowUppercaseText(t *testing.T) {
+	_, hs := openTestStore(t)
+	meta, err := hs.CreateLog("ATIS", []config.HowgozitField{
+		{Key: "airport", Label: "Airport", Type: "text", Uppercase: true},
+	}, "", "atis")
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := hs.InsertRow(meta.LogID, time.Now().UnixNano(), map[string]string{"airport": "klax"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Values["airport"] != "KLAX" {
+		t.Fatalf("airport: got %q want KLAX", row.Values["airport"])
 	}
 }
 
