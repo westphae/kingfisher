@@ -21,6 +21,7 @@ fusion — especially GPS.
 | **`gps`** | Pi wall clock when gpsd TPV is **received** | Fix computed ~600–700 ms earlier (see below) | Fix epoch stored separately as **`fix_time_unix_s`** |
 | Pod sensors (`bmp581`, `mmc5983`, `ms4525`, …) | Sample time reconstructed on Pi clock | Pod `uptime − age_us`, mapped via EMA sync | UDP / batch jitter adds uncertainty |
 | Derived (`ahrs`, `press_alt`, `geo`, `compass`) | `time.Now()` when value is **computed** | Inputs may be tens of ms older | Not the timestamp of fused inputs |
+| **Howgozit** (`hgz_*` tables) | `time.Now()` when the pilot taps **+** (editable) | User may backdate via time cell | Manual annotations; join to sensors on `ts_ns` |
 | `sensor_attrs` | When the attr snapshot was logged | N/A (configuration, not a sample) | |
 | `_session.start_time`, DB filename | Pi wall clock at session open | N/A | |
 
@@ -168,6 +169,25 @@ header for live discipline.
    raw IMU/GPS/mag with their own `ts_ns`.
 6. **Pod vs cabin IMU** — Both on Pi clock after mapping; allow small offset
    and interpolate; pod adds link jitter.
+
+## Howgozit manual logs
+
+Pilot-entered rows live in per-log tables named `hgz_<log_id>` (registry in
+`howgozit_log`). Each row has **`ts_ns`** set at row creation (Pi wall clock)
+and custom REAL/TEXT columns from templates in `config.json` (`howgozit`).
+
+To annotate sensor data with a manual entry, join on Pi time — for example,
+nearest sensor sample within a window:
+
+```sql
+SELECT s.*, h.*
+FROM icm20948 s
+JOIN hgz_flight_conditions h
+  ON ABS(s.ts_ns - h.ts_ns) < 500000000;  -- 500 ms
+```
+
+Schema snapshots are stored in `howgozit_log.schema_json` so exported DBs
+remain self-describing if templates change later.
 
 ## Related docs
 
