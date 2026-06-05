@@ -319,6 +319,91 @@ func (c *Config) PodSettingsDevice() Device {
 	return Device{Enabled: enabled, Attrs: attrs}
 }
 
+// HowgozitField is one column in a manual log template or flight log schema.
+type HowgozitField struct {
+	Key       string   `json:"key"`
+	Label     string   `json:"label"`
+	Type      string   `json:"type"` // number, text, select
+	Unit      string   `json:"unit,omitempty"`
+	Step      string   `json:"step,omitempty"`       // HTML step for number spinners (e.g. "0.01")
+	InputMode string   `json:"input_mode,omitempty"` // decimal, numeric, text
+	Options   []string `json:"options,omitempty"`
+}
+
+// HowgozitTemplate is a reusable schema for in-flight manual logs.
+type HowgozitTemplate struct {
+	ID     string          `json:"id"`
+	Name   string          `json:"name"`
+	Fields []HowgozitField `json:"fields"`
+}
+
+// Howgozit configures manual log templates (seeds for + Log). Flight logs live in the DB only.
+type Howgozit struct {
+	Templates  []HowgozitTemplate `json:"templates,omitempty"`
+	ActiveLogs []string           `json:"active_logs,omitempty"` // deprecated; ignored
+}
+
+// DefaultHowgozitTemplates returns the built-in ATC Radio and Flight Conditions schemas.
+func DefaultHowgozitTemplates() []HowgozitTemplate {
+	return []HowgozitTemplate{
+		{
+			ID:   "atc_radio",
+			Name: "ATC Radio",
+			Fields: []HowgozitField{
+				{Key: "freq_mhz", Label: "Freq", Type: "number", Unit: "MHz"},
+				{Key: "facility", Label: "Facility", Type: "text"},
+				{Key: "baro_inhg", Label: "Baro", Type: "number", Unit: "inHg", Step: "0.01"},
+			},
+		},
+		{
+			ID:   "flight_conditions",
+			Name: "Flight Conditions",
+			Fields: []HowgozitField{
+				{Key: "fuel_used_gal", Label: "Fuel used", Type: "number", Unit: "gal"},
+				{Key: "fuel_t1_gal", Label: "T1", Type: "number", Unit: "gal"},
+				{Key: "fuel_t2_gal", Label: "T2", Type: "number", Unit: "gal"},
+				{Key: "fuel_t3_gal", Label: "T3", Type: "number", Unit: "gal"},
+				{Key: "fuel_t4_gal", Label: "T4", Type: "number", Unit: "gal"},
+				{Key: "fuel_sel", Label: "Sel", Type: "select", Options: []string{"1", "2", "3", "4"}},
+				{Key: "ff_gph", Label: "FF", Type: "number", Unit: "gph"},
+				{Key: "mp_inhg", Label: "MP", Type: "number", Unit: "inHg", Step: "0.01"},
+				{Key: "rpm", Label: "RPM", Type: "number"},
+				{Key: "alt_ft", Label: "Alt", Type: "number", Unit: "ft"},
+				{Key: "baro_inhg", Label: "Baro", Type: "number", Unit: "inHg", Step: "0.01"},
+				{Key: "oat_c", Label: "OAT", Type: "number", Unit: "°C"},
+				{Key: "tit_c", Label: "TIT", Type: "number", Unit: "°C"},
+				{Key: "kias", Label: "KIAS", Type: "number", Unit: "kt"},
+				{Key: "ktas", Label: "KTAS", Type: "number", Unit: "kt"},
+				{Key: "kgs", Label: "KGS", Type: "number", Unit: "kt"},
+			},
+		},
+	}
+}
+
+// MergeHowgozitDefaults fills empty howgozit sections from Defaults().
+func MergeHowgozitDefaults(h *Howgozit) {
+	if h == nil {
+		return
+	}
+	def := Defaults().Howgozit
+	if len(h.Templates) == 0 {
+		h.Templates = append([]HowgozitTemplate(nil), def.Templates...)
+	}
+}
+
+// TemplateByID returns the template with the given id, or nil.
+func (h *Howgozit) TemplateByID(id string) *HowgozitTemplate {
+	if h == nil {
+		return nil
+	}
+	for i := range h.Templates {
+		if h.Templates[i].ID == id {
+			return &h.Templates[i]
+		}
+	}
+	return nil
+}
+
 type Config struct {
 	Aircraft     string `json:"aircraft"`
 	AircraftName string `json:"aircraft_name,omitempty"`
@@ -338,6 +423,7 @@ type Config struct {
 	Airspeed   Airspeed          `json:"airspeed"`
 	AHRS       AHRS              `json:"ahrs"`
 	Compass    Compass           `json:"compass"`
+	Howgozit   Howgozit          `json:"howgozit,omitempty"`
 	Terminal   Terminal          `json:"terminal,omitempty"`
 }
 
@@ -428,6 +514,9 @@ func Defaults() *Config {
 			N0Ut:         DefaultCompassN0Ut,
 			Kalman:       CompassKalmanDefaults(),
 			SensorMountR: map[string][3][3]float64{},
+		},
+		Howgozit: Howgozit{
+			Templates: DefaultHowgozitTemplates(),
 		},
 		Terminal: Terminal{
 			Enabled:           false,
@@ -571,6 +660,7 @@ func Load(path string) (*Config, error) {
 	MergeAirspeedDefaults(&c.Airspeed)
 	MergePodDefaults(&c.Pod)
 	MergeClockDefaults(&c.Clock)
+	MergeHowgozitDefaults(&c.Howgozit)
 	return c, nil
 }
 
