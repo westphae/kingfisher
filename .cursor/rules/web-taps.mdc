@@ -12,8 +12,9 @@ Use `KFTap` from `internal/web/static/tap.js` (loaded before `app.js` / `howgozi
 | Control | API |
 |---------|-----|
 | Buttons, nav, list rows | `KFTap.bindPress(root, selector, handler)` |
+| Live-updating list rows | add `{ stableKey: 'device', slop: 12 }` (matches `data-device` via `dataset.device`) |
 | One-off buttons | `KFTap.bindTap(el, handler)` |
-| Dialog / form field focus | `KFTap.bindFieldFocus(container, fieldSelector, inputSelector)` — focus on `pointerdown` |
+| Dialog / form field focus | `KFTap.bindFieldFocus(container, fieldSelector, inputSelector)` — focus on `pointerdown`; use `KFTap.focusFormControl(el)` for programmatic focus |
 | Dialog Cancel/Close | `KFTap.wireDialogCloses()` at init |
 | Checkboxes in `label.cfgCheckbox` | `KFTap.wireCheckboxLabels()` at init |
 | Dialog Save (async) | `type="button"` + `KFTap.bindPress(form, '[data-…-save]', …)` — not native `type="submit"` |

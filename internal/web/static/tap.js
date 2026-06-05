@@ -24,19 +24,89 @@ const KFTap = (function () {
   }
 
   // pointerdown/up on the same matching element (ignores scroll drags).
-  function bindPress(root, selector, handler) {
+  // options.stableKey — match dataset[stableKey] when live DOM re-renders replace nodes
+  // options.slop — max pointer movement (px) for a tap; default 12 when stableKey set
+  function bindPress(root, selector, handler, options) {
     if (!root) return;
+    const stableKey = options?.stableKey || '';
+    const slop = options?.slop ?? (stableKey ? 12 : 0);
     let downEl = null;
+    let downKey = null;
+    let downX = 0;
+    let downY = 0;
+
+    const clear = () => {
+      downEl = null;
+      downKey = null;
+    };
+
     root.addEventListener('pointerdown', (ev) => {
       downEl = ev.target.closest(selector);
+      if (!downEl) return;
+      downKey = stableKey ? downEl.dataset[stableKey] : null;
+      downX = ev.clientX;
+      downY = ev.clientY;
     });
+
     root.addEventListener('pointerup', (ev) => {
+      if (!downEl) return;
+      if (slop > 0) {
+        const dx = ev.clientX - downX;
+        const dy = ev.clientY - downY;
+        if (dx * dx + dy * dy > slop * slop) {
+          clear();
+          return;
+        }
+      }
       const upEl = ev.target.closest(selector);
-      if (!upEl || upEl !== downEl) return;
+      let match = false;
+      if (stableKey && downKey != null) {
+        const upKey = upEl?.dataset?.[stableKey];
+        match = upKey === downKey || (!upEl && slop > 0);
+      } else {
+        match = upEl === downEl;
+      }
+      if (!match) {
+        clear();
+        return;
+      }
       if (ev.cancelable) ev.preventDefault();
-      handler(ev, upEl);
-      downEl = null;
+      handler(ev, upEl || downEl);
+      clear();
     });
+
+    root.addEventListener('pointercancel', clear);
+  }
+
+  function isFormControl(el) {
+    return (
+      el instanceof HTMLInputElement ||
+      el instanceof HTMLTextAreaElement ||
+      el instanceof HTMLSelectElement
+    );
+  }
+
+  // Blur-then-focus so iOS WebKit picks up inputmode/type when switching fields.
+  function focusFormControl(inp) {
+    if (!inp || inp.disabled) return;
+    if (document.activeElement === inp) return;
+
+    const active = document.activeElement;
+    const switching = isFormControl(active) && active !== inp;
+
+    const apply = () => {
+      if (inp instanceof HTMLInputElement && inp.hasAttribute('inputmode')) {
+        inp.inputMode = inp.getAttribute('inputmode');
+      }
+      inp.focus({ preventScroll: true });
+    };
+
+    if (switching) {
+      active.blur();
+      window.setTimeout(apply, 10);
+    } else {
+      apply();
+    }
   }
 
   // Focus a nested control on pointerdown — iOS WebKit often drops the delayed
@@ -44,12 +114,22 @@ const KFTap = (function () {
   function bindFieldFocus(root, fieldSelector, inputSelector) {
     if (!root || root.dataset.kfFocusWired === '1') return;
     root.dataset.kfFocusWired = '1';
-    root.addEventListener('pointerdown', (ev) => {
-      const field = ev.target.closest(fieldSelector);
-      if (!field) return;
-      const inp = field.querySelector(inputSelector);
-      if (inp && document.activeElement !== inp) inp.focus();
-    });
+    root.addEventListener(
+      'pointerdown',
+      (ev) => {
+        const field = ev.target.closest(fieldSelector);
+        if (!field) return;
+        if (field.classList.contains('cfgCheckbox')) return;
+        if (ev.target.closest('label.cfgCheckbox')) return;
+        if (ev.target.closest('button, a, [role="button"]')) return;
+        const inp = field.querySelector(inputSelector);
+        if (!inp || inp.disabled || inp.type === 'checkbox') return;
+        if (ev.target.closest(inputSelector) === inp && document.activeElement === inp) return;
+        if (inp.tagName !== 'SELECT' && ev.cancelable) ev.preventDefault();
+        focusFormControl(inp);
+      },
+      { passive: false }
+    );
   }
 
   let dialogCloseWired = false;
@@ -69,6 +149,16 @@ const KFTap = (function () {
   function wireCheckboxLabels() {
     if (checkboxWired) return;
     checkboxWired = true;
+    // Block the delayed native click (Mac/desktop) after we toggle on pointerup.
+    document.addEventListener(
+      'click',
+      (ev) => {
+        if (ev.target.closest('label.cfgCheckbox')) {
+          ev.preventDefault();
+        }
+      },
+      true
+    );
     bindPress(document, 'label.cfgCheckbox', (ev, label) => {
       const inp = label.querySelector('input[type="checkbox"]');
       if (!inp || inp.disabled) return;
@@ -78,5 +168,5 @@ const KFTap = (function () {
     });
   }
 
-  return { bindTap, bindPress, bindFieldFocus, wireDialogCloses, wireCheckboxLabels };
+  return { bindTap, bindPress, bindFieldFocus, focusFormControl, wireDialogCloses, wireCheckboxLabels };
 })();

@@ -1441,7 +1441,7 @@ function wireOverviewNav() {
   KFTap.bindPress(viewOverviewEl, '.ovBlock', (ev, block) => {
     const device = block.dataset.device;
     if (device) setRoute(`#/sensor/${encodeURIComponent(device)}`);
-  });
+  }, { stableKey: 'device', slop: 12 });
   viewOverviewEl.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Enter' && ev.key !== ' ') return;
     const block = ev.target.closest('.ovBlock');
