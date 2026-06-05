@@ -16,6 +16,7 @@ var KFHowgozit = (function () {
     editDlg: null,
     toTmplDlg: null,
     rowDlg: null,
+    rowAddFieldPanel: null,
   };
 
   const data = {
@@ -223,6 +224,157 @@ var KFHowgozit = (function () {
     ui.editDlg = document.getElementById('hgzEditDlg');
     ui.toTmplDlg = document.getElementById('hgzToTmplDlg');
     ui.rowDlg = document.getElementById('hgzRowDlg');
+    ui.rowAddFieldPanel = ui.rowDlg?.querySelector('[data-hgz-row-add-field-panel]');
+  }
+
+  function normalizeFieldType(raw) {
+    const t = String(raw ?? '').trim().toLowerCase();
+    if (t === 'decimal' || t === 'numeric') return 'number';
+    if (t === 'text' || t === 'select' || t === 'number') return t;
+    return 'number';
+  }
+
+  function legacyInputMode(field) {
+    const raw = String(field?.type ?? '').trim().toLowerCase();
+    if ((raw === 'decimal' || raw === 'numeric') && !field.input_mode) return raw;
+    return field.input_mode || '';
+  }
+
+  function cloneField(f) {
+    const type = normalizeFieldType(f.type);
+    const out = {
+      key: f.key,
+      label: f.label,
+      type,
+    };
+    const inputMode = legacyInputMode(f);
+    if (f.unit) out.unit = f.unit;
+    if (f.step) out.step = f.step;
+    if (inputMode) out.input_mode = inputMode;
+    if (f.options?.length) out.options = [...f.options];
+    return out;
+  }
+
+  function syncRowAddFieldPanelType() {
+    if (!ui.rowAddFieldPanel) return;
+    const typeSel = ui.rowAddFieldPanel.querySelector('[data-hgz-af-type]');
+    const type = normalizeFieldType(typeSel?.value);
+    if (typeSel && typeSel.value !== type) typeSel.value = type;
+    for (const el of ui.rowAddFieldPanel.querySelectorAll('[data-hgz-add-field-number]')) {
+      el.hidden = type !== 'number';
+    }
+    const unitEl = ui.rowAddFieldPanel.querySelector('[data-hgz-add-field-unit]');
+    if (unitEl) unitEl.hidden = type === 'select';
+    const optEl = ui.rowAddFieldPanel.querySelector('[data-hgz-add-field-select]');
+    if (optEl) optEl.hidden = type !== 'select';
+  }
+
+  function hideRowAddFieldPanel() {
+    if (!ui.rowAddFieldPanel) return;
+    ui.rowAddFieldPanel.hidden = true;
+  }
+
+  function showRowAddFieldPanel() {
+    if (!ui.rowAddFieldPanel) return;
+    const labelInp = ui.rowAddFieldPanel.querySelector('[data-hgz-af-label]');
+    const typeSel = ui.rowAddFieldPanel.querySelector('[data-hgz-af-type]');
+    const unitInp = ui.rowAddFieldPanel.querySelector('[data-hgz-af-unit]');
+    const stepInp = ui.rowAddFieldPanel.querySelector('[data-hgz-af-step]');
+    const modeSel = ui.rowAddFieldPanel.querySelector('[data-hgz-af-input-mode]');
+    const optInp = ui.rowAddFieldPanel.querySelector('[data-hgz-af-options]');
+    if (labelInp) labelInp.value = '';
+    if (typeSel) typeSel.value = 'number';
+    if (unitInp) unitInp.value = '';
+    if (stepInp) stepInp.value = '';
+    if (modeSel) modeSel.value = 'decimal';
+    if (optInp) optInp.value = '';
+    syncRowAddFieldPanelType();
+    ui.rowAddFieldPanel.hidden = false;
+    labelInp?.focus({ preventScroll: true });
+  }
+
+  function labelToKey(label) {
+    const key = String(label)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    if (!key) throw new Error('Label required.');
+    return key;
+  }
+
+  function uniqueFieldKey(base, fields) {
+    const used = new Set((fields || []).map((f) => f.key));
+    if (!used.has(base)) return base;
+    for (let n = 2; n < 1000; n++) {
+      const candidate = `${base}_${n}`;
+      if (!used.has(candidate)) return candidate;
+    }
+    throw new Error('Could not allocate a unique field key.');
+  }
+
+  function parseRowAddFieldPanel() {
+    if (!ui.rowAddFieldPanel) throw new Error('Add field form missing.');
+    const label = ui.rowAddFieldPanel.querySelector('[data-hgz-af-label]')?.value?.trim();
+    if (!label) throw new Error('Label required.');
+    const type = normalizeFieldType(ui.rowAddFieldPanel.querySelector('[data-hgz-af-type]')?.value);
+    const field = {
+      key: '',
+      label,
+      type,
+    };
+    const unit = ui.rowAddFieldPanel.querySelector('[data-hgz-af-unit]')?.value?.trim() || '';
+    if (unit && type !== 'select') field.unit = unit;
+    if (type === 'number') {
+      const step = ui.rowAddFieldPanel.querySelector('[data-hgz-af-step]')?.value?.trim() || '';
+      const input_mode = ui.rowAddFieldPanel.querySelector('[data-hgz-af-input-mode]')?.value?.trim() || '';
+      if (step) field.step = step;
+      if (input_mode) field.input_mode = input_mode;
+    }
+    if (type === 'select') {
+      const raw = ui.rowAddFieldPanel.querySelector('[data-hgz-af-options]')?.value || '';
+      field.options = raw.split(',').map((s) => s.trim()).filter(Boolean);
+      if (field.options.length === 0) {
+        throw new Error('Select fields need at least one option (comma-separated).');
+      }
+    }
+    return field;
+  }
+
+  async function flushRowDialogPatches() {
+    if (!ui.rowDlg || rowEditId == null) return;
+    const rowid = rowEditId;
+    const inputs = [...ui.rowDlg.querySelectorAll('.hgz-row-input[data-field]')];
+    for (const inp of inputs) {
+      const key = `${rowid}:${inp.dataset.field}`;
+      if (patchTimers.has(key)) {
+        clearTimeout(patchTimers.get(key));
+        patchTimers.delete(key);
+      }
+    }
+    await Promise.all(inputs.map((inp) => patchCell(rowid, inp.dataset.field, inp)));
+  }
+
+  async function saveRowAddField() {
+    const log = activeLog();
+    if (!log || rowEditId == null || !ui.rowAddFieldPanel) return;
+    await flushRowDialogPatches();
+    let field;
+    try {
+      field = parseRowAddFieldPanel();
+      field.key = uniqueFieldKey(labelToKey(field.label), log.fields);
+    } catch (e) {
+      alert(e.message);
+      return;
+    }
+    try {
+      const meta = await api('PATCH', `/logs/${encodeURIComponent(log.log_id)}/schema`, { field });
+      syncLogMeta(meta);
+      hideRowAddFieldPanel();
+      renderRowDialogFields(rowEditId, field.key);
+    } catch (e) {
+      alert('Add field failed: ' + e.message);
+    }
   }
 
   async function loadAll() {
@@ -373,18 +525,14 @@ var KFHowgozit = (function () {
     }
   }
 
-  function openRowDialog(rowid) {
-    if (!ui.rowDlg) ui.rowDlg = document.getElementById('hgzRowDlg');
+  function renderRowDialogFields(rowid, focusFieldKey) {
     const log = activeLog();
     const rid = Number(rowid);
     const row = data.rows.find((r) => Number(r.rowid) === rid);
     if (!log || !row || !ui.rowDlg) return;
-    rowEditId = rid;
-    const fields = fieldsForLog(log);
-    const prefilled = data.prefill.get(rowid) || new Set();
-    const titleEl = ui.rowDlg.querySelector('[data-hgz-row-title]');
-    if (titleEl) titleEl.textContent = log.display_name || 'Entry';
 
+    const fields = fieldsForLog(log);
+    const prefilled = data.prefill.get(rid) || new Set();
     const fieldsEl = ui.rowDlg.querySelector('[data-hgz-row-fields]');
     if (!fieldsEl) return;
 
@@ -393,12 +541,8 @@ var KFHowgozit = (function () {
     html +=
       `<label class="hgz-row-field">` +
       `<span class="hgz-row-label">Time (HH:MM)</span>` +
-      `<input type="text" class="hgz-row-input hgz-row-input-time${timePrefill ? ' hgz-prefill' : ''}" data-rowid="${rowid}" data-field="__time__" value="${escapeHtml(formatTime(row.ts_ns))}" inputmode="numeric" placeholder="21:15" />` +
+      `<input type="text" class="hgz-row-input hgz-row-input-time${timePrefill ? ' hgz-prefill' : ''}" data-rowid="${rid}" data-field="__time__" value="${escapeHtml(formatTime(row.ts_ns))}" inputmode="numeric" placeholder="21:15" />` +
       `</label>`;
-
-    if (fields.length === 0) {
-      html += '<p class="hgz-empty hgz-row-no-cols">No columns yet — close and tap <strong>Edit</strong> to add fields.</p>';
-    }
 
     for (const f of fields) {
       const val = row.values?.[f.key] ?? '';
@@ -406,21 +550,44 @@ var KFHowgozit = (function () {
       html +=
         `<label class="hgz-row-field">` +
         `<span class="hgz-row-label">${escapeHtml(fieldLabel(f))}</span>` +
-        fieldInputHtml(rowid, f, val, isPrefill) +
+        fieldInputHtml(rid, f, val, isPrefill) +
         `</label>`;
     }
     fieldsEl.innerHTML = html;
     wireRowInputs(fieldsEl);
+
+    if (focusFieldKey) {
+      requestAnimationFrame(() => {
+        const focusEl = fieldsEl.querySelector(`[data-field="${CSS.escape(focusFieldKey)}"]`);
+        focusEl?.focus({ preventScroll: true });
+      });
+    }
+  }
+
+  function openRowDialog(rowid) {
+    if (!ui.rowDlg) ui.rowDlg = document.getElementById('hgzRowDlg');
+    const log = activeLog();
+    const rid = Number(rowid);
+    const row = data.rows.find((r) => Number(r.rowid) === rid);
+    if (!log || !row || !ui.rowDlg) return;
+    rowEditId = rid;
+    hideRowAddFieldPanel();
+    const titleEl = ui.rowDlg.querySelector('[data-hgz-row-title]');
+    if (titleEl) titleEl.textContent = log.display_name || 'Entry';
+
+    renderRowDialogFields(rid);
     ui.rowDlg.showModal();
     requestAnimationFrame(() => {
-      const firstEmpty = fieldsEl.querySelector('.hgz-row-input:not(.hgz-row-input-time)');
-      const focusEl = firstEmpty && !firstEmpty.value ? firstEmpty : fieldsEl.querySelector('.hgz-row-input');
+      const fieldsEl = ui.rowDlg.querySelector('[data-hgz-row-fields]');
+      const firstEmpty = fieldsEl?.querySelector('.hgz-row-input:not(.hgz-row-input-time)');
+      const focusEl = firstEmpty && !firstEmpty.value ? firstEmpty : fieldsEl?.querySelector('.hgz-row-input');
       focusEl?.focus({ preventScroll: true });
     });
   }
 
   function closeRowDialog() {
     if (!ui.rowDlg?.open) return;
+    hideRowAddFieldPanel();
     for (const inp of ui.rowDlg.querySelectorAll('.hgz-row-input')) {
       flushPatch(inp, true);
     }
@@ -432,6 +599,14 @@ var KFHowgozit = (function () {
     ui.rowDlg.dataset.wired = '1';
     const fieldsEl = ui.rowDlg.querySelector('[data-hgz-row-fields]');
     KFTap.bindFieldFocus(fieldsEl, '.hgz-row-field', '.hgz-row-input');
+    if (ui.rowAddFieldPanel) {
+      KFTap.bindFieldFocus(ui.rowAddFieldPanel, '.hgz-row-field', '.hgz-row-input');
+      const typeSel = ui.rowAddFieldPanel.querySelector('[data-hgz-af-type]');
+      if (typeSel && !typeSel.dataset.wired) {
+        typeSel.dataset.wired = '1';
+        typeSel.addEventListener('change', syncRowAddFieldPanelType);
+      }
+    }
     KFTap.bindPress(ui.rowDlg, '[data-hgz-row-done]', () => closeRowDialog());
     KFTap.bindPress(ui.rowDlg, '[data-hgz-row-del]', async () => {
       if (rowEditId == null) return;
@@ -439,12 +614,16 @@ var KFHowgozit = (function () {
       closeRowDialog();
       await deleteRow(id);
     });
+    KFTap.bindPress(ui.rowDlg, '[data-hgz-row-add-field]', () => showRowAddFieldPanel());
+    KFTap.bindPress(ui.rowDlg, '[data-hgz-row-add-field-cancel]', () => hideRowAddFieldPanel());
+    KFTap.bindPress(ui.rowDlg, '[data-hgz-row-add-field-save]', () => void saveRowAddField());
     ui.rowDlg.addEventListener('cancel', (ev) => {
       ev.preventDefault();
       closeRowDialog();
     });
     ui.rowDlg.addEventListener('close', () => {
       rowEditId = null;
+      hideRowAddFieldPanel();
       renderRows();
     });
   }
@@ -590,19 +769,6 @@ var KFHowgozit = (function () {
     }
   }
 
-  function cloneField(f) {
-    const out = {
-      key: f.key,
-      label: f.label,
-      type: f.type || 'number',
-    };
-    if (f.unit) out.unit = f.unit;
-    if (f.step) out.step = f.step;
-    if (f.input_mode) out.input_mode = f.input_mode;
-    if (f.options?.length) out.options = [...f.options];
-    return out;
-  }
-
   function fieldFromDraftRow(rowEl) {
     const idx = Number(rowEl.dataset.fieldIdx);
     const field = { ...editDraft.fields[idx] };
@@ -651,13 +817,15 @@ var KFHowgozit = (function () {
     let html = '';
     editDraft.fields.forEach((f, idx) => {
       const isExisting = editOriginalKeys.has(f.key);
+      const fieldType = normalizeFieldType(f.type);
       const typeOpts = ['number', 'text', 'select']
-        .map((t) => `<option value="${t}"${f.type === t ? ' selected' : ''}>${t}</option>`)
+        .map((t) => `<option value="${t}"${fieldType === t ? ' selected' : ''}>${t}</option>`)
         .join('');
+      const inputMode = legacyInputMode(f);
       const imOpts = ['', 'decimal', 'numeric', 'text']
         .map((t) => {
           const label = t || 'default';
-          const sel = (f.input_mode || '') === t ? ' selected' : '';
+          const sel = inputMode === t ? ' selected' : '';
           return `<option value="${t}"${sel}>${label}</option>`;
         })
         .join('');
@@ -677,7 +845,7 @@ var KFHowgozit = (function () {
         `<label>Unit <input data-f-unit value="${escapeHtml(f.unit || '')}" autocomplete="off" placeholder="optional" /></label>` +
         `<label>Step <input data-f-step value="${escapeHtml(f.step || '')}" autocomplete="off" placeholder="e.g. 0.01" /></label>` +
         `<label>Input mode <select data-f-input-mode>${imOpts}</select></label>` +
-        `<label data-f-options-row${f.type === 'select' ? '' : ' hidden'}>Options <input data-f-options value="${escapeHtml(optionsVal)}" autocomplete="off" placeholder="comma-separated" /></label>` +
+        `<label data-f-options-row${fieldType === 'select' ? '' : ' hidden'}>Options <input data-f-options value="${escapeHtml(optionsVal)}" autocomplete="off" placeholder="comma-separated" /></label>` +
         `</div></div>`;
     });
     list.innerHTML = html;
@@ -742,6 +910,26 @@ var KFHowgozit = (function () {
     return field;
   }
 
+  async function submitEditForm() {
+    if (!editDraft) return;
+    syncDraftFromDom();
+    const body = {
+      display_name: editDraft.display_name,
+      fields: editDraft.fields.map(cloneField),
+    };
+    try {
+      const meta = await api('PUT', `/logs/${encodeURIComponent(editDraft.log_id)}`, body);
+      syncLogMeta(meta);
+      editDraft = null;
+      ui.editDlg.close();
+      await loadRows();
+      renderTabs();
+      renderRows();
+    } catch (e) {
+      alert('Save failed: ' + e.message);
+    }
+  }
+
   function wireEditForm() {
     const form = document.getElementById('hgzEditForm');
     if (!form || form.dataset.wired) return;
@@ -753,26 +941,11 @@ var KFHowgozit = (function () {
       if (optRow) optRow.hidden = typeSel.value !== 'select';
     });
 
-    form.addEventListener('submit', async (ev) => {
+    form.addEventListener('submit', (ev) => {
       ev.preventDefault();
-      if (!editDraft) return;
-      syncDraftFromDom();
-      const body = {
-        display_name: editDraft.display_name,
-        fields: editDraft.fields.map(cloneField),
-      };
-      try {
-        const meta = await api('PUT', `/logs/${encodeURIComponent(editDraft.log_id)}`, body);
-        syncLogMeta(meta);
-        editDraft = null;
-        ui.editDlg.close();
-        await loadRows();
-        renderTabs();
-        renderRows();
-      } catch (e) {
-        alert('Save failed: ' + e.message);
-      }
+      void submitEditForm();
     });
+    KFTap.bindPress(form, '[data-hgz-edit-save]', () => void submitEditForm());
   }
 
   function openToTemplateDialog() {
@@ -789,29 +962,45 @@ var KFHowgozit = (function () {
     ui.toTmplDlg.showModal();
   }
 
+  async function submitToTemplateForm() {
+    const log = activeLog();
+    if (!log) {
+      alert('Select a log first.');
+      return;
+    }
+    const form = document.getElementById('hgzToTmplForm');
+    if (!form) return;
+    const idRaw = String(form.querySelector('[name="id"]')?.value || '').trim();
+    const name = String(form.querySelector('[name="name"]')?.value || '').trim();
+    const replace = form.querySelector('[name="replace"]')?.checked || false;
+    if (!idRaw || !/^[A-Za-z0-9_]+$/.test(idRaw)) {
+      alert('Template id is required (letters, numbers, and underscores only).');
+      form.querySelector('[name="id"]')?.focus({ preventScroll: true });
+      return;
+    }
+    try {
+      await api('POST', `/logs/${encodeURIComponent(log.log_id)}/to-template`, {
+        id: idRaw,
+        name,
+        replace,
+      });
+      await loadAll();
+      ui.toTmplDlg.close();
+      alert('Template saved.');
+    } catch (e) {
+      alert('Save template failed: ' + e.message);
+    }
+  }
+
   function wireToTemplateForm() {
     const form = document.getElementById('hgzToTmplForm');
     if (!form || form.dataset.wired) return;
     form.dataset.wired = '1';
-    form.addEventListener('submit', async (ev) => {
+    form.addEventListener('submit', (ev) => {
       ev.preventDefault();
-      const log = activeLog();
-      if (!log) return;
-      const fd = new FormData(form);
-      const body = {
-        id: String(fd.get('id') || '').trim(),
-        name: String(fd.get('name') || '').trim(),
-        replace: fd.get('replace') === 'on',
-      };
-      try {
-        await api('POST', `/logs/${encodeURIComponent(log.log_id)}/to-template`, body);
-        await loadAll();
-        ui.toTmplDlg.close();
-        alert('Template saved.');
-      } catch (e) {
-        alert('Save template failed: ' + e.message);
-      }
+      void submitToTemplateForm();
     });
+    KFTap.bindPress(form, '[data-hgz-to-tmpl-save]', () => void submitToTemplateForm());
   }
 
   async function show(rootEl) {

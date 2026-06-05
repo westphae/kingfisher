@@ -5,6 +5,7 @@
 // Single controls:   KFTap.bindTap(el, handler)
 // Dialog inputs:     KFTap.bindFieldFocus(container, fieldSelector, inputSelector)
 // Cancel buttons:    KFTap.wireDialogCloses() once at init
+// Checkboxes:        KFTap.wireCheckboxLabels() once at init
 const KFTap = (function () {
   const DEBOUNCE_MS = 350;
 
@@ -52,6 +53,7 @@ const KFTap = (function () {
   }
 
   let dialogCloseWired = false;
+  let checkboxWired = false;
 
   function wireDialogCloses() {
     if (dialogCloseWired) return;
@@ -64,5 +66,17 @@ const KFTap = (function () {
     });
   }
 
-  return { bindTap, bindPress, bindFieldFocus, wireDialogCloses };
+  function wireCheckboxLabels() {
+    if (checkboxWired) return;
+    checkboxWired = true;
+    bindPress(document, 'label.cfgCheckbox', (ev, label) => {
+      const inp = label.querySelector('input[type="checkbox"]');
+      if (!inp || inp.disabled) return;
+      if (ev.cancelable) ev.preventDefault();
+      inp.checked = !inp.checked;
+      inp.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  return { bindTap, bindPress, bindFieldFocus, wireDialogCloses, wireCheckboxLabels };
 })();

@@ -724,6 +724,7 @@ dialog.sheet-wide {
 dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
 dialog form { display: grid; gap: 0.75rem; }
 dialog label { display: grid; gap: 0.25rem; font-size: 0.95rem; }
+dialog [hidden] { display: none !important; }
 
 dialog input,
 dialog textarea {
@@ -1412,16 +1413,88 @@ dialog.hgz-row-dlg form {
   box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.25);
 }
 
+select.hgz-row-input {
+  appearance: auto;
+  cursor: pointer;
+}
+
 .hgz-row-dlg-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
-  justify-content: space-between;
+  align-items: stretch;
   padding-top: 0.25rem;
   border-top: 1px solid var(--border);
 }
 
+.hgz-row-add-field {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.75rem 0 0.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.hgz-row-add-field[hidden] {
+  display: none !important;
+}
+
+.hgz-row-add-field-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.hgz-row-add-field-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.hgz-row-add-field-cancel {
+  min-height: 48px;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--dim);
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.hgz-row-add-field-save {
+  min-height: 48px;
+  padding: 0.55rem 1rem;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #051125;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.hgz-row-addFieldBtn {
+  min-height: 52px;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.hgz-row-addFieldBtn:active {
+  background: rgba(96, 165, 250, 0.12);
+}
+
 .hgz-row-doneBtn {
-  flex: 1;
+  flex: 1 1 8rem;
   min-height: 52px;
   padding: 0.65rem 1rem;
   border: 0;

@@ -15,6 +15,8 @@ Use `KFTap` from `internal/web/static/tap.js` (loaded before `app.js` / `howgozi
 | One-off buttons | `KFTap.bindTap(el, handler)` |
 | Dialog / form field focus | `KFTap.bindFieldFocus(container, fieldSelector, inputSelector)` — focus on `pointerdown` |
 | Dialog Cancel/Close | `KFTap.wireDialogCloses()` at init |
+| Checkboxes in `label.cfgCheckbox` | `KFTap.wireCheckboxLabels()` at init |
+| Dialog Save (async) | `type="button"` + `KFTap.bindPress(form, '[data-…-save]', …)` — not native `type="submit"` |
 
 **Dialogs:** define `<dialog>` in `index.html` as a direct `<body>` child (same as Settings/More), not inside `#main` / `#howgozitMount`.
 

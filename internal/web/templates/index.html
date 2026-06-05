@@ -121,7 +121,7 @@
         <button type="button" class="hgz-edit-addBtn" data-hgz-edit-add-col>+ Add column</button>
       </div>
       <div class="hgz-edit-danger"><button type="button" class="hgz-delLogBtn" data-hgz-delete-log>Delete log</button></div>
-      <div class="dlgRow"><button type="submit" value="save">Save</button><button type="button" value="cancel">Cancel</button></div>
+      <div class="dlgRow"><button type="button" data-hgz-edit-save>Save</button><button type="button" value="cancel">Cancel</button></div>
     </form>
   </dialog>
 
@@ -131,7 +131,7 @@
       <label>Template id <input name="id" required pattern="[A-Za-z0-9_]+" autocomplete="off" /></label>
       <label>Name <input name="name" autocomplete="off" /></label>
       <label class="cfgCheckbox"><input name="replace" type="checkbox" /> Replace existing template with same id</label>
-      <div class="dlgRow"><button type="submit" value="save">Save</button><button type="button" value="cancel">Cancel</button></div>
+      <div class="dlgRow"><button type="button" data-hgz-to-tmpl-save>Save</button><button type="button" value="cancel">Cancel</button></div>
     </form>
   </dialog>
 
@@ -139,11 +139,52 @@
     <form method="dialog" id="hgzRowForm">
       <div class="hgz-row-dlg-head">
         <h2 data-hgz-row-title>Entry</h2>
-        <p class="dim hgz-row-dlg-hint">Tap each field to enter values. Prefilled cells copy the previous row.</p>
+        <p class="dim hgz-row-dlg-hint">Tap a field to edit. Use <strong>Add field</strong> to add a column to this log.</p>
       </div>
       <div class="hgz-row-fields" data-hgz-row-fields></div>
+      <div class="hgz-row-add-field" data-hgz-row-add-field-panel hidden>
+        <h3 class="hgz-row-add-field-title">Add field</h3>
+        <label class="hgz-row-field">
+          <span class="hgz-row-label">Label</span>
+          <input type="text" class="hgz-row-input" data-hgz-af-label autocomplete="off" placeholder="Fuel Pressure" required />
+        </label>
+        <label class="hgz-row-field">
+          <span class="hgz-row-label">Type</span>
+          <select class="hgz-row-input" data-hgz-af-type>
+            <option value="number" selected>number</option>
+            <option value="text">text</option>
+            <option value="select">select</option>
+          </select>
+        </label>
+        <label class="hgz-row-field" data-hgz-add-field-unit>
+          <span class="hgz-row-label">Unit (optional)</span>
+          <input type="text" class="hgz-row-input" data-hgz-af-unit autocomplete="off" placeholder="psi" />
+        </label>
+        <label class="hgz-row-field" data-hgz-add-field-number>
+          <span class="hgz-row-label">Step (optional)</span>
+          <input type="text" class="hgz-row-input" data-hgz-af-step autocomplete="off" placeholder="0.1" inputmode="decimal" />
+        </label>
+        <label class="hgz-row-field" data-hgz-add-field-number>
+          <span class="hgz-row-label">Input mode</span>
+          <select class="hgz-row-input" data-hgz-af-input-mode>
+            <option value="">default</option>
+            <option value="decimal" selected>decimal</option>
+            <option value="numeric">numeric</option>
+            <option value="text">text</option>
+          </select>
+        </label>
+        <label class="hgz-row-field" data-hgz-add-field-select hidden>
+          <span class="hgz-row-label">Options (comma-separated)</span>
+          <input type="text" class="hgz-row-input" data-hgz-af-options autocomplete="off" placeholder="L, R, Both" />
+        </label>
+        <div class="hgz-row-add-field-actions">
+          <button type="button" class="hgz-row-add-field-cancel" data-hgz-row-add-field-cancel>Cancel</button>
+          <button type="button" class="hgz-row-add-field-save" data-hgz-row-add-field-save>Add</button>
+        </div>
+      </div>
       <div class="hgz-row-dlg-actions">
         <button type="button" class="hgz-row-delBtn" data-hgz-row-del>Delete entry</button>
+        <button type="button" class="hgz-row-addFieldBtn" data-hgz-row-add-field>Add field</button>
         <button type="button" class="hgz-row-doneBtn" data-hgz-row-done>Done</button>
       </div>
     </form>

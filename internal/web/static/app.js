@@ -1349,6 +1349,7 @@ setInterval(markStaleness, 1000);
 
 function wireUiTaps() {
   KFTap.wireDialogCloses();
+  KFTap.wireCheckboxLabels();
 
   document.addEventListener(
     'close',
