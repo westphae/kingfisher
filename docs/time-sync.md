@@ -122,8 +122,8 @@ rtcsync
 
 #pool pool.ntp.org iburst
 
-refclock SOCK /run/chrony.clk.ttyAMA0.sock refid GPS precision 1e-1 offset 0.62 delay 0.1
-refclock SOCK /run/chrony.pps0.sock refid PPS precision 1e-7 lock GPS
+refclock SOCK /run/chrony.clk.ttyAMA0.sock refid GPS precision 1e-1 offset 0.62 delay 0.1 poll 2 filter 3
+refclock SOCK /run/chrony.pps0.sock refid PPS precision 1e-7 lock GPS poll 2
 ```
 
 Directive notes:
@@ -132,6 +132,16 @@ Directive notes:
 - **`offset`** — added to the gpsd serial SOCK timestamp (see tuning section).
 - **`lock GPS`** — PPS steers the clock but needs the GPS refclock for which
   UTC second each pulse belongs to.
+- **`poll 2 filter 3`** — faster boot lock. The default refclock `poll` is 4
+  (one sample / 16 s), so GPS takes minutes to become selectable and PPS
+  (`lock GPS`) longer still. `poll 2` (4 s) plus `filter 3` (median of the
+  per-poll samples) lets GPS converge and PPS lock within tens of seconds once
+  a fix exists. Keep PPS `poll` equal to GPS `poll` so `lock GPS` always has a
+  recent time-of-day sample. GPS serial only carries time-of-day, so the lower
+  poll does not degrade steady-state accuracy — PPS still steers the clock.
+  Note: the bigger boot delay after days off is usually GPS **acquisition**
+  (cold start); keep the receiver's backup battery (V_BCKP) powered for a
+  warm/hot start to cut that down — chrony tuning cannot speed up acquisition.
 - **`pool`** — fine on the bench with internet; for offline recording, comment
   it out so chrony selects GPS/PPS instead of NTP.
 

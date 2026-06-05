@@ -16,8 +16,15 @@ rtcsync
 #
 # Tune with chronyc sourcestats at offset 0.0 (NTP-synced): use the same sign
 # as the GPS Offset column in seconds (+620ms -> offset 0.62 on this M9N path).
-refclock SOCK /run/chrony.clk.ttyAMA0.sock refid GPS precision 1e-1 offset 0.62 delay 0.1
+#
+# poll/filter: default refclock poll is 4 (16s/sample), which makes GPS take
+# minutes to become selectable and PPS (lock GPS) even longer at boot. poll 2
+# (4s) + filter 3 lets GPS converge and PPS lock within tens of seconds once a
+# fix exists. GPS serial only carries time-of-day for lock, so the lower poll
+# does not hurt steady-state accuracy (PPS still steers the clock).
+refclock SOCK /run/chrony.clk.ttyAMA0.sock refid GPS precision 1e-1 offset 0.62 delay 0.1 poll 2 filter 3
 
 # PPS follow-on (GPIO 18 -> /dev/pps0, also in gpsd DEVICES). Use SOCK PPS —
 # do not also enable refclock PPS /dev/pps0; gpsd holds the device.
-# refclock SOCK /run/chrony.pps0.sock refid PPS precision 1e-7 lock GPS
+# Keep PPS poll == GPS poll so lock GPS always has a recent time-of-day sample.
+# refclock SOCK /run/chrony.pps0.sock refid PPS precision 1e-7 lock GPS poll 2
