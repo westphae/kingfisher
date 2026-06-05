@@ -59,6 +59,10 @@ func columnSQLType(fieldType string) string {
 }
 
 func (s *Store) ensureDataTable(table string, fields []config.HowgozitField) error {
+	return ensureDataTable(s.db, table, fields)
+}
+
+func ensureDataTable(conn dbConn, table string, fields []config.HowgozitField) error {
 	colDecl := make([]string, 0, len(fields))
 	wantCols := make([]string, 0, len(fields))
 	for _, f := range fields {
@@ -74,14 +78,23 @@ func (s *Store) ensureDataTable(table string, fields []config.HowgozitField) err
 		stmt += ", " + strings.Join(colDecl, ", ")
 	}
 	stmt += ")"
-	if _, err := s.db.Exec(stmt); err != nil {
+	if _, err := conn.Exec(stmt); err != nil {
 		return err
 	}
-	return s.addMissingColumns(table, fields, wantCols)
+	return addMissingColumns(conn, table, fields, wantCols)
+}
+
+type dbConn interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
 }
 
 func (s *Store) addMissingColumns(table string, fields []config.HowgozitField, wantCols []string) error {
-	rows, err := s.db.Query(fmt.Sprintf(`PRAGMA table_info(%q)`, table))
+	return addMissingColumns(s.db, table, fields, wantCols)
+}
+
+func addMissingColumns(conn dbConn, table string, fields []config.HowgozitField, wantCols []string) error {
+	rows, err := conn.Query(fmt.Sprintf(`PRAGMA table_info(%q)`, table))
 	if err != nil {
 		return err
 	}
@@ -115,7 +128,7 @@ func (s *Store) addMissingColumns(table string, fields []config.HowgozitField, w
 		if ft == "" {
 			ft = "number"
 		}
-		if _, err := s.db.Exec(fmt.Sprintf(`ALTER TABLE %q ADD COLUMN %q %s`, table, c, columnSQLType(ft))); err != nil {
+		if _, err := conn.Exec(fmt.Sprintf(`ALTER TABLE %q ADD COLUMN %q %s`, table, c, columnSQLType(ft))); err != nil {
 			return err
 		}
 	}
@@ -226,8 +239,12 @@ func (s *Store) AddField(logID string, field config.HowgozitField) (*LogMeta, er
 	if strings.TrimSpace(field.Label) == "" {
 		field.Label = key
 	}
-	if field.Type == "" {
-		field.Type = "number"
+	field.Type = strings.ToLower(strings.TrimSpace(field.Type))
+	config.NormalizeHowgozitField(&field)
+	switch field.Type {
+	case "number", "text", "select":
+	default:
+		return nil, fmt.Errorf("howgozit: field type must be number, text, or select")
 	}
 	for _, f := range meta.Fields {
 		if store.Sanitize(f.Key) == key {
@@ -335,9 +352,8 @@ func normalizeLogFields(fields []config.HowgozitField) ([]config.HowgozitField, 
 		if strings.TrimSpace(f.Label) == "" {
 			f.Label = key
 		}
-		if f.Type == "" {
-			f.Type = "number"
-		}
+		f.Type = strings.ToLower(strings.TrimSpace(f.Type))
+		config.NormalizeHowgozitField(&f)
 		switch f.Type {
 		case "number", "text", "select":
 		default:
@@ -348,18 +364,35 @@ func normalizeLogFields(fields []config.HowgozitField) ([]config.HowgozitField, 
 	return out, nil
 }
 
+func normalizeLogMetaFields(fields []config.HowgozitField) {
+	for i := range fields {
+		config.NormalizeHowgozitField(&fields[i])
+	}
+}
+
 func (s *Store) persistSchema(meta *LogMeta) (*LogMeta, error) {
+	normalizeLogMetaFields(meta.Fields)
 	snap := config.HowgozitTemplate{Name: meta.DisplayName, Fields: meta.Fields}
 	schemaJSON, err := json.Marshal(snap)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.ensureDataTable(meta.TableName, meta.Fields); err != nil {
+	tx, err := s.db.Begin()
+	if err != nil {
 		return nil, err
 	}
-	_, err = s.db.Exec(`UPDATE howgozit_log SET display_name=?, schema_json=? WHERE log_id=?`,
-		meta.DisplayName, string(schemaJSON), meta.LogID)
-	if err != nil {
+	rollback := func(e error) (*LogMeta, error) {
+		tx.Rollback()
+		return nil, e
+	}
+	if err := ensureDataTable(tx, meta.TableName, meta.Fields); err != nil {
+		return rollback(err)
+	}
+	if _, err := tx.Exec(`UPDATE howgozit_log SET display_name=?, schema_json=? WHERE log_id=?`,
+		meta.DisplayName, string(schemaJSON), meta.LogID); err != nil {
+		return rollback(err)
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	meta.SchemaJSON = string(schemaJSON)
@@ -383,6 +416,7 @@ func (s *Store) ListLogs() ([]LogMeta, error) {
 		var tmpl config.HowgozitTemplate
 		if err := json.Unmarshal([]byte(m.SchemaJSON), &tmpl); err == nil {
 			m.Fields = tmpl.Fields
+			normalizeLogMetaFields(m.Fields)
 		}
 		out = append(out, m)
 	}
@@ -402,6 +436,7 @@ func (s *Store) GetLog(logID string) (*LogMeta, error) {
 	var tmpl config.HowgozitTemplate
 	if err := json.Unmarshal([]byte(m.SchemaJSON), &tmpl); err == nil {
 		m.Fields = tmpl.Fields
+		normalizeLogMetaFields(m.Fields)
 	}
 	return &m, nil
 }

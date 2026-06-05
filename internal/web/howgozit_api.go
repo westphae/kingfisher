@@ -489,11 +489,10 @@ func validateHowgozitField(f *config.HowgozitField) error {
 	if strings.TrimSpace(f.Label) == "" {
 		f.Label = key
 	}
+	f.Type = strings.ToLower(strings.TrimSpace(f.Type))
+	config.NormalizeHowgozitField(f)
 	switch f.Type {
-	case "number", "text", "select", "":
-		if f.Type == "" {
-			f.Type = "number"
-		}
+	case "number", "text", "select":
 	default:
 		return errBadTemplate("field type must be number, text, or select")
 	}

@@ -2,10 +2,13 @@ package howgozit_test
 
 import (
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/howgozit"
+	"github.com/westphae/kingfisher/internal/live"
 	"github.com/westphae/kingfisher/internal/store"
 )
 
@@ -134,6 +137,78 @@ func TestAddField(t *testing.T) {
 	}
 	if len(updated.Fields) != 1 {
 		t.Fatalf("fields: got %d want 1", len(updated.Fields))
+	}
+}
+
+func TestAddFieldConcurrentSensorFlush(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(dir, "N99999")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	buf := store.NewBuffer(st, 10*time.Millisecond)
+	stop := make(chan struct{})
+	go buf.Run(stop)
+	defer close(stop)
+
+	hs := howgozit.NewStore(st)
+	meta, err := hs.CreateLog("Test", nil, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ts := time.Now().UnixNano()
+		for i := 0; i < 200; i++ {
+			buf.Append(live.Sample{
+				Device: "gps",
+				TsNs:   ts + int64(i),
+				Values: map[string]float64{"speed_m_s": float64(i)},
+			})
+		}
+	}()
+	wg.Wait()
+
+	updated, err := hs.AddField(meta.LogID, config.HowgozitField{
+		Key: "fuel_pressure", Label: "Fuel Pressure", Type: "number", Unit: "psi",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Fields) != 1 || updated.Fields[0].Key != "fuel_pressure" {
+		t.Fatalf("fields: %+v", updated.Fields)
+	}
+}
+
+func TestGetLogNormalizesLegacyDecimalType(t *testing.T) {
+	st, hs := openTestStore(t)
+	meta, err := hs.CreateLog("Test", nil, "", "legacy_log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.DB().Exec(`UPDATE howgozit_log SET schema_json=? WHERE log_id=?`,
+		`{"name":"Test","fields":[{"key":"mp_inhg","label":"MP","type":"decimal","step":"0.01","unit":"inHg"}]}`,
+		meta.LogID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := hs.GetLog(meta.LogID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Fields) != 1 {
+		t.Fatalf("fields: got %d want 1", len(got.Fields))
+	}
+	if got.Fields[0].Type != "number" {
+		t.Fatalf("type: got %q want number", got.Fields[0].Type)
+	}
+	if got.Fields[0].InputMode != "decimal" {
+		t.Fatalf("input_mode: got %q want decimal", got.Fields[0].InputMode)
 	}
 }
 
