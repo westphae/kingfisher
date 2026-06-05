@@ -119,7 +119,15 @@ CREATE TABLE IF NOT EXISTS sensor_attrs (
   attr      TEXT    NOT NULL,
   value     TEXT
 );
-CREATE INDEX IF NOT EXISTS sensor_attrs_dev_attr ON sensor_attrs(device, channel, attr);`)
+CREATE INDEX IF NOT EXISTS sensor_attrs_dev_attr ON sensor_attrs(device, channel, attr);
+CREATE TABLE IF NOT EXISTS howgozit_log (
+  log_id        TEXT PRIMARY KEY,
+  template_id   TEXT NOT NULL,
+  display_name  TEXT NOT NULL,
+  schema_json   TEXT NOT NULL,
+  table_name    TEXT NOT NULL UNIQUE,
+  created_ts_ns INTEGER NOT NULL
+);`)
 	if err != nil {
 		return err
 	}
