@@ -9,6 +9,7 @@
 //	POST /api/clock/resync — light chronyc reselect or full chronyd+gpsd restart.
 //	POST /api/compass/align — capture sensor→vehicle alignment (manual or GPS taxi).
 //	POST /api/airspeed/zero — average pitot ΔP over 15s and save as zero offset.
+//	GET/POST/PUT/DELETE /api/howgozit/* — manual log templates and flight rows.
 //	GET  /terminal — browser shell (opt-in via config terminal.enabled).
 //	GET  /api/terminal/auth — login methods (pubkey / password).
 //	GET  /api/terminal/challenge — one-time challenge for pubkey login.
@@ -130,6 +131,8 @@ func (s *Server) Run(addr string, stop <-chan struct{}) error {
 	mux.HandleFunc("/api/recording", s.handleRecording)
 	mux.HandleFunc("/api/compass/align", s.handleCompassAlign)
 	mux.HandleFunc("/api/airspeed/zero", s.handleAirspeedZero)
+	mux.HandleFunc("/api/howgozit/", s.handleHowgozit)
+	mux.HandleFunc("/api/howgozit", s.handleHowgozit)
 	s.term.Register(mux)
 
 	staticFS, err := fs.Sub(assets, "static")
