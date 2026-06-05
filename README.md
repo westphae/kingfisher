@@ -199,6 +199,77 @@ the nag and enables secure-context APIs (clipboard, etc.) over HTTPS.
 Open the cockpit at **`https://<pi-hostname-or-ip>/`** (port 443; HTTP on port 80
 redirects automatically).
 
+### systemd user service (boot)
+
+Kingfisher is normally run as your Pi login user (IIO device access, config under
+`~/.config/kingfisher/`, flight DBs under `~/kingfisher/flights`). A **systemd user
+unit** starts it at boot without keeping an SSH session open.
+
+**Prerequisites:** gpsd and chrony configured per **`docs/time-sync.md`**. If you
+use Caddy for HTTPS, enable **`caddy.service`** separately (system unit); start
+kingfisher first so the reverse proxy has a backend on `:8080`.
+
+1. **Install the binary** with `go install` (default: `$(go env GOPATH)/bin`, usually
+   `~/go/bin`; override with `GOBIN` if you use it):
+
+   ```bash
+   cd ~/go/src/github.com/westphae/kingfisher
+   go install ./cmd/kingfisher
+   ```
+
+2. **Install the user unit** from the repo example (path must match step 1):
+
+   ```bash
+   mkdir -p ~/.config/systemd/user
+   bin="$(go env GOBIN)"
+   [ -z "$bin" ] && bin="$(go env GOPATH)/bin"
+   sed "s|__KINGFISHER_BIN__|$bin/kingfisher|g" \
+     deploy/systemd/kingfisher.service.example \
+     > ~/.config/systemd/user/kingfisher.service
+   ```
+
+3. **Enable linger** so the user service starts at boot (not only after login):
+
+   ```bash
+   sudo loginctl enable-linger "$USER"
+   loginctl show-user "$USER" -p Linger   # expect Linger=yes
+   ```
+
+4. **Enable and start:**
+
+   ```bash
+   systemctl --user daemon-reload
+   systemctl --user enable --now kingfisher.service
+   ```
+
+5. **Check status and logs:**
+
+   ```bash
+   systemctl --user status kingfisher.service
+   journalctl --user -u kingfisher.service -f
+   curl -s http://127.0.0.1:8080/api/status | head
+   ```
+
+The unit runs `chronyc waitsync 120 0.25` before opening today's flight DB:
+up to **120 tries** at the default **10 s** interval (~**20 minutes** worst case)
+until chrony reports synchronized with remaining correction ≤ **0.25 s** (returns
+immediately when already synced). Session filenames and startup timestamps then
+reflect disciplined time. On a cold GPS start that can still fail if the receiver
+has not locked yet; retry with `systemctl --user restart kingfisher.service` once
+`#* PPS` appears, or temporarily comment out the `ExecStartPre=` line while
+bench-testing.
+
+**After upgrading:** `go install ./cmd/kingfisher`, then
+`systemctl --user restart kingfisher.service`.
+
+**Stop/disable:**
+
+```bash
+systemctl --user disable --now kingfisher.service
+```
+
+Example unit file: **`deploy/systemd/kingfisher.service.example`**.
+
 ### Browser terminal (optional)
 
 Kingfisher can expose a full-screen web terminal at **`/terminal`** (footer link

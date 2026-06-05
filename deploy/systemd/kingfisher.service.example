@@ -1,0 +1,35 @@
+# Kingfisher systemd *user* unit — runs as your login user (IIO, config, flight DBs).
+#
+# Install (binary via go install → GOBIN or $(go env GOPATH)/bin):
+#
+#   go install ./cmd/kingfisher
+#   mkdir -p ~/.config/systemd/user
+#   bin="$(go env GOBIN)"; [ -z "$bin" ] && bin="$(go env GOPATH)/bin"
+#   sed "s|__KINGFISHER_BIN__|$bin/kingfisher|g" \
+#     deploy/systemd/kingfisher.service.example \
+#     > ~/.config/systemd/user/kingfisher.service
+#   sudo loginctl enable-linger "$USER"    # start at boot without an SSH session
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now kingfisher.service
+#   journalctl --user -u kingfisher.service -f
+#
+# See README.md § "systemd user service (boot)" for ordering with chrony/gpsd and Caddy.
+
+[Unit]
+Description=Kingfisher flight data recorder
+Documentation=file://%h/go/src/github.com/westphae/kingfisher/README.md
+After=network-online.target chronyd.service gpsd.service
+Wants=network-online.target chronyd.service gpsd.service
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/chronyc waitsync 120 0.25
+ExecStart=__KINGFISHER_BIN__
+Restart=on-failure
+RestartSec=5
+
+# Flight DBs default to ~/kingfisher/flights; config to ~/.config/kingfisher/config.json
+# WorkingDirectory=%h
+
+[Install]
+WantedBy=default.target
