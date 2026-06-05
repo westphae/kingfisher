@@ -1,5 +1,5 @@
 // Howgozit — in-flight manual log tab.
-const KFHowgozit = (function () {
+var KFHowgozit = (function () {
   const PATCH_DEBOUNCE_MS = 400;
 
   const DEFAULT_NUMBER_STEP = {
@@ -10,10 +10,12 @@ const KFHowgozit = (function () {
   const ui = {
     root: null,
     tabsEl: null,
-    tableWrap: null,
+    scrollEl: null,
+    bodyEl: null,
     addLogDlg: null,
     editDlg: null,
     toTmplDlg: null,
+    rowDlg: null,
   };
 
   const data = {
@@ -26,10 +28,10 @@ const KFHowgozit = (function () {
 
   let editDraft = null;
   let editOriginalKeys = new Set();
+  let rowEditId = null;
 
   let patchTimers = new Map();
   let mounted = false;
-  let resizeWired = false;
 
   async function api(method, path, body) {
     const opts = { method, headers: { 'Content-Type': 'application/json' } };
@@ -74,87 +76,153 @@ const KFHowgozit = (function () {
 
   function mount(rootEl) {
     ui.root = rootEl;
-    if (rootEl.querySelector('[data-hgz-root]')) {
-      bindShellRefs(rootEl);
-      wireEditForm();
-      wireResize();
-      mounted = true;
-      return;
+    for (const dlg of rootEl.querySelectorAll(
+      'dialog[data-hgz-add-log-dlg], dialog[data-hgz-edit-dlg], dialog[data-hgz-to-tmpl-dlg], dialog[data-hgz-row-dlg]'
+    )) {
+      dlg.remove();
     }
-    rootEl.innerHTML =
-      '<div class="hgz-root" data-hgz-root>' +
-      '<div class="hgz-toolbar">' +
-      '<div class="hgz-tabs" data-hgz-tabs role="tablist"></div>' +
-      '<button type="button" class="hgz-iconBtn" data-hgz-add-log title="Add log">+ Log</button>' +
-      '<button type="button" class="hgz-iconBtn" data-hgz-edit title="Edit log">Edit</button>' +
-      '<button type="button" class="hgz-iconBtn" data-hgz-to-tmpl title="Save log as template">→ Template</button>' +
-      '</div>' +
-      '<div class="hgz-scroll" data-hgz-scroll>' +
-      '<table class="hgz-table" data-hgz-table><thead data-hgz-head></thead><tbody data-hgz-body></tbody></table>' +
-      '</div>' +
-      '<dialog class="sheet" data-hgz-add-log-dlg><form method="dialog">' +
-      '<h2>Add log</h2>' +
-      '<p class="dim hgz-dlgHint">Pick a template to seed columns, or start blank.</p>' +
-      '<div class="hgz-pick-list" data-hgz-add-log-list></div>' +
-      '<div class="dlgRow"><button value="cancel">Cancel</button></div></form></dialog>' +
-      '<dialog class="sheet sheet-wide" data-hgz-edit-dlg><form method="dialog" id="hgzEditForm">' +
-      '<h2>Edit log</h2>' +
-      '<label>Log name <input name="display_name" autocomplete="off" required /></label>' +
-      '<p class="dim hgz-dlgHint">Column keys are fixed after creation; edit labels and parameters below.</p>' +
-      '<div class="hgz-edit-fields" data-hgz-edit-fields></div>' +
-      '<div class="hgz-edit-add" data-hgz-edit-add>' +
-      '<h3>Add column</h3>' +
-      '<div class="hgz-edit-add-grid">' +
-      '<label>Key <input name="new_key" pattern="[A-Za-z0-9_]+" autocomplete="off" /></label>' +
-      '<label>Label <input name="new_label" autocomplete="off" /></label>' +
-      '<label>Type <select name="new_type"><option value="text">text</option><option value="number" selected>number</option><option value="select">select</option></select></label>' +
-      '<label>Unit <input name="new_unit" autocomplete="off" placeholder="optional" /></label>' +
-      '<label>Step <input name="new_step" autocomplete="off" placeholder="e.g. 0.01" /></label>' +
-      '<label>Input mode <select name="new_input_mode"><option value="">default</option><option value="decimal">decimal</option><option value="numeric">numeric</option><option value="text">text</option></select></label>' +
-      '<label data-hgz-edit-new-options hidden>Options (comma-separated) <input name="new_options" autocomplete="off" /></label>' +
-      '</div>' +
-      '<button type="button" class="hgz-edit-addBtn" data-hgz-edit-add-col>+ Add column</button>' +
-      '</div>' +
-      '<div class="hgz-edit-danger"><button type="button" class="hgz-delLogBtn" data-hgz-delete-log>Delete log</button></div>' +
-      '<div class="dlgRow"><button type="submit" value="save">Save</button><button value="cancel">Cancel</button></div>' +
-      '</form></dialog>' +
-      '<dialog class="sheet" data-hgz-to-tmpl-dlg><form method="dialog" id="hgzToTmplForm">' +
-      '<h2>Save as template</h2>' +
-      '<label>Template id <input name="id" required pattern="[A-Za-z0-9_]+" autocomplete="off" /></label>' +
-      '<label>Name <input name="name" autocomplete="off" /></label>' +
-      '<label class="cfgCheckbox"><input name="replace" type="checkbox" /> Replace existing template with same id</label>' +
-      '<div class="dlgRow"><button type="submit" value="save">Save</button><button value="cancel">Cancel</button></div></form></dialog>';
-
+    if (!rootEl.querySelector('[data-hgz-root]')) {
+      rootEl.innerHTML =
+        '<div class="hgz-root" data-hgz-root>' +
+        '<div class="hgz-toolbar">' +
+        '<div class="hgz-tabs" data-hgz-tabs role="tablist"></div>' +
+        '<button type="button" class="hgz-iconBtn" data-hgz-add-log title="Add log">+ Log</button>' +
+        '<button type="button" class="hgz-iconBtn" data-hgz-edit title="Edit log">Edit</button>' +
+        '<button type="button" class="hgz-iconBtn" data-hgz-to-tmpl title="Save log as template">→ Template</button>' +
+        '</div>' +
+        '<div class="hgz-scroll" data-hgz-scroll>' +
+        '<div class="hgz-row-list" data-hgz-body></div>' +
+        '<button type="button" class="hgz-add-entry" data-hgz-add-row>+ Add entry</button>' +
+        '</div></div>';
+    }
     bindShellRefs(rootEl);
-    rootEl.querySelector('[data-hgz-add-log]')?.addEventListener('click', () => openAddLogDialog());
-    rootEl.querySelector('[data-hgz-edit]')?.addEventListener('click', () => openEditDialog());
-    rootEl.querySelector('[data-hgz-to-tmpl]')?.addEventListener('click', () => openToTemplateDialog());
+    wireHowgozitTaps();
     wireEditForm();
     wireToTemplateForm();
-    wireResize();
+    wireRowDialog();
+    wireHowgozitDialogFields();
     mounted = true;
   }
 
-  function wireResize() {
-    if (resizeWired) return;
-    resizeWired = true;
-    let timer;
-    window.addEventListener('resize', () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        const headEl = ui.root?.querySelector('[data-hgz-head]');
-        const bodyEl = ui.root?.querySelector('[data-hgz-body]');
-        if (headEl && bodyEl) fitColumnWidths(headEl, bodyEl);
-      }, 150);
+  function wireHowgozitDialogFields() {
+    if (document.documentElement.dataset.hgzDlgFocusWired === '1') return;
+    document.documentElement.dataset.hgzDlgFocusWired = '1';
+    const editFields = document.querySelector('[data-hgz-edit-fields]');
+    const editAdd = document.querySelector('[data-hgz-edit-add]');
+    KFTap.bindFieldFocus(editFields, '[data-hgz-field-row]', 'input, select');
+    KFTap.bindFieldFocus(editAdd, 'label', 'input, select');
+    KFTap.bindFieldFocus(document.getElementById('hgzEditForm'), 'label', 'input, select, textarea');
+    KFTap.bindFieldFocus(document.getElementById('hgzToTmplForm'), 'label', 'input');
+  }
+
+  function wireHowgozitTaps() {
+    if (document.documentElement.dataset.hgzTapWired === '1') return;
+    document.documentElement.dataset.hgzTapWired = '1';
+
+    KFTap.bindPress(document, '[data-hgz-add-log]', () => openAddLogDialog());
+    KFTap.bindPress(document, '[data-hgz-edit]', () => openEditDialog());
+    KFTap.bindPress(document, '[data-hgz-to-tmpl]', () => openToTemplateDialog());
+
+    KFTap.bindPress(document, '.hgz-tab', async (ev, btn) => {
+      data.activeLogId = btn.dataset.logId;
+      data.prefill.clear();
+      renderTabs();
+      await loadRows();
+      renderRows();
+    });
+
+    KFTap.bindPress(document, '[data-hgz-add-row]', () => addRow());
+    KFTap.bindPress(document, '.hgz-row-card', (ev, card) => {
+      if (ev.target.closest('[data-del-row], .hgz-delBtn')) return;
+      openRowDialog(Number(card.dataset.rowid));
+    });
+    KFTap.bindPress(document, '[data-del-row]', (ev, btn) => deleteRow(Number(btn.dataset.delRow)));
+
+    KFTap.bindPress(document, '[data-pick-new]', () => {
+      ui.addLogDlg?.close();
+      createLog({ new: true, name: 'New log' });
+    });
+    KFTap.bindPress(document, '[data-pick-tmpl]', (ev, btn) => {
+      ui.addLogDlg?.close();
+      createLog({ template_id: btn.dataset.pickTmpl });
+    });
+
+    KFTap.bindPress(document, '[data-move-up]', (ev, btn) => {
+      syncDraftFromDom();
+      const idx = Number(btn.closest('[data-hgz-field-row]')?.dataset.fieldIdx);
+      if (idx <= 0) return;
+      const tmp = editDraft.fields[idx - 1];
+      editDraft.fields[idx - 1] = editDraft.fields[idx];
+      editDraft.fields[idx] = tmp;
+      renderEditFields();
+    });
+    KFTap.bindPress(document, '[data-move-down]', (ev, btn) => {
+      syncDraftFromDom();
+      const idx = Number(btn.closest('[data-hgz-field-row]')?.dataset.fieldIdx);
+      if (idx < 0 || idx >= editDraft.fields.length - 1) return;
+      const tmp = editDraft.fields[idx + 1];
+      editDraft.fields[idx + 1] = editDraft.fields[idx];
+      editDraft.fields[idx] = tmp;
+      renderEditFields();
+    });
+    KFTap.bindPress(document, '[data-del-field]', (ev, btn) => {
+      syncDraftFromDom();
+      const idx = Number(btn.closest('[data-hgz-field-row]')?.dataset.fieldIdx);
+      const field = editDraft.fields[idx];
+      if (!field) return;
+      if (columnHasRowData(field.key)) {
+        if (!confirm(`Delete column "${field.label}" and all its row values?`)) return;
+      }
+      editDraft.fields.splice(idx, 1);
+      renderEditFields();
+    });
+
+    KFTap.bindPress(document, '[data-hgz-edit-add-col]', () => {
+      try {
+        syncDraftFromDom();
+        const form = document.getElementById('hgzEditForm');
+        const field = parseNewColumnForm(form);
+        editDraft.fields.push(field);
+        form.querySelector('[name="new_key"]').value = '';
+        form.querySelector('[name="new_label"]').value = '';
+        form.querySelector('[name="new_unit"]').value = '';
+        form.querySelector('[name="new_step"]').value = '';
+        form.querySelector('[name="new_options"]').value = '';
+        renderEditFields();
+      } catch (e) {
+        alert(e.message);
+      }
+    });
+
+    KFTap.bindPress(document, '[data-hgz-delete-log]', async () => {
+      const log = activeLog();
+      if (!log || !editDraft) return;
+      if (!confirm(`Delete log "${log.display_name}" and all its rows?`)) return;
+      try {
+        await api('DELETE', `/logs/${encodeURIComponent(log.log_id)}`);
+        data.logs = data.logs.filter((l) => l.log_id !== log.log_id);
+        data.activeLogId = data.logs[0]?.log_id || null;
+        data.rows = [];
+        data.prefill.clear();
+        editDraft = null;
+        ui.editDlg?.close();
+        renderTabs();
+        renderRows();
+      } catch (e) {
+        alert('Delete log failed: ' + e.message);
+      }
     });
   }
 
   function bindShellRefs(rootEl) {
-    ui.tabsEl = rootEl.querySelector('[data-hgz-tabs]');
-    ui.tableWrap = rootEl.querySelector('[data-hgz-scroll]');
-    ui.addLogDlg = rootEl.querySelector('[data-hgz-add-log-dlg]');
-    ui.editDlg = rootEl.querySelector('[data-hgz-edit-dlg]');
-    ui.toTmplDlg = rootEl.querySelector('[data-hgz-to-tmpl-dlg]');
+    ui.root = rootEl.querySelector('[data-hgz-root]') || rootEl;
+    ui.tabsEl = ui.root.querySelector('[data-hgz-tabs]');
+    ui.scrollEl = ui.root.querySelector('[data-hgz-scroll]');
+    ui.bodyEl = ui.root.querySelector('[data-hgz-body]');
+    ui.addLogDlg = document.getElementById('hgzAddLogDlg');
+    ui.editDlg = document.getElementById('hgzEditDlg');
+    ui.toTmplDlg = document.getElementById('hgzToTmplDlg');
+    ui.rowDlg = document.getElementById('hgzRowDlg');
   }
 
   async function loadAll() {
@@ -202,15 +270,6 @@ const KFHowgozit = (function () {
       html += `<button type="button" class="hgz-tab${active}" role="tab" data-log-id="${escapeHtml(log.log_id)}">${escapeHtml(log.display_name)}</button>`;
     }
     ui.tabsEl.innerHTML = html;
-    for (const btn of ui.tabsEl.querySelectorAll('.hgz-tab')) {
-      btn.addEventListener('click', async () => {
-        data.activeLogId = btn.dataset.logId;
-        data.prefill.clear();
-        renderTabs();
-        await loadRows();
-        renderTable();
-      });
-    }
   }
 
   function cellInputType(field) {
@@ -229,125 +288,165 @@ const KFHowgozit = (function () {
     return ` type="text" inputmode="${escapeHtml(mode)}"`;
   }
 
-  function renderTable() {
+  function fieldLabel(f) {
+    return f.unit ? `${f.label} (${f.unit})` : f.label;
+  }
+
+  function fieldInputHtml(rowid, field, val, prefilled) {
+    const pf = prefilled ? ' hgz-prefill' : '';
+    const rid = ` data-rowid="${rowid}"`;
+    const df = ` data-field="${escapeHtml(field.key)}"`;
+    const ph = ` placeholder="Enter ${escapeHtml(field.label)}"`;
+    const kind = cellInputType(field);
+    if (kind === 'select') {
+      let opts = '<option value="">— select —</option>';
+      for (const o of field.options || []) {
+        const sel = String(val) === String(o) ? ' selected' : '';
+        opts += `<option value="${escapeHtml(o)}"${sel}>${escapeHtml(o)}</option>`;
+      }
+      return `<select class="hgz-row-input${pf}"${rid}${df}>${opts}</select>`;
+    }
+    if (kind === 'number') {
+      return `<input class="hgz-row-input${pf}"${rid}${df} value="${escapeHtml(val)}"${numberFieldAttrs(field)}${ph} />`;
+    }
+    return `<input type="text" class="hgz-row-input${pf}"${rid}${df} value="${escapeHtml(val)}" inputmode="text"${ph} />`;
+  }
+
+  function formatFieldDisplay(val, field) {
+    if (val == null || String(val).trim() === '') return null;
+    const s = String(val);
+    return field.unit ? `${s} ${field.unit}` : s;
+  }
+
+  function renderRows() {
     const log = activeLog();
-    const headEl = ui.root?.querySelector('[data-hgz-head]');
-    const bodyEl = ui.root?.querySelector('[data-hgz-body]');
-    if (!headEl || !bodyEl) return;
+    const bodyEl = ui.bodyEl;
+    const addBtn = ui.root?.querySelector('[data-hgz-add-row]');
+    if (!bodyEl) return;
 
     if (!log) {
-      headEl.innerHTML = '';
-      bodyEl.innerHTML = '<tr><td class="hgz-empty">No logs — tap + Log to start.</td></tr>';
+      bodyEl.innerHTML = '<p class="hgz-empty">No logs — tap + Log to start.</p>';
+      if (addBtn) addBtn.hidden = true;
+      return;
+    }
+    if (addBtn) addBtn.hidden = false;
+
+    const fields = fieldsForLog(log);
+    if (data.rows.length === 0) {
+      bodyEl.innerHTML = '<p class="hgz-empty">No entries yet — tap <strong>+ Add entry</strong> below.</p>';
       return;
     }
 
-    const fields = fieldsForLog(log);
-    let head = '<tr><th class="hgz-col-time">Time</th>';
-    for (const f of fields) {
-      const label = f.unit ? `${f.label} (${f.unit})` : f.label;
-      head += `<th>${escapeHtml(label)}</th>`;
-    }
-    head += '<th class="hgz-col-del"></th></tr>';
-    headEl.innerHTML = head;
-    headEl.querySelector('tr')?.classList.add('hgz-head-row');
-
-    let body = '';
+    let html = '';
     for (const row of data.rows) {
       const prefilled = data.prefill.get(row.rowid) || new Set();
-      body += `<tr class="hgz-data-row" data-rowid="${row.rowid}">`;
-      const timePrefill = prefilled.has('__time__');
-      body += `<td class="hgz-col-time"><input type="text" class="hgz-cell${timePrefill ? ' hgz-prefill' : ''}" data-field="__time__" value="${escapeHtml(formatTime(row.ts_ns))}" inputmode="numeric" /></td>`;
+      html += `<div class="hgz-row-card" data-rowid="${row.rowid}" role="button" tabindex="0">`;
+      html += `<div class="hgz-row-card-head">`;
+      html += `<span class="hgz-row-card-time">${escapeHtml(formatTime(row.ts_ns))}</span>`;
+      html += `<button type="button" class="hgz-delBtn" data-del-row="${row.rowid}" title="Delete entry">×</button>`;
+      html += `</div><div class="hgz-row-card-body">`;
       for (const f of fields) {
-        const val = row.values?.[f.key] ?? '';
-        const isPrefill = prefilled.has(f.key);
-        const kind = cellInputType(f);
-        if (kind === 'select') {
-          let opts = '<option value="">—</option>';
-          for (const o of f.options || []) {
-            const sel = String(val) === String(o) ? ' selected' : '';
-            opts += `<option value="${escapeHtml(o)}"${sel}>${escapeHtml(o)}</option>`;
-          }
-          body += `<td><select class="hgz-cell${isPrefill ? ' hgz-prefill' : ''}" data-field="${escapeHtml(f.key)}">${opts}</select></td>`;
-        } else if (kind === 'number') {
-          body += `<td><input class="hgz-cell${isPrefill ? ' hgz-prefill' : ''}" data-field="${escapeHtml(f.key)}" value="${escapeHtml(val)}"${numberFieldAttrs(f)} /></td>`;
-        } else {
-          body += `<td><input type="text" class="hgz-cell${isPrefill ? ' hgz-prefill' : ''}" data-field="${escapeHtml(f.key)}" value="${escapeHtml(val)}" inputmode="text" /></td>`;
-        }
+        const val = row.values?.[f.key];
+        const display = formatFieldDisplay(val, f);
+        const emptyCls = display ? '' : ' hgz-empty-val';
+        const text = display || '—';
+        html += `<div class="hgz-field-line"><span class="lbl">${escapeHtml(f.label)}</span>`;
+        html += `<span class="val${emptyCls}">${escapeHtml(text)}</span></div>`;
       }
-      body += `<td class="hgz-col-del"><button type="button" class="hgz-delBtn" data-del-row="${row.rowid}" title="Delete row">×</button></td></tr>`;
+      html += `</div></div>`;
     }
-    const colSpan = fields.length + 2;
-    body += `<tr class="hgz-add-row" data-hgz-add-row role="button" tabindex="0"><td colspan="${colSpan}">Add new row</td></tr>`;
-    bodyEl.innerHTML = body;
+    bodyEl.innerHTML = html;
+  }
 
-    for (const inp of bodyEl.querySelectorAll('.hgz-cell')) {
+  function wireRowInputs(container) {
+    for (const inp of container.querySelectorAll('.hgz-row-input')) {
       const handler = () => onCellEdit(inp);
       inp.addEventListener('input', handler);
       inp.addEventListener('change', handler);
-      inp.addEventListener('blur', () => {
-        flushPatch(inp, true);
-        fitColumnWidths(headEl, bodyEl);
+      inp.addEventListener('focus', () => {
+        if (inp.classList.contains('hgz-prefill')) {
+          inp.classList.remove('hgz-prefill');
+          const rowid = Number(inp.dataset.rowid);
+          clearPrefill(rowid, inp.dataset.field);
+        }
       });
     }
-    for (const btn of bodyEl.querySelectorAll('[data-del-row]')) {
-      btn.addEventListener('click', () => deleteRow(Number(btn.dataset.delRow)));
-    }
-    const addRowEl = bodyEl.querySelector('[data-hgz-add-row]');
-    addRowEl?.addEventListener('click', () => addRow());
-    addRowEl?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        addRow();
-      }
-    });
-    fitColumnWidths(headEl, bodyEl);
   }
 
-  function fitColumnWidths(headEl, bodyEl) {
-    const heads = [...headEl.querySelectorAll('th')];
-    if (!heads.length) return;
+  function openRowDialog(rowid) {
+    if (!ui.rowDlg) ui.rowDlg = document.getElementById('hgzRowDlg');
+    const log = activeLog();
+    const rid = Number(rowid);
+    const row = data.rows.find((r) => Number(r.rowid) === rid);
+    if (!log || !row || !ui.rowDlg) return;
+    rowEditId = rid;
+    const fields = fieldsForLog(log);
+    const prefilled = data.prefill.get(rowid) || new Set();
+    const titleEl = ui.rowDlg.querySelector('[data-hgz-row-title]');
+    if (titleEl) titleEl.textContent = log.display_name || 'Entry';
 
-    const clear = (cells) => {
-      for (const c of cells) {
-        c.style.width = '';
-        c.style.minWidth = '';
-        c.style.maxWidth = '';
-        c.style.flexBasis = '';
-      }
-    };
-    clear(heads);
-    for (const tr of bodyEl.querySelectorAll('tr.hgz-data-row')) {
-      clear([...tr.querySelectorAll('td')]);
+    const fieldsEl = ui.rowDlg.querySelector('[data-hgz-row-fields]');
+    if (!fieldsEl) return;
+
+    let html = '';
+    const timePrefill = prefilled.has('__time__');
+    html +=
+      `<label class="hgz-row-field">` +
+      `<span class="hgz-row-label">Time (HH:MM)</span>` +
+      `<input type="text" class="hgz-row-input hgz-row-input-time${timePrefill ? ' hgz-prefill' : ''}" data-rowid="${rowid}" data-field="__time__" value="${escapeHtml(formatTime(row.ts_ns))}" inputmode="numeric" placeholder="21:15" />` +
+      `</label>`;
+
+    if (fields.length === 0) {
+      html += '<p class="hgz-empty hgz-row-no-cols">No columns yet — close and tap <strong>Edit</strong> to add fields.</p>';
     }
 
-    const measureCell = (cell) => {
-      const control = cell.querySelector('.hgz-cell, .hgz-delBtn');
-      if (control) {
-        return Math.ceil(Math.max(cell.offsetWidth, control.scrollWidth));
-      }
-      return cell.offsetWidth;
-    };
-
-    const widths = heads.map((th) => measureCell(th));
-    for (const tr of bodyEl.querySelectorAll('tr.hgz-data-row')) {
-      tr.querySelectorAll('td').forEach((td, i) => {
-        widths[i] = Math.max(widths[i] || 0, measureCell(td));
-      });
+    for (const f of fields) {
+      const val = row.values?.[f.key] ?? '';
+      const isPrefill = prefilled.has(f.key);
+      html +=
+        `<label class="hgz-row-field">` +
+        `<span class="hgz-row-label">${escapeHtml(fieldLabel(f))}</span>` +
+        fieldInputHtml(rowid, f, val, isPrefill) +
+        `</label>`;
     }
+    fieldsEl.innerHTML = html;
+    wireRowInputs(fieldsEl);
+    ui.rowDlg.showModal();
+    requestAnimationFrame(() => {
+      const firstEmpty = fieldsEl.querySelector('.hgz-row-input:not(.hgz-row-input-time)');
+      const focusEl = firstEmpty && !firstEmpty.value ? firstEmpty : fieldsEl.querySelector('.hgz-row-input');
+      focusEl?.focus({ preventScroll: true });
+    });
+  }
 
-    const apply = (cells) => {
-      cells.forEach((cell, i) => {
-        const w = Math.ceil(widths[i] || 0);
-        if (w <= 0) return;
-        cell.style.flexBasis = `${w}px`;
-        cell.style.width = `${w}px`;
-        cell.style.maxWidth = `${w}px`;
-      });
-    };
-    apply(heads);
-    for (const tr of bodyEl.querySelectorAll('tr.hgz-data-row')) {
-      apply([...tr.querySelectorAll('td')]);
+  function closeRowDialog() {
+    if (!ui.rowDlg?.open) return;
+    for (const inp of ui.rowDlg.querySelectorAll('.hgz-row-input')) {
+      flushPatch(inp, true);
     }
+    ui.rowDlg.close();
+  }
+
+  function wireRowDialog() {
+    if (!ui.rowDlg || ui.rowDlg.dataset.wired) return;
+    ui.rowDlg.dataset.wired = '1';
+    const fieldsEl = ui.rowDlg.querySelector('[data-hgz-row-fields]');
+    KFTap.bindFieldFocus(fieldsEl, '.hgz-row-field', '.hgz-row-input');
+    KFTap.bindPress(ui.rowDlg, '[data-hgz-row-done]', () => closeRowDialog());
+    KFTap.bindPress(ui.rowDlg, '[data-hgz-row-del]', async () => {
+      if (rowEditId == null) return;
+      const id = rowEditId;
+      closeRowDialog();
+      await deleteRow(id);
+    });
+    ui.rowDlg.addEventListener('cancel', (ev) => {
+      ev.preventDefault();
+      closeRowDialog();
+    });
+    ui.rowDlg.addEventListener('close', () => {
+      rowEditId = null;
+      renderRows();
+    });
   }
 
   function clearPrefill(rowid, field) {
@@ -358,9 +457,8 @@ const KFHowgozit = (function () {
   }
 
   function onCellEdit(inp) {
-    const tr = inp.closest('tr');
-    if (!tr) return;
-    const rowid = Number(tr.dataset.rowid);
+    const rowid = Number(inp.dataset.rowid);
+    if (!rowid) return;
     const field = inp.dataset.field;
     inp.classList.remove('hgz-prefill');
     clearPrefill(rowid, field);
@@ -368,9 +466,8 @@ const KFHowgozit = (function () {
   }
 
   function flushPatch(inp, immediate) {
-    const tr = inp.closest('tr');
-    if (!tr) return;
-    const rowid = Number(tr.dataset.rowid);
+    const rowid = Number(inp.dataset.rowid);
+    if (!rowid) return;
     const field = inp.dataset.field;
     const key = `${rowid}:${field}`;
     if (patchTimers.has(key)) {
@@ -442,8 +539,9 @@ const KFHowgozit = (function () {
         data.prefill.set(row.rowid, prefillSet);
       }
       data.rows.push(row);
-      renderTable();
-      ui.tableWrap?.scrollTo({ top: ui.tableWrap.scrollHeight, behavior: 'smooth' });
+      renderRows();
+      ui.scrollEl?.scrollTo({ top: ui.scrollEl.scrollHeight, behavior: 'smooth' });
+      requestAnimationFrame(() => openRowDialog(row.rowid));
     } catch (e) {
       console.error('howgozit add row', e);
     }
@@ -456,7 +554,7 @@ const KFHowgozit = (function () {
       await api('DELETE', `/logs/${encodeURIComponent(log.log_id)}/rows/${rowid}`);
       data.rows = data.rows.filter((r) => r.rowid !== rowid);
       data.prefill.delete(rowid);
-      renderTable();
+      renderRows();
     } catch (e) {
       console.error('howgozit delete row', e);
     }
@@ -474,16 +572,6 @@ const KFHowgozit = (function () {
         `<span class="dim hgz-pick-meta">${tmpl.fields.length} col(s)</span></button>`;
     }
     list.innerHTML = html;
-    list.querySelector('[data-pick-new]')?.addEventListener('click', () => {
-      ui.addLogDlg.close();
-      createLog({ new: true, name: 'New log' });
-    });
-    for (const btn of list.querySelectorAll('[data-pick-tmpl]')) {
-      btn.addEventListener('click', () => {
-        ui.addLogDlg.close();
-        createLog({ template_id: btn.dataset.pickTmpl });
-      });
-    }
     ui.addLogDlg.showModal();
   }
 
@@ -495,7 +583,7 @@ const KFHowgozit = (function () {
       data.prefill.clear();
       await loadRows();
       renderTabs();
-      renderTable();
+      renderRows();
     } catch (e) {
       console.error('howgozit create log', e);
       alert('Could not create log: ' + e.message);
@@ -601,41 +689,6 @@ const KFHowgozit = (function () {
         if (optRow) optRow.hidden = sel.value !== 'select';
       });
     });
-    list.querySelectorAll('[data-move-up]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        syncDraftFromDom();
-        const idx = Number(btn.closest('[data-hgz-field-row]')?.dataset.fieldIdx);
-        if (idx <= 0) return;
-        const tmp = editDraft.fields[idx - 1];
-        editDraft.fields[idx - 1] = editDraft.fields[idx];
-        editDraft.fields[idx] = tmp;
-        renderEditFields();
-      });
-    });
-    list.querySelectorAll('[data-move-down]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        syncDraftFromDom();
-        const idx = Number(btn.closest('[data-hgz-field-row]')?.dataset.fieldIdx);
-        if (idx < 0 || idx >= editDraft.fields.length - 1) return;
-        const tmp = editDraft.fields[idx + 1];
-        editDraft.fields[idx + 1] = editDraft.fields[idx];
-        editDraft.fields[idx] = tmp;
-        renderEditFields();
-      });
-    });
-    list.querySelectorAll('[data-del-field]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        syncDraftFromDom();
-        const idx = Number(btn.closest('[data-hgz-field-row]')?.dataset.fieldIdx);
-        const field = editDraft.fields[idx];
-        if (!field) return;
-        if (columnHasRowData(field.key)) {
-          if (!confirm(`Delete column "${field.label}" and all its row values?`)) return;
-        }
-        editDraft.fields.splice(idx, 1);
-        renderEditFields();
-      });
-    });
   }
 
   function openEditDialog() {
@@ -651,8 +704,11 @@ const KFHowgozit = (function () {
       fields: (log.fields || []).map(cloneField),
     };
     const form = document.getElementById('hgzEditForm');
-    form?.reset();
-    form?.querySelector('[name="display_name"]').value = editDraft.display_name;
+    if (form) {
+      form.reset();
+      const nameEl = form.querySelector('[name="display_name"]');
+      if (nameEl) nameEl.value = editDraft.display_name;
+    }
     const typeSel = form?.querySelector('[name="new_type"]');
     const optRow = form?.querySelector('[data-hgz-edit-new-options]');
     if (typeSel && optRow) optRow.hidden = typeSel.value !== 'select';
@@ -697,41 +753,6 @@ const KFHowgozit = (function () {
       if (optRow) optRow.hidden = typeSel.value !== 'select';
     });
 
-    form.querySelector('[data-hgz-edit-add-col]')?.addEventListener('click', () => {
-      try {
-        syncDraftFromDom();
-        const field = parseNewColumnForm(form);
-        editDraft.fields.push(field);
-        form.querySelector('[name="new_key"]').value = '';
-        form.querySelector('[name="new_label"]').value = '';
-        form.querySelector('[name="new_unit"]').value = '';
-        form.querySelector('[name="new_step"]').value = '';
-        form.querySelector('[name="new_options"]').value = '';
-        renderEditFields();
-      } catch (e) {
-        alert(e.message);
-      }
-    });
-
-    form.querySelector('[data-hgz-delete-log]')?.addEventListener('click', async () => {
-      const log = activeLog();
-      if (!log || !editDraft) return;
-      if (!confirm(`Delete log "${log.display_name}" and all its rows?`)) return;
-      try {
-        await api('DELETE', `/logs/${encodeURIComponent(log.log_id)}`);
-        data.logs = data.logs.filter((l) => l.log_id !== log.log_id);
-        data.activeLogId = data.logs[0]?.log_id || null;
-        data.rows = [];
-        data.prefill.clear();
-        editDraft = null;
-        ui.editDlg.close();
-        renderTabs();
-        renderTable();
-      } catch (e) {
-        alert('Delete log failed: ' + e.message);
-      }
-    });
-
     form.addEventListener('submit', async (ev) => {
       ev.preventDefault();
       if (!editDraft) return;
@@ -747,7 +768,7 @@ const KFHowgozit = (function () {
         ui.editDlg.close();
         await loadRows();
         renderTabs();
-        renderTable();
+        renderRows();
       } catch (e) {
         alert('Save failed: ' + e.message);
       }
@@ -799,15 +820,16 @@ const KFHowgozit = (function () {
       await loadAll();
       await loadRows();
       renderTabs();
-      renderTable();
+      renderRows();
     } catch (e) {
       console.error('howgozit load', e);
       const body = ui.root && ui.root.querySelector('[data-hgz-body]');
       if (body) {
-        body.innerHTML = `<tr><td class="hgz-empty" colspan="99">Load error: ${escapeHtml(e.message)}</td></tr>`;
+        body.innerHTML = `<p class="hgz-empty">Load error: ${escapeHtml(e.message)}</p>`;
       }
     }
   }
 
   return { show, mount };
 })();
+window.KFHowgozit = KFHowgozit;

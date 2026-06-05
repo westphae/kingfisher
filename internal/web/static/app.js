@@ -85,6 +85,17 @@ function parseRoute() {
   return { view: 'sensors', sensor: null };
 }
 
+// Apply route immediately; do not rely on hashchange alone (iOS Safari can defer
+// it while the main thread is busy re-rendering the overview on WS ticks).
+function setRoute(hash) {
+  const normalized = hash.startsWith('#') ? hash : '#' + hash;
+  if (location.hash !== normalized) {
+    location.hash = normalized;
+  }
+  applyRoute();
+}
+window.KFSetRoute = setRoute;
+
 function applyRoute() {
   const r = parseRoute();
   state.routeView = r.view;
@@ -111,7 +122,7 @@ function applyRoute() {
   if (onDetail) {
     openSensorDetail(r.sensor);
   } else if (onSensors) {
-    renderOverview();
+    renderOverview(true);
   } else if (r.view === 'instruments') {
     renderInstruments();
   } else if (r.view === 'howgozit') {
@@ -134,10 +145,53 @@ function renderInstruments() {
 function renderHowgozit() {
   const mount = document.getElementById('howgozitMount');
   if (!mount) return;
-  KFHowgozit.show(mount);
+  const mod = window.KFHowgozit;
+  if (!mod) {
+    mount.innerHTML = '<p class="dim" style="padding:1rem">Howgozit failed to initialize.</p>';
+    return;
+  }
+  void mod.show(mount);
 }
 
-function renderOverview() {
+function overviewDataSig() {
+  const parts = [];
+  for (const name of KFOverview.sortedOverviewDevices(state.deviceNames)) {
+    const sm = state.devices.get(name);
+    parts.push(name, String(sm?.ts_ns ?? ''));
+    const vals = sm?.values;
+    if (vals) {
+      for (const k of Object.keys(vals).sort()) {
+        parts.push(k, String(vals[k]));
+      }
+    }
+  }
+  return parts.join('\0');
+}
+
+let lastOverviewSig = '';
+const OVERVIEW_RENDER_MIN_MS = 250;
+let lastOverviewRenderMs = 0;
+let overviewRenderTimer = null;
+
+function renderOverview(force) {
+  const now = performance.now();
+  if (!force && now - lastOverviewRenderMs < OVERVIEW_RENDER_MIN_MS) {
+    if (!overviewRenderTimer) {
+      overviewRenderTimer = setTimeout(() => {
+        overviewRenderTimer = null;
+        if (state.routeView === 'sensors' && !state.activeSensor) renderOverview(true);
+      }, OVERVIEW_RENDER_MIN_MS - (now - lastOverviewRenderMs));
+    }
+    return;
+  }
+  if (overviewRenderTimer) {
+    clearTimeout(overviewRenderTimer);
+    overviewRenderTimer = null;
+  }
+  lastOverviewRenderMs = now;
+  const sig = overviewDataSig();
+  if (!force && sig === lastOverviewSig) return;
+  lastOverviewSig = sig;
   KFOverview.render(viewOverviewEl, (name) => state.devices.get(name));
   // The render above rewrites innerHTML, wiping any kf-stale classes the
   // 1 Hz markStaleness pass applied. Re-apply in the same frame so stale
@@ -162,7 +216,7 @@ function rebuildDetailPanel() {
 
 function openSensorDetail(name) {
   if (!state.deviceNames.has(name)) {
-    location.hash = '#/';
+    setRoute('#/');
     return;
   }
   const loc = state.deviceLocation.get(name) || inferDeviceLocation(name) || '';
@@ -368,10 +422,10 @@ function wireCompassSettings() {
     }
   };
   if (gpsBtn) {
-    gpsBtn.addEventListener('click', () => doAlign({ manual_heading_deg: null }));
+    KFTap.bindTap(gpsBtn, () => doAlign({ manual_heading_deg: null }));
   }
   if (manBtn) {
-    manBtn.addEventListener('click', () => {
+    KFTap.bindTap(manBtn, () => {
       const inp = document.getElementById('compassManualHdg');
       const v = inp ? Number(inp.value) : NaN;
       if (!Number.isFinite(v)) {
@@ -448,7 +502,7 @@ function wireAirspeedSettings() {
   const emaChk = document.getElementById('airspeedEmaEnabled');
   if (emaChk) emaChk.addEventListener('change', saveDebounced);
   if (zeroBtn) {
-    zeroBtn.addEventListener('click', async () => {
+    KFTap.bindTap(zeroBtn, async () => {
       const durationS = 15;
       if (msg) msg.textContent = `Sampling… ${durationS}s remaining`;
       zeroBtn.disabled = true;
@@ -762,9 +816,9 @@ function wireClockResyncButtons(root) {
   if (!root) return;
   const retryBtn = root.querySelector('[data-clock-resync="light"]');
   const fullBtn = root.querySelector('[data-clock-resync="full"]');
-  if (retryBtn) {
-    retryBtn.addEventListener('click', async (ev) => {
-      ev.preventDefault();
+  if (retryBtn && retryBtn.dataset.tapWired !== '1') {
+    retryBtn.dataset.tapWired = '1';
+    KFTap.bindTap(retryBtn, async () => {
       retryBtn.disabled = true;
       try {
         await clockResync('light');
@@ -773,9 +827,9 @@ function wireClockResyncButtons(root) {
       }
     });
   }
-  if (fullBtn) {
-    fullBtn.addEventListener('click', async (ev) => {
-      ev.preventDefault();
+  if (fullBtn && fullBtn.dataset.tapWired !== '1') {
+    fullBtn.dataset.tapWired = '1';
+    KFTap.bindTap(fullBtn, async () => {
       const ok = confirm(
         'Restart chronyd and gpsd? If GPS offset is far off, the offset will be auto-corrected first. Discipline may pause for a few seconds.'
       );
@@ -929,9 +983,6 @@ function renderStatusChips() {
   if (!statusChipsEl) return;
   const chips = [compactClockChip(), compactPodChip()].filter(Boolean);
   statusChipsEl.innerHTML = chips.join('') || '<span class="dim">Status loading…</span>';
-  for (const btn of statusChipsEl.querySelectorAll('[data-open-status]')) {
-    btn.addEventListener('click', openStatusDrawer);
-  }
 }
 
 function openStatusDrawer() {
@@ -967,13 +1018,29 @@ function renderCompassPanel() {
 }
 
 function onWsTick() {
-  if (state.routeView === 'sensors' && !state.activeSensor) {
-    renderOverview();
-  } else if (state.activeSensor) {
-    renderActiveSensor();
-  } else if (state.routeView === 'instruments') {
-    renderInstruments();
-  }
+  scheduleUiRefresh();
+}
+
+let uiRefreshPending = false;
+
+function modalOpen() {
+  return !!document.querySelector('dialog[open]');
+}
+
+function scheduleUiRefresh() {
+  if (uiRefreshPending) return;
+  uiRefreshPending = true;
+  requestAnimationFrame(() => {
+    uiRefreshPending = false;
+    if (modalOpen()) return;
+    if (state.routeView === 'sensors' && !state.activeSensor) {
+      renderOverview(false);
+    } else if (state.activeSensor) {
+      renderActiveSensor();
+    } else if (state.routeView === 'instruments') {
+      renderInstruments();
+    }
+  });
 }
 
 function escapeAttr(s) { return String(s ?? '').replace(/"/g, '&quot;'); }
@@ -1119,22 +1186,6 @@ function setPausedUI(paused) {
   state.paused = paused;
   updateRecordingUI();
 }
-
-pauseBtn?.addEventListener('click', async () => {
-  if (!state.serverConnected) return;
-  const next = !state.paused;
-  try {
-    const r = await fetch('/api/recording', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paused: next }),
-    });
-    if (r.ok) {
-      const j = await r.json();
-      setPausedUI(!!j.paused);
-    }
-  } catch {}
-});
 
 function formatPodFooter(pod) {
   if (!pod || !pod.enabled) return '';
@@ -1296,70 +1347,113 @@ function markStaleness() {
 }
 setInterval(markStaleness, 1000);
 
-detailBackEl?.addEventListener('click', () => {
-  location.hash = '#/';
-});
+function wireUiTaps() {
+  KFTap.wireDialogCloses();
+
+  document.addEventListener(
+    'close',
+    (ev) => {
+      if (ev.target instanceof HTMLDialogElement) scheduleUiRefresh();
+    },
+    true
+  );
+
+  KFTap.bindPress(statusChipsEl, '[data-open-status]', () => openStatusDrawer());
+
+  KFTap.bindTap(detailBackEl, () => setRoute('#/'));
+
+  KFTap.bindTap(pauseBtn, async () => {
+    if (!state.serverConnected) return;
+    const next = !state.paused;
+    try {
+      const r = await fetch('/api/recording', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paused: next }),
+      });
+      if (r.ok) {
+        const j = await r.json();
+        setPausedUI(!!j.paused);
+      }
+    } catch {}
+  });
+
+  KFTap.bindTap(menuBtn, () => {
+    refreshStatus();
+    moreSheet.showModal();
+  });
+
+  KFTap.bindTap(document.getElementById('moreTerminalBtn'), () => {
+    moreSheet.close();
+    location.href = '/terminal';
+  });
+
+  KFTap.bindTap(document.getElementById('moreSettingsBtn'), () => {
+    moreSheet.close();
+    openSettingsDialog();
+  });
+
+  KFTap.bindTap(document.getElementById('moreStatusBtn'), () => {
+    moreSheet.close();
+    openStatusDrawer();
+  });
+
+  KFTap.bindTap(document.getElementById('cfgSave'), async (e) => {
+    e.preventDefault();
+    const cfg = settingsDlg._cfg || {};
+    cfg.aircraft = document.getElementById('cfgAircraft').value;
+    cfg.notes = document.getElementById('cfgNotes').value;
+    cfg.flush_seconds = parseInt(document.getElementById('cfgFlush').value, 10) || 5;
+    const bt = document.getElementById('cfgBigText');
+    if (bt) setBigText(bt.checked);
+    await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg),
+    });
+    if (hdrTailEl) hdrTailEl.textContent = cfg.aircraft || '';
+    settingsDlg.close();
+  });
+
+  for (const btn of document.querySelectorAll('#bottomNav .bottomNavBtn')) {
+    KFTap.bindTap(btn, () => {
+      const nav = btn.dataset.nav;
+      if (nav === 'sensors') {
+        setRoute('#/');
+      } else if (nav === 'instruments') {
+        setRoute('#/instruments');
+      } else if (nav === 'howgozit') {
+        setRoute('#/howgozit');
+      } else if (nav === 'more') {
+        refreshStatus();
+        moreSheet.showModal();
+      }
+    });
+  }
+
+  wireOverviewNav();
+}
+
+function wireOverviewNav() {
+  if (!viewOverviewEl || viewOverviewEl.dataset.navWired === '1') return;
+  viewOverviewEl.dataset.navWired = '1';
+  KFTap.bindPress(viewOverviewEl, '.ovBlock', (ev, block) => {
+    const device = block.dataset.device;
+    if (device) setRoute(`#/sensor/${encodeURIComponent(device)}`);
+  });
+  viewOverviewEl.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter' && ev.key !== ' ') return;
+    const block = ev.target.closest('.ovBlock');
+    if (!block) return;
+    ev.preventDefault();
+    const device = block.dataset.device;
+    if (device) setRoute(`#/sensor/${encodeURIComponent(device)}`);
+  });
+}
 
 window.addEventListener('hashchange', applyRoute);
 window.addEventListener('pageshow', (ev) => {
   if (ev.persisted && state.routeView === 'howgozit') renderHowgozit();
-});
-
-for (const btn of document.querySelectorAll('#bottomNav .bottomNavBtn')) {
-  btn.addEventListener('click', () => {
-    const nav = btn.dataset.nav;
-    if (nav === 'sensors') {
-      location.hash = '#/';
-    } else if (nav === 'instruments') {
-      location.hash = '#/instruments';
-    } else if (nav === 'howgozit') {
-      if (location.hash !== '#/howgozit') {
-        location.hash = '#/howgozit';
-      } else {
-        applyRoute();
-      }
-    } else if (nav === 'more') {
-      refreshStatus();
-      moreSheet.showModal();
-    }
-  });
-}
-
-menuBtn?.addEventListener('click', () => {
-  refreshStatus();
-  moreSheet.showModal();
-});
-
-document.getElementById('moreTerminalBtn')?.addEventListener('click', () => {
-  moreSheet.close();
-  location.href = '/terminal';
-});
-
-document.getElementById('moreSettingsBtn')?.addEventListener('click', () => {
-  moreSheet.close();
-  openSettingsDialog();
-});
-
-document.getElementById('moreStatusBtn')?.addEventListener('click', () => {
-  moreSheet.close();
-  openStatusDrawer();
-});
-
-document.getElementById('cfgSave')?.addEventListener('click', async (e) => {
-  e.preventDefault();
-  const cfg = settingsDlg._cfg || {};
-  cfg.aircraft = document.getElementById('cfgAircraft').value;
-  cfg.notes = document.getElementById('cfgNotes').value;
-  cfg.flush_seconds = parseInt(document.getElementById('cfgFlush').value, 10) || 5;
-  const bt = document.getElementById('cfgBigText');
-  if (bt) setBigText(bt.checked);
-  await fetch('/api/config', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(cfg),
-  });
-  if (hdrTailEl) hdrTailEl.textContent = cfg.aircraft || '';
-  settingsDlg.close();
 });
 
 (async function init() {
@@ -1374,6 +1468,7 @@ document.getElementById('cfgSave')?.addEventListener('click', async (e) => {
   for (const d of CALC_DEVICES) ensureDevice(d);
   ensureDevice('gps');
   await preloadDeviceLocations();
+  wireUiTaps();
   if (!location.hash || location.hash === '#') {
     location.hash = '#/';
   }

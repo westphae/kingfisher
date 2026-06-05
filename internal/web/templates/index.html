@@ -60,8 +60,8 @@
       <label>Flush seconds <input id="cfgFlush" type="number" min="1" max="60" /></label>
       <label class="cfgCheckbox"><input id="cfgBigText" type="checkbox" /> Big text (in-flight)</label>
       <div class="dlgRow">
-        <button id="cfgSave" value="save">Save</button>
-        <button value="cancel">Cancel</button>
+        <button type="button" id="cfgSave" value="save">Save</button>
+        <button type="button" value="cancel">Cancel</button>
       </div>
     </form>
   </dialog>
@@ -76,7 +76,7 @@
         <button type="button" id="moreSettingsBtn">Settings</button>
       </div>
       <div class="dlgRow">
-        <button value="cancel">Close</button>
+        <button type="button" value="cancel">Close</button>
       </div>
     </form>
   </dialog>
@@ -87,13 +87,71 @@
       <div id="statusDrawerClock" class="statusDrawerBlock"></div>
       <div id="statusDrawerPod" class="statusDrawerBlock"></div>
       <div class="dlgRow">
-        <button value="cancel">Close</button>
+        <button type="button" value="cancel">Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="hgzAddLogDlg" class="sheet" data-hgz-add-log-dlg>
+    <form method="dialog">
+      <h2>Add log</h2>
+      <p class="dim hgz-dlgHint">Pick a template to seed columns, or start blank.</p>
+      <div class="hgz-pick-list" data-hgz-add-log-list></div>
+      <div class="dlgRow"><button type="button" value="cancel">Cancel</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="hgzEditDlg" class="sheet sheet-wide" data-hgz-edit-dlg>
+    <form method="dialog" id="hgzEditForm">
+      <h2>Edit log</h2>
+      <label>Log name <input name="display_name" autocomplete="off" required /></label>
+      <p class="dim hgz-dlgHint">Column keys are fixed after creation; edit labels and parameters below.</p>
+      <div class="hgz-edit-fields" data-hgz-edit-fields></div>
+      <div class="hgz-edit-add" data-hgz-edit-add>
+        <h3>Add column</h3>
+        <div class="hgz-edit-add-grid">
+          <label>Key <input name="new_key" pattern="[A-Za-z0-9_]+" autocomplete="off" /></label>
+          <label>Label <input name="new_label" autocomplete="off" /></label>
+          <label>Type <select name="new_type"><option value="text">text</option><option value="number" selected>number</option><option value="select">select</option></select></label>
+          <label>Unit <input name="new_unit" autocomplete="off" placeholder="optional" /></label>
+          <label>Step <input name="new_step" autocomplete="off" placeholder="e.g. 0.01" /></label>
+          <label>Input mode <select name="new_input_mode"><option value="">default</option><option value="decimal">decimal</option><option value="numeric">numeric</option><option value="text">text</option></select></label>
+          <label data-hgz-edit-new-options hidden>Options (comma-separated) <input name="new_options" autocomplete="off" /></label>
+        </div>
+        <button type="button" class="hgz-edit-addBtn" data-hgz-edit-add-col>+ Add column</button>
+      </div>
+      <div class="hgz-edit-danger"><button type="button" class="hgz-delLogBtn" data-hgz-delete-log>Delete log</button></div>
+      <div class="dlgRow"><button type="submit" value="save">Save</button><button type="button" value="cancel">Cancel</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="hgzToTmplDlg" class="sheet" data-hgz-to-tmpl-dlg>
+    <form method="dialog" id="hgzToTmplForm">
+      <h2>Save as template</h2>
+      <label>Template id <input name="id" required pattern="[A-Za-z0-9_]+" autocomplete="off" /></label>
+      <label>Name <input name="name" autocomplete="off" /></label>
+      <label class="cfgCheckbox"><input name="replace" type="checkbox" /> Replace existing template with same id</label>
+      <div class="dlgRow"><button type="submit" value="save">Save</button><button type="button" value="cancel">Cancel</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="hgzRowDlg" class="sheet sheet-wide hgz-row-dlg" data-hgz-row-dlg>
+    <form method="dialog" id="hgzRowForm">
+      <div class="hgz-row-dlg-head">
+        <h2 data-hgz-row-title>Entry</h2>
+        <p class="dim hgz-row-dlg-hint">Tap each field to enter values. Prefilled cells copy the previous row.</p>
+      </div>
+      <div class="hgz-row-fields" data-hgz-row-fields></div>
+      <div class="hgz-row-dlg-actions">
+        <button type="button" class="hgz-row-delBtn" data-hgz-row-del>Delete entry</button>
+        <button type="button" class="hgz-row-doneBtn" data-hgz-row-done>Done</button>
       </div>
     </form>
   </dialog>
 
   <script>window.KF_INITIAL_DEVICES = {{.Devices}};</script>
   <script src="/static/display.js"></script>
+  <script src="/static/tap.js"></script>
   <script src="/static/compass.js"></script>
   <script src="/static/airspeed.js"></script>
   <script src="/static/pfd.js"></script>

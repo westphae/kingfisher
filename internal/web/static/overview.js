@@ -83,17 +83,6 @@ const KFOverview = (function () {
       }
     }
     container.innerHTML = html;
-    for (const block of container.querySelectorAll('.ovBlock')) {
-      const device = block.dataset.device;
-      const go = () => { location.hash = `#/sensor/${encodeURIComponent(device)}`; };
-      block.addEventListener('click', go);
-      block.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          go();
-        }
-      });
-    }
   }
 
   return { render, sortedOverviewDevices, groupedDevices };
