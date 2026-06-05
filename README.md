@@ -246,9 +246,14 @@ kingfisher first so the reverse proxy has a backend on `:8080`.
 
    ```bash
    systemctl --user status kingfisher.service
-   journalctl --user -u kingfisher.service -f
+   journalctl --user-unit=kingfisher.service -f
    curl -s http://127.0.0.1:8080/api/status | head
    ```
+
+   Use **`--user-unit`** (not `journalctl --user`): on Raspberry Pi OS the user
+   manager logs to the **system** journal; there is no separate per-user journal
+   file under `/run/user/$UID/journal`, so `journalctl --user` shows nothing even
+   though `systemctl --user status` does.
 
 The unit runs `chronyc waitsync 120 0.25` before opening today's flight DB:
 up to **120 tries** at the default **10 s** interval (~**20 minutes** worst case)

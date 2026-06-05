@@ -11,7 +11,7 @@
 #   sudo loginctl enable-linger "$USER"    # start at boot without an SSH session
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now kingfisher.service
-#   journalctl --user -u kingfisher.service -f
+#   journalctl --user-unit=kingfisher.service -f
 #
 # See README.md § "systemd user service (boot)" for ordering with chrony/gpsd and Caddy.
 
