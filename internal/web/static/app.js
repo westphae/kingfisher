@@ -18,6 +18,7 @@ const state = {
 const viewOverviewEl = document.getElementById('viewOverview');
 const viewDetailEl = document.getElementById('viewDetail');
 const viewInstrumentsEl = document.getElementById('viewInstruments');
+const viewHowgozitEl = document.getElementById('viewHowgozit');
 const detailPanelEl = document.getElementById('detailPanel');
 const detailTitleEl = document.getElementById('detailTitle');
 const detailBackEl = document.getElementById('detailBack');
@@ -78,6 +79,7 @@ function parseRoute() {
   const raw = (location.hash || '#/').replace(/^#/, '');
   const path = raw.startsWith('/') ? raw : '/' + raw;
   if (path === '/instruments') return { view: 'instruments', sensor: null };
+  if (path === '/howgozit') return { view: 'howgozit', sensor: null };
   const m = path.match(/^\/sensor\/(.+)$/);
   if (m) return { view: 'sensors', sensor: decodeURIComponent(m[1]) };
   return { view: 'sensors', sensor: null };
@@ -93,12 +95,16 @@ function applyRoute() {
   viewOverviewEl.classList.toggle('view-active', onSensors && !onDetail);
   viewDetailEl.classList.toggle('view-active', !!onDetail);
   viewInstrumentsEl.classList.toggle('view-active', r.view === 'instruments');
+  if (viewHowgozitEl) {
+    viewHowgozitEl.classList.toggle('view-active', r.view === 'howgozit');
+  }
 
   for (const btn of document.querySelectorAll('#bottomNav .bottomNavBtn')) {
     const nav = btn.dataset.nav;
     let active = false;
     if (nav === 'sensors') active = onSensors;
     else if (nav === 'instruments') active = r.view === 'instruments';
+    else if (nav === 'howgozit') active = r.view === 'howgozit';
     btn.classList.toggle('active', active);
   }
 
@@ -108,6 +114,8 @@ function applyRoute() {
     renderOverview();
   } else if (r.view === 'instruments') {
     renderInstruments();
+  } else if (r.view === 'howgozit') {
+    renderHowgozit();
   }
 }
 
@@ -121,6 +129,12 @@ function renderInstruments() {
     pressAlt: state.devices.get('press_alt'),
     gps: state.devices.get('gps'),
   });
+}
+
+function renderHowgozit() {
+  const mount = document.getElementById('howgozitMount');
+  if (!mount) return;
+  KFHowgozit.show(mount);
 }
 
 function renderOverview() {
@@ -1287,6 +1301,9 @@ detailBackEl?.addEventListener('click', () => {
 });
 
 window.addEventListener('hashchange', applyRoute);
+window.addEventListener('pageshow', (ev) => {
+  if (ev.persisted && state.routeView === 'howgozit') renderHowgozit();
+});
 
 for (const btn of document.querySelectorAll('#bottomNav .bottomNavBtn')) {
   btn.addEventListener('click', () => {
@@ -1295,6 +1312,12 @@ for (const btn of document.querySelectorAll('#bottomNav .bottomNavBtn')) {
       location.hash = '#/';
     } else if (nav === 'instruments') {
       location.hash = '#/instruments';
+    } else if (nav === 'howgozit') {
+      if (location.hash !== '#/howgozit') {
+        location.hash = '#/howgozit';
+      } else {
+        applyRoute();
+      }
     } else if (nav === 'more') {
       refreshStatus();
       moreSheet.showModal();

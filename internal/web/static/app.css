@@ -345,6 +345,18 @@ body {
   padding: 1rem 0.75rem;
 }
 
+#viewHowgozit {
+  padding: 0;
+  overflow: hidden;
+}
+
+#howgozitMount {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .viewHeading {
   margin: 0 0 1rem;
   font-size: 1.25rem;
@@ -563,9 +575,15 @@ body {
   border: 0;
   background: transparent;
   color: var(--dim);
-  font-size: 0.9rem;
+  font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
+}
+
+@media (min-width: 420px) {
+  .bottomNavBtn {
+    font-size: 0.9rem;
+  }
 }
 
 .bottomNavBtn.active {
@@ -1119,3 +1137,383 @@ dialog textarea {
   font-size: var(--ov-label);
   text-align: center;
 }
+
+/* —— Howgozit manual log —— */
+.hgz-root {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.hgz-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  flex-shrink: 0;
+}
+
+.hgz-tabs {
+  display: flex;
+  flex: 1;
+  gap: 0.35rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.hgz-tabs::-webkit-scrollbar { display: none; }
+
+.hgz-tab {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--bg);
+  color: var(--dim);
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.45rem 0.65rem;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.hgz-tab-active {
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.hgz-iconBtn {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.45rem 0.55rem;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.hgz-scroll {
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 0.5rem;
+}
+
+.hgz-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.hgz-table thead,
+.hgz-table tbody {
+  display: block;
+}
+
+.hgz-table thead tr.hgz-head-row,
+.hgz-table tbody tr.hgz-data-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.45rem;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.hgz-table thead tr.hgz-head-row {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--panel);
+}
+
+.hgz-table thead th,
+.hgz-table tbody td {
+  display: block;
+  flex: 0 0 auto;
+  padding: 0;
+  border: none;
+  vertical-align: middle;
+  box-sizing: border-box;
+}
+
+.hgz-table thead th {
+  color: var(--dim);
+  font-weight: 600;
+  text-align: left;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.hgz-col-time {
+  min-width: 0;
+}
+
+.hgz-col-del {
+  text-align: center;
+}
+
+.hgz-dlgHint {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+}
+
+.hgz-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.hgz-pick-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--bg);
+  color: var(--fg);
+  min-height: 52px;
+  padding: 0.65rem 0.75rem;
+  cursor: pointer;
+  width: 100%;
+}
+
+.hgz-pick-item:active {
+  border-color: var(--accent);
+}
+
+.hgz-pick-new {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.hgz-pick-name {
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.hgz-pick-meta {
+  font-size: 0.85rem;
+}
+
+.hgz-cell {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  padding: 0.3rem 0.35rem;
+  box-sizing: border-box;
+  field-sizing: content;
+}
+
+@supports (field-sizing: content) {
+  .hgz-cell:not(select) {
+    width: auto;
+    min-width: 2.5ch;
+    max-width: 100%;
+  }
+}
+
+.hgz-cell.hgz-prefill {
+  background: var(--border);
+  color: var(--dim);
+}
+
+.hgz-cell:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.hgz-delBtn {
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font-size: 1.4rem;
+  line-height: 1;
+  min-width: 44px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.hgz-delBtn:active {
+  color: var(--rec);
+}
+
+.hgz-empty {
+  padding: 1.5rem 0.75rem;
+  color: var(--dim);
+  text-align: center;
+}
+
+.hgz-add-row {
+  display: block;
+  width: 100%;
+}
+
+.hgz-add-row td {
+  padding: 0.85rem 0.75rem;
+  color: var(--dim);
+  text-align: center;
+  cursor: pointer;
+  border-top: 1px dashed var(--border);
+  user-select: none;
+}
+
+.hgz-add-row:active td,
+.hgz-add-row:focus td {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.hgz-add-row:focus {
+  outline: none;
+}
+
+.hgz-add-row:focus-visible td {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.hgz-edit-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 40vh;
+  overflow-y: auto;
+  margin-bottom: 1rem;
+}
+
+.hgz-edit-field {
+  padding: 0.65rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--bg);
+}
+
+.hgz-edit-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.hgz-edit-key {
+  font-family: monospace;
+  font-size: 0.85rem;
+}
+
+.hgz-edit-field-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.hgz-edit-move,
+.hgz-edit-del {
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  background: var(--panel);
+  color: var(--fg);
+  min-width: 2.5rem;
+  min-height: 40px;
+  padding: 0.2rem 0.45rem;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.hgz-edit-del {
+  color: var(--rec);
+}
+
+.hgz-edit-field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.5rem;
+}
+
+.hgz-edit-field-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+}
+
+.hgz-edit-field-grid input,
+.hgz-edit-field-grid select {
+  min-height: 40px;
+}
+
+.hgz-edit-add {
+  margin-bottom: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.hgz-edit-add h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.hgz-edit-add-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.hgz-edit-add-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+}
+
+.hgz-edit-addBtn {
+  border: 1px solid var(--accent);
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--accent);
+  min-height: 44px;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.hgz-edit-danger {
+  margin: 1rem 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.hgz-delLogBtn {
+  border: 1px solid var(--rec);
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--rec);
+  min-height: 44px;
+  padding: 0.4rem 0.85rem;
+  cursor: pointer;
+  font-weight: 600;
+  width: 100%;
+}
+
