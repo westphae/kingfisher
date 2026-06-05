@@ -1,0 +1,23 @@
+---
+description: Cockpit UI touch/tap handling (iPad WebKit + busy main thread)
+globs: internal/web/static/**/*.js, internal/web/templates/**, internal/web/static/**/*.css
+---
+
+# Web UI taps (kingfisher cockpit)
+
+Live sensor DOM updates can block `click` on iPad/WebKit. **Do not use bare `click` listeners** for interactive controls.
+
+Use `KFTap` from `internal/web/static/tap.js` (loaded before `app.js` / `howgozit.js`):
+
+| Control | API |
+|---------|-----|
+| Buttons, nav, list rows | `KFTap.bindPress(root, selector, handler)` |
+| One-off buttons | `KFTap.bindTap(el, handler)` |
+| Dialog / form field focus | `KFTap.bindFieldFocus(container, fieldSelector, inputSelector)` — focus on `pointerdown` |
+| Dialog Cancel/Close | `KFTap.wireDialogCloses()` at init |
+
+**Dialogs:** define `<dialog>` in `index.html` as a direct `<body>` child (same as Settings/More), not inside `#main` / `#howgozitMount`.
+
+**CSS:** `touch-action: manipulation` and `-webkit-tap-highlight-color: transparent` on tappable controls.
+
+**While a dialog is open:** `app.js` skips live overview re-renders (`modalOpen()`); do not add per-frame DOM rewrites that overlap open dialogs.
