@@ -12,6 +12,7 @@ const state = {
   clock: null,
   serverConnected: false,
   paused: false,
+  powerOffAvailable: false,
   config: null,
 };
 
@@ -29,6 +30,8 @@ const recSizeEl = document.getElementById('recSize');
 const recLabelEl = document.getElementById('recLabel');
 const recBlockEl = document.querySelector('#hdr .rec');
 const pauseBtn = document.getElementById('pauseBtn');
+const powerOffBtn = document.getElementById('powerOffBtn');
+const powerOffDlg = document.getElementById('powerOffDlg');
 const menuBtn = document.getElementById('menuBtn');
 const moreSheet = document.getElementById('moreSheet');
 const moreBufStatEl = document.getElementById('moreBufStat');
@@ -36,6 +39,17 @@ const statusDrawer = document.getElementById('statusDrawer');
 const statusDrawerClock = document.getElementById('statusDrawerClock');
 const statusDrawerPod = document.getElementById('statusDrawerPod');
 const settingsDlg = document.getElementById('settingsDlg');
+
+let powerOffPending = false;
+
+function setPowerOffUI() {
+  if (!powerOffBtn) return;
+  const available = state.powerOffAvailable;
+  powerOffBtn.disabled = !available || powerOffPending || !state.serverConnected;
+  powerOffBtn.title = available
+    ? 'Shut down Kingfisher and power off the Pi'
+    : 'Power-off helper not installed (see deploy/kingfisher-poweroff.sh)';
+}
 
 const DERIVED_DEVICES = ['ahrs', 'press_alt', 'compass', 'airspeed'];
 const CALC_DEVICES = new Set([...DERIVED_DEVICES, 'geo']);
@@ -1137,6 +1151,7 @@ function setServerConnected(connected) {
   if (state.serverConnected === connected) return;
   state.serverConnected = connected;
   updateRecordingUI();
+  setPowerOffUI();
   renderStatusChips();
 }
 
@@ -1230,6 +1245,8 @@ async function refreshStatus() {
     if (moreBufStatEl) moreBufStatEl.textContent = bufText;
     if (s.aircraft && hdrTailEl) hdrTailEl.textContent = s.aircraft;
     if (typeof s.recording_paused === 'boolean') setPausedUI(s.recording_paused);
+    if (typeof s.poweroff_available === 'boolean') state.powerOffAvailable = s.poweroff_available;
+    setPowerOffUI();
     state.recording = s.recording || null;
     updateRecordingUI();
     state.podLink = s.pod || null;
@@ -1377,6 +1394,33 @@ function wireUiTaps() {
         setPausedUI(!!j.paused);
       }
     } catch {}
+  });
+
+  KFTap.bindTap(powerOffBtn, () => {
+    if (!state.powerOffAvailable || powerOffPending || !state.serverConnected) return;
+    powerOffDlg.showModal();
+  });
+
+  KFTap.bindPress(document.getElementById('powerOffConfirm'), async () => {
+    powerOffDlg.close();
+    powerOffPending = true;
+    setPowerOffUI();
+    document.body.classList.add('shutting-down');
+    try {
+      const r = await fetch('/api/power/off', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
+      });
+      if (!r.ok) {
+        powerOffPending = false;
+        document.body.classList.remove('shutting-down');
+        setPowerOffUI();
+        alert('Power off failed');
+      }
+    } catch {
+      // Connection loss is expected while the Pi shuts down.
+    }
   });
 
   KFTap.bindTap(menuBtn, () => {

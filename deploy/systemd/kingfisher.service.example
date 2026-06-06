@@ -27,6 +27,7 @@ ExecStartPre=/usr/bin/chronyc waitsync 120 0.25
 ExecStart=__KINGFISHER_BIN__
 Restart=on-failure
 RestartSec=5
+TimeoutStopSec=45
 
 # Flight DBs default to ~/kingfisher/flights; config to ~/.config/kingfisher/config.json
 # WorkingDirectory=%h

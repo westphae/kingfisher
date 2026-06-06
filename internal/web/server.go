@@ -7,6 +7,7 @@
 //	POST /api/config  — replace config; persists to disk + signals reload.
 //	GET  /api/status  — DB path, size, buffered rows, GPS fix state, clock health.
 //	POST /api/clock/resync — light chronyc reselect or full chronyd+gpsd restart.
+//	POST /api/power/off — flush flight DB, shut down kingfisher, power off Pi.
 //	POST /api/compass/align — capture sensor→vehicle alignment (manual or GPS taxi).
 //	POST /api/airspeed/zero — average pitot ΔP over 15s and save as zero offset.
 //	GET/POST/PUT/DELETE /api/howgozit/* — manual log templates and flight rows.
@@ -79,6 +80,8 @@ type Server struct {
 	compass derive.CompassAligner
 	nudger  *clock.AutoNudger
 
+	requestShutdown func(powerOff bool)
+
 	tpl        *template.Template
 	devWebRoot string // non-empty: serve static/templates from disk each request
 	httpSrv    *http.Server
@@ -90,7 +93,7 @@ type Server struct {
 // on disk (parent of static/ and templates/). UI assets are read on each
 // request with Cache-Control: no-cache — no go build/restart needed for CSS/JS
 // edits. Production binaries leave devWebRoot empty and use go:embed instead.
-func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, gpsc *gps.Client, podc *pod.Client, reg *sensors.Registry, compass derive.CompassAligner, nudger *clock.AutoNudger, devWebRoot string) (*Server, error) {
+func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, gpsc *gps.Client, podc *pod.Client, reg *sensors.Registry, compass derive.CompassAligner, nudger *clock.AutoNudger, requestShutdown func(powerOff bool), devWebRoot string) (*Server, error) {
 	tpl, err := template.ParseFS(assets, "templates/*.html")
 	if err != nil {
 		return nil, err
@@ -111,6 +114,7 @@ func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, 
 		reg:        reg,
 		compass:    compass,
 		nudger:     nudger,
+		requestShutdown: requestShutdown,
 		tpl:        tpl,
 		devWebRoot: devWebRoot,
 		up:         websocket.Upgrader{CheckOrigin: sameOriginCheck},
@@ -126,6 +130,7 @@ func (s *Server) Run(addr string, stop <-chan struct{}) error {
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/clock/resync", s.handleClockResync)
+	mux.HandleFunc("/api/power/off", s.handlePowerOff)
 	mux.HandleFunc("/api/devices", s.handleDevices)
 	mux.HandleFunc("/api/devices/", s.handleDeviceSub)
 	mux.HandleFunc("/api/recording", s.handleRecording)
@@ -271,6 +276,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"buffered_rows":    s.buf.BufferedRows(),
 		"recording_paused": s.buf.Paused(),
 		"recording":        s.buf.RecordingState(),
+		"poweroff_available": clock.HelperInstalled(cfg.Clock.PoweroffHelper),
 	}
 	if free, err := s.store.VolumeFreeBytes(); err == nil {
 		st["db_volume_free_bytes"] = free
@@ -764,6 +770,56 @@ func (s *Server) handleRecording(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handlePowerOff flushes the flight DB and requests process shutdown. When the
+// cockpit confirms, kingfisher exits cleanly and main runs the poweroff helper.
+func (s *Server) handlePowerOff(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.requestShutdown == nil {
+		http.Error(w, "shutdown unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	cfg := s.cfg.Get()
+	helper := cfg.Clock.PoweroffHelper
+	if !clock.HelperInstalled(helper) {
+		http.Error(w, "poweroff helper not installed: "+strings.TrimSpace(helper), http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		Confirm bool `json:"confirm"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !body.Confirm {
+		http.Error(w, "confirm required", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.buf.SetPaused(true); err != nil {
+		log.Printf("web: power off flush: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := s.store.SetMeta("shutdown_reason", "cockpit_power_off"); err != nil {
+		log.Printf("web: shutdown_reason: %v", err)
+	}
+	if err := s.store.SetMeta("shutdown_at_utc", now); err != nil {
+		log.Printf("web: shutdown_at_utc: %v", err)
+	}
+
+	writeJSON(w, map[string]string{"status": "shutting_down"})
+
+	go func() {
+		time.Sleep(400 * time.Millisecond)
+		s.requestShutdown(true)
+	}()
 }
 
 func (s *Server) handleClockResync(w http.ResponseWriter, r *http.Request) {

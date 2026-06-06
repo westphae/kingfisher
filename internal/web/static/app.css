@@ -174,7 +174,8 @@ body {
 @keyframes pulse { 50% { opacity: 0.3; } }
 
 .menuBtn,
-.pauseBtn {
+.pauseBtn,
+.powerOffBtn {
   background: transparent;
   color: var(--fg);
   border: 1px solid var(--border);
@@ -187,12 +188,41 @@ body {
   flex-shrink: 0;
 }
 
-.menuBtn:hover,
-.pauseBtn:hover { background: var(--border); }
+.powerOffBtn {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--warn);
+  border-color: rgba(255, 180, 80, 0.45);
+}
 
-.pauseBtn:disabled {
+.menuBtn:hover,
+.pauseBtn:hover,
+.powerOffBtn:hover:not(:disabled) { background: var(--border); }
+
+.pauseBtn:disabled,
+.powerOffBtn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.powerOffConfirm {
+  color: var(--warn);
+  border-color: rgba(255, 180, 80, 0.45);
+}
+
+body.shutting-down::after {
+  content: 'Shutting down…';
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(11, 19, 32, 0.85);
+  font-size: 1.25rem;
+  font-weight: 600;
+  pointer-events: all;
 }
 
 .statusChip {

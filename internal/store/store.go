@@ -8,6 +8,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -81,6 +82,9 @@ func (s *Store) VolumeFreeBytes() (int64, error) {
 func (s *Store) Close() error {
 	if s.db == nil {
 		return nil
+	}
+	if err := s.CheckpointWAL(); err != nil {
+		log.Printf("store: close checkpoint: %v", err)
 	}
 	err := s.db.Close()
 	s.db = nil

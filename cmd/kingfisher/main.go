@@ -13,6 +13,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -157,13 +158,23 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	stop := make(chan struct{})
+	var powerOffAfterExit atomic.Bool
+	var shutdownOnce sync.Once
+	requestShutdown := func(powerOff bool) {
+		if powerOff {
+			powerOffAfterExit.Store(true)
+		}
+		shutdownOnce.Do(func() {
+			log.Printf("shutdown requested")
+			cancel()
+			close(stop)
+		})
+	}
 	go func() {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 		<-c
-		log.Printf("shutdown requested")
-		cancel()
-		close(stop)
+		requestShutdown(false)
 	}()
 
 	var compassEngine *derive.Engine
@@ -182,7 +193,7 @@ func main() {
 		}
 	}
 
-	srv, err := web.New(holder, hub, st, buf, gpsClient, podClient, registry, compassEngine, autoNudger, devRoot)
+	srv, err := web.New(holder, hub, st, buf, gpsClient, podClient, registry, compassEngine, autoNudger, requestShutdown, devRoot)
 	if err != nil {
 		log.Fatalf("web: %v", err)
 	}
@@ -213,4 +224,11 @@ func main() {
 
 	wg.Wait()
 	log.Printf("kingfisher: shutdown complete")
+	if powerOffAfterExit.Load() {
+		helper := holder.Get().Clock.PoweroffHelper
+		log.Printf("power off: running %s", helper)
+		if err := clock.PowerOff(context.Background(), helper); err != nil {
+			log.Printf("power off: %v", err)
+		}
+	}
 }
