@@ -1100,6 +1100,26 @@ var KFHowgozit = (function () {
     }
   }
 
-  return { show, mount };
+  // _test exposes otherwise-private pure helpers for unit tests
+  // (internal/web/jstest). It has no runtime effect on the UI.
+  const _test = {
+    parseTimeToTsNs,
+    formatTime,
+    escapeHtml,
+    normalizeFieldType,
+    legacyInputMode,
+    normalizeFieldValue,
+    cloneField,
+    lookupField,
+    labelToKey,
+    uniqueFieldKey,
+    cellInputType,
+    numberFieldAttrs,
+    textFieldAttrs,
+    fieldLabel,
+    fieldInputHtml,
+  };
+
+  return { show, mount, _test };
 })();
 window.KFHowgozit = KFHowgozit;
