@@ -369,8 +369,12 @@ var KFHowgozit = (function () {
     return field;
   }
 
-  async function flushRowDialogPatches() {
-    if (!ui.rowDlg || rowEditId == null) return;
+  // Flush every dirty cell in the open row dialog NOW (cancelling pending
+  // debounces). Returns a promise that settles when all PATCHes complete;
+  // await it when the writes must be durable before mutating schema, or
+  // fire-and-forget (void) when an instant dialog close matters more.
+  function flushRowPatches() {
+    if (!ui.rowDlg || rowEditId == null) return Promise.resolve();
     const rowid = rowEditId;
     const inputs = [...ui.rowDlg.querySelectorAll('.hgz-row-input[data-field]')];
     for (const inp of inputs) {
@@ -380,13 +384,13 @@ var KFHowgozit = (function () {
         patchTimers.delete(key);
       }
     }
-    await Promise.all(inputs.map((inp) => patchCell(rowid, inp.dataset.field, inp)));
+    return Promise.all(inputs.map((inp) => patchCell(rowid, inp.dataset.field, inp)));
   }
 
   async function saveRowAddField() {
     const log = activeLog();
     if (!log || rowEditId == null || !ui.rowAddFieldPanel) return;
-    await flushRowDialogPatches();
+    await flushRowPatches();
     let field;
     try {
       field = parseRowAddFieldPanel();
@@ -628,9 +632,7 @@ var KFHowgozit = (function () {
   function closeRowDialog() {
     if (!ui.rowDlg?.open) return;
     hideRowAddFieldPanel();
-    for (const inp of ui.rowDlg.querySelectorAll('.hgz-row-input')) {
-      flushPatch(inp, true);
-    }
+    void flushRowPatches();
     ui.rowDlg.close();
   }
 
@@ -681,10 +683,12 @@ var KFHowgozit = (function () {
     const field = inp.dataset.field;
     inp.classList.remove('hgz-prefill');
     clearPrefill(rowid, field);
-    flushPatch(inp, false);
+    flushPatch(inp);
   }
 
-  function flushPatch(inp, immediate) {
+  // Schedule a debounced PATCH for a single edited cell. flushRowPatches()
+  // is the counterpart that flushes every dirty cell immediately.
+  function flushPatch(inp) {
     const rowid = Number(inp.dataset.rowid);
     if (!rowid) return;
     const field = inp.dataset.field;
@@ -693,9 +697,21 @@ var KFHowgozit = (function () {
       clearTimeout(patchTimers.get(key));
       patchTimers.delete(key);
     }
-    const run = () => patchCell(rowid, field, inp);
-    if (immediate) run();
-    else patchTimers.set(key, setTimeout(run, PATCH_DEBOUNCE_MS));
+    patchTimers.set(key, setTimeout(() => patchCell(rowid, field, inp), PATCH_DEBOUNCE_MS));
+  }
+
+  // Mark / clear a per-cell error so a failed save (or invalid input) is
+  // visible to the pilot instead of silently lost. Mirrors wireAttrEdits in
+  // app.js (input.err border + title tooltip).
+  function markCellError(inp, msg) {
+    if (!inp) return;
+    inp.classList.add('err');
+    inp.title = msg;
+  }
+  function clearCellError(inp) {
+    if (!inp) return;
+    inp.classList.remove('err');
+    inp.removeAttribute('title');
   }
 
   async function patchCell(rowid, field, inp) {
@@ -706,13 +722,18 @@ var KFHowgozit = (function () {
 
     if (field === '__time__') {
       const ts = parseTimeToTsNs(inp.value, row.ts_ns);
-      if (ts == null) return;
+      if (ts == null) {
+        markCellError(inp, 'Enter time as HH:MM.');
+        return;
+      }
       try {
         await api('PATCH', `/logs/${encodeURIComponent(log.log_id)}/rows/${rowid}`, { ts_ns: ts });
         row.ts_ns = ts;
         inp.value = formatTime(ts);
+        clearCellError(inp);
       } catch (e) {
         console.error('howgozit time patch', e);
+        markCellError(inp, 'Not saved: ' + String(e.message || e));
       }
       return;
     }
@@ -725,8 +746,10 @@ var KFHowgozit = (function () {
       await api('PATCH', `/logs/${encodeURIComponent(log.log_id)}/rows/${rowid}`, {
         values: { [field]: val ?? '' },
       });
+      clearCellError(inp);
     } catch (e) {
       console.error('howgozit patch', e);
+      markCellError(inp, 'Not saved: ' + String(e.message || e));
     }
   }
 

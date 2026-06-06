@@ -1413,6 +1413,10 @@ dialog.hgz-row-dlg form {
   box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.25);
 }
 
+.hgz-row-input.err {
+  border-color: var(--rec);
+}
+
 .hgz-row-input.hgz-upper,
 .hgz-field-line .val.hgz-upper {
   text-transform: uppercase;
