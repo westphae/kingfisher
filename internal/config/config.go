@@ -59,12 +59,14 @@ type Clock struct {
 	AutoResyncCooldownS int    `json:"auto_resync_cooldown_s,omitempty"`
 	AutoResyncMaxTries  int    `json:"auto_resync_max_tries,omitempty"`
 	ResyncHelper        string `json:"resync_helper,omitempty"`
+	PoweroffHelper      string `json:"poweroff_helper,omitempty"`
 }
 
 const (
 	DefaultAutoResyncCooldownS = 300
 	DefaultAutoResyncMaxTries  = 6
 	DefaultResyncHelper        = "/usr/local/bin/kingfisher-resync-time.sh"
+	DefaultPoweroffHelper      = "/usr/local/bin/kingfisher-poweroff.sh"
 )
 
 func (c *Clock) AutoResyncEffective() bool {
@@ -100,6 +102,9 @@ func MergeClockDefaults(c *Clock) {
 	}
 	if strings.TrimSpace(c.ResyncHelper) == "" {
 		c.ResyncHelper = DefaultResyncHelper
+	}
+	if strings.TrimSpace(c.PoweroffHelper) == "" {
+		c.PoweroffHelper = DefaultPoweroffHelper
 	}
 }
 
