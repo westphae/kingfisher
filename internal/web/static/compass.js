@@ -29,7 +29,9 @@ const KFCompass = (function () {
     return out.html ?? String(out.text ?? '');
   }
 
-  let smoothedHMeasNt = null;
+  function smoothedVals(device, sample) {
+    return KFSmooth.values(device, sample?.values ?? {});
+  }
 
   function heading360(deg) {
     const n = Number(deg);
@@ -39,10 +41,7 @@ const KFCompass = (function () {
 
   function effectiveHMeasNt(hMeasNt, hModelNt) {
     const h = Number(hMeasNt);
-    if (Number.isFinite(h) && h > 0) {
-      smoothedHMeasNt = smoothedHMeasNt == null ? h : 0.3 * h + 0.7 * smoothedHMeasNt;
-    }
-    if (smoothedHMeasNt != null) return smoothedHMeasNt;
+    if (Number.isFinite(h) && h > 0) return h;
     const m = Number(hModelNt);
     return Number.isFinite(m) && m > 0 ? m : 50000;
   }
@@ -227,8 +226,8 @@ const KFCompass = (function () {
     const root = kvEl.querySelector('[data-compass-root]');
     if (!root) return;
     updateFootnote(root, alignMethod || 'wmm');
-    const geoVals = geoSample?.values ?? {};
-    const compassVals = compassSample?.values ?? {};
+    const geoVals = smoothedVals('geo', geoSample);
+    const compassVals = smoothedVals('compass', compassSample);
     const hdgRaw = compassVals.align_active === 1
       ? compassVals.heading_mag_deg
       : compassVals.heading_sensor_deg;

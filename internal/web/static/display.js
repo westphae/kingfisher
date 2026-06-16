@@ -70,6 +70,30 @@ const KFDisplay = (function () {
 
   const BQ27441_HIDDEN = new Set(['battery_gauge_learned']);
 
+  const NO_SMOOTH_CHANNELS = new Set([
+    'fix_time_unix_s',
+    'fix',
+    'sats',
+    'align_active',
+    'converged',
+    'filter_mode',
+    'battery_gauge_learned',
+    'pressure_source',
+  ]);
+
+  const SMOOTH_GROUP_LABELS = {
+    default: 'All channels',
+    accel: 'Accel',
+    gyro: 'Gyro',
+    mag: 'Mag',
+    pos: 'Position',
+    acc: 'Accuracy',
+    fix: 'Fix',
+    vel: 'Velocity',
+    field: 'Field',
+    heading: 'Heading',
+  };
+
   /** Overview block title overrides (device id unchanged in routes/WS). */
   const OVERVIEW_DEVICE_NAMES = {
     press_alt: 'altitude',
@@ -874,6 +898,92 @@ const KFDisplay = (function () {
     return { subRows: subRows.filter(Boolean) };
   }
 
+  function noSmoothChannel(channel) {
+    return NO_SMOOTH_CHANNELS.has(channel);
+  }
+
+  function smoothGroupLabel(device, groupId, channels) {
+    if (SMOOTH_GROUP_LABELS[groupId]) {
+      const base = SMOOTH_GROUP_LABELS[groupId];
+      if (groupId === 'accel' || groupId === 'gyro' || groupId === 'mag') {
+        const axes = (channels || []).map((ch) => {
+          const m = ch.match(/(?:accel_|anglvel_|magn_|mag_)(.)/);
+          if (m) return m[1].toUpperCase();
+          const parts = ch.split('_');
+          return parts[parts.length - 1].slice(0, 1).toUpperCase();
+        });
+        if (axes.length) return `${base} (${axes.join(' ')})`;
+      }
+      return base;
+    }
+    if (groupId === 'default' && device === 'ahrs') return 'Attitude (roll pitch yaw)';
+    if (groupId === 'default' && device === 'compass') return 'Heading';
+    if (groupId === 'default' && device === 'airspeed') return 'IAS / TAS';
+    if (groupId === 'default' && device === 'press_alt') return 'Altitude';
+    if (groupId === 'default' && device === 'geo') return 'Geomagnetic';
+    if (channels && channels.length === 1) {
+      return channelLabel(device, channels[0]);
+    }
+    return groupId.replace(/_/g, ' ');
+  }
+
+  function listSmoothGroups(device, values) {
+    values = values || {};
+    const keys = Object.keys(values);
+    const layout = overviewLayout(device, values);
+    const groups = [];
+    const assigned = new Set();
+
+    for (const sr of layout.subRows) {
+      const groupId = sr.rowLabel || 'default';
+      const channels = sr.cells
+        .map((c) => c.key)
+        .filter((ch) => !noSmoothChannel(ch));
+      if (channels.length === 0) continue;
+      groups.push({
+        id: groupId,
+        label: smoothGroupLabel(device, groupId, channels),
+        channels,
+      });
+      for (const ch of channels) assigned.add(ch);
+    }
+
+    const prefixGroups = [
+      ['field_', 'field'],
+      ['heading_', 'heading'],
+    ];
+    const extra = {};
+    for (const k of keys) {
+      if (assigned.has(k) || noSmoothChannel(k)) continue;
+      if (typeof values[k] !== 'number' || !Number.isFinite(values[k])) continue;
+      let gid = k;
+      for (const [prefix, g] of prefixGroups) {
+        if (k.startsWith(prefix)) {
+          gid = g;
+          break;
+        }
+      }
+      if (device === 'press_alt' && k === 'vs_ms') gid = 'default';
+      const existing = groups.find((g) => g.id === gid);
+      if (existing) {
+        if (!existing.channels.includes(k)) existing.channels.push(k);
+      } else {
+        if (!extra[gid]) extra[gid] = [];
+        extra[gid].push(k);
+      }
+      assigned.add(k);
+    }
+    for (const [gid, chs] of Object.entries(extra)) {
+      const sorted = sortKeys(device, chs);
+      groups.push({
+        id: gid,
+        label: smoothGroupLabel(device, gid, sorted),
+        channels: sorted,
+      });
+    }
+    return groups;
+  }
+
   function formatOverviewCell(device, channel, value, allValues) {
     if (value == null || (typeof value === 'number' && !Number.isFinite(value))) {
       if (device === 'bq27441' && bq27441UnlearnedField(channel, allValues)) return '—';
@@ -966,5 +1076,8 @@ const KFDisplay = (function () {
     overviewLayout,
     formatOverviewCell,
     overviewDeviceName,
+    noSmoothChannel,
+    listSmoothGroups,
+    smoothGroupLabel,
   };
 })();

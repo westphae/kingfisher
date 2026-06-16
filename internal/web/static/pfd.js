@@ -23,22 +23,15 @@
 const KFPFD = (function () {
   const MPS_TO_FPM = 196.8503937;
   const PITCH_PX_PER_DEG = 1.4; // horizon vertical travel
-  const ROLL_EMA = 0.35;        // attitude smoothing (presentation only)
 
-  // Smoothed/last-shown state across ticks (single PFD instance). The
-  // *Txt fields cache the last rendered string so every readout follows
-  // the same dead-band discipline (only touch the DOM on a real change).
+  // Last-shown state across ticks (single PFD instance). The *Txt fields cache
+  // the last rendered string so every readout follows the same dead-band
+  // discipline (only touch the DOM on a real change).
   const s = { roll: null, pitch: null, hdg: null, ias: null, alt: null, rpTxt: null, flagTxt: null, vsiTxt: null, tasTxt: null, vsiSrc: null };
 
   function num(sample, ch) {
     const v = sample?.values?.[ch];
     return v != null && Number.isFinite(Number(v)) ? Number(v) : null;
-  }
-
-  function ema(prev, next, a) {
-    if (next == null) return prev;
-    if (prev == null) return next;
-    return prev + a * (next - prev);
   }
 
   function wrap360(d) {
@@ -153,11 +146,11 @@ const KFPFD = (function () {
     if (alt == null) alt = num(src.pressAlt, 'pressure_alt_ft');
     setTape(root, 'alt', alt, 10, 100, (v) => v.toLocaleString('en-US'));
 
-    // ---- Attitude (smoothed, presentation only) ----
+    // ---- Attitude (display smoothing via KFSmooth on ahrs sample) ----
     const roll = num(src.ahrs, 'roll');
     const pitch = num(src.ahrs, 'pitch');
-    s.roll = ema(s.roll, roll, ROLL_EMA);
-    s.pitch = ema(s.pitch, pitch, ROLL_EMA);
+    s.roll = roll;
+    s.pitch = pitch;
     const hz = root.querySelector('[data-pfd-horizon]');
     const rpEl = root.querySelector('[data-pfd-rp]');
     if (hz) {

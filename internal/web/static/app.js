@@ -11,6 +11,9 @@ const state = {
   podLink: null,
   clock: null,
   serverConnected: false,
+  wsOpen: false,
+  lastWsAt: 0,
+  deviceSeenAt: new Map(), // name -> client ms when last WS snapshot included device
   paused: false,
   powerOffAvailable: false,
   config: null,
@@ -148,11 +151,11 @@ function renderInstruments() {
   const mount = document.getElementById('pfdMount');
   if (!mount) return;
   KFPFD.renderPanel(mount, {
-    ahrs: state.devices.get('ahrs'),
-    compass: state.devices.get('compass'),
-    airspeed: state.devices.get('airspeed'),
-    pressAlt: state.devices.get('press_alt'),
-    gps: state.devices.get('gps'),
+    ahrs: KFSmooth.sampleValues(state.devices.get('ahrs'), 'ahrs'),
+    compass: KFSmooth.sampleValues(state.devices.get('compass'), 'compass'),
+    airspeed: KFSmooth.sampleValues(state.devices.get('airspeed'), 'airspeed'),
+    pressAlt: KFSmooth.sampleValues(state.devices.get('press_alt'), 'press_alt'),
+    gps: KFSmooth.sampleValues(state.devices.get('gps'), 'gps'),
   });
 }
 
@@ -259,7 +262,7 @@ function renderLiveValues() {
   if (!name || !panelRegions) return;
   const sm = state.devices.get(name);
   if (!sm) { panelRegions.kv.innerHTML = ''; return; }
-  const vals = sm.values || {};
+  const vals = KFSmooth.values(name, sm.values || {});
   let html = '';
   const keys = KFDisplay.sortKeys(name, Object.keys(vals));
   for (const k of keys) {
@@ -287,16 +290,22 @@ function renderAttrs() {
   let html = `<section class="attrs"><h3>Settings</h3>${locLine}`;
   if (name === 'compass') {
     html += renderCompassSettings();
+    html += renderSmoothSettings(name);
     panelRegions.attrs.removeAttribute('data-compass-wired');
+    panelRegions.attrs.removeAttribute('data-smooth-wired');
     panelRegions.attrs.innerHTML = html + `</section>`;
     wireCompassSettings();
+    wireSmoothSettings(name);
     return;
   }
   if (name === 'airspeed') {
     html += renderAirspeedSettings();
+    html += renderSmoothSettings(name);
     panelRegions.attrs.removeAttribute('data-airspeed-wired');
+    panelRegions.attrs.removeAttribute('data-smooth-wired');
     panelRegions.attrs.innerHTML = html + `</section>`;
     wireAirspeedSettings();
+    wireSmoothSettings(name);
     return;
   }
   if (!attrs) {
@@ -309,9 +318,12 @@ function renderAttrs() {
       html += `<div class="attrRow"><div class="k">${label}</div><div class="v">${renderAttrInput(a)}</div></div>`;
     }
   }
+  html += renderSmoothSettings(name);
   html += `</section>`;
+  panelRegions.attrs.removeAttribute('data-smooth-wired');
   panelRegions.attrs.innerHTML = html;
   wireAttrEdits(name);
+  wireSmoothSettings(name);
 }
 
 function magDeviceOptions() {
@@ -558,6 +570,94 @@ function debounce(fn, ms) {
     clearTimeout(t);
     t = setTimeout(() => fn(...args), ms);
   };
+}
+
+function renderSmoothSettings(device) {
+  const vals = state.devices.get(device)?.values ?? {};
+  const groups = KFSmooth.listGroups(device, vals);
+  if (groups.length === 0) return '';
+  let rows = '';
+  for (const g of groups) {
+    const ui = KFSmooth.uiGroup(device, g.id);
+    const rawOn = ui.mode !== 'smoothed';
+    const tauDisabled = rawOn ? ' disabled' : '';
+    const nameBase = `smooth-${device}-${g.id}`;
+    rows +=
+      `<div class="smoothRow attrRow" data-smooth-group="${escapeAttr(g.id)}">` +
+      `<div class="k">${escapeHtml(KFSmooth.groupLabel(device, g.id, g.channels))}</div>` +
+      `<div class="v smoothCtrls">` +
+      `<span class="smoothMode">` +
+      `<label><input type="radio" name="${escapeAttr(nameBase)}" value="raw"${rawOn ? ' checked' : ''}/> Raw</label> ` +
+      `<label><input type="radio" name="${escapeAttr(nameBase)}" value="smoothed"${!rawOn ? ' checked' : ''}/> Smoothed</label>` +
+      `</span> ` +
+      `<label class="smoothTauLbl">τ <input type="number" class="smoothTau" step="0.05" min="0.05" value="${escapeAttr(ui.tau_s)}" style="width:4em"${tauDisabled}/> s</label>` +
+      `</div></div>`;
+  }
+  let hint = '<p class="dim smoothHint">Affects cockpit display only; flight recording is unchanged.</p>';
+  if (device === 'airspeed') {
+    hint += '<p class="dim smoothHint">Pitot ΔP EMA (server) is configured above; this smooths published IAS/TAS on screen.</p>';
+  }
+  return `<section class="smoothSettings"><h4>Display smoothing</h4>${hint}${rows}</section>`;
+}
+
+function syncSmoothTauDisabled(row) {
+  const raw = row.querySelector('input[value="raw"]')?.checked;
+  const tauInp = row.querySelector('.smoothTau');
+  if (tauInp) tauInp.disabled = !!raw;
+}
+
+async function saveSmoothSettings(device) {
+  if (!state.config) await loadConfig();
+  const cfg = state.config ?? {};
+  cfg.display = cfg.display ?? {};
+  cfg.display.smooth = cfg.display.smooth ?? {};
+  cfg.display.smooth[device] = cfg.display.smooth[device] ?? {};
+  const prev = { ...cfg.display.smooth[device] };
+  const rows = panelRegions?.attrs?.querySelectorAll('.smoothRow') ?? [];
+  for (const row of rows) {
+    const groupId = row.dataset.smoothGroup;
+    if (!groupId) continue;
+    const mode = row.querySelector('input[value="smoothed"]')?.checked ? 'smoothed' : 'raw';
+    const tauInp = row.querySelector('.smoothTau');
+    const tau = tauInp ? Number(tauInp.value) : KFSmooth.uiGroup(device, groupId).tau_s;
+    const prevG = prev[groupId];
+    if (!prevG || prevG.mode !== mode || prevG.tau_s !== tau) {
+      const g = KFSmooth.listGroups(device, state.devices.get(device)?.values ?? {})
+        .find((x) => x.id === groupId);
+      if (g) KFSmooth.clearGroup(device, g.channels);
+    }
+    cfg.display.smooth[device][groupId] = { mode, tau_s: tau };
+  }
+  try {
+    const r = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg),
+    });
+    const t = await r.text();
+    if (!r.ok) throw new Error(t || r.statusText);
+    state.config = cfg;
+    KFSmooth.setConfig(cfg.display);
+  } catch (e) {
+    console.error('smooth settings save:', e);
+  }
+}
+
+function wireSmoothSettings(device) {
+  if (!panelRegions?.attrs) return;
+  const key = `smooth-${device}`;
+  if (panelRegions.attrs.dataset.smoothWired === key) return;
+  panelRegions.attrs.dataset.smoothWired = key;
+  const saveDebounced = debounce(() => saveSmoothSettings(device), 400);
+  for (const row of panelRegions.attrs.querySelectorAll('.smoothRow')) {
+    syncSmoothTauDisabled(row);
+    for (const inp of row.querySelectorAll('input')) {
+      inp.addEventListener('change', () => {
+        syncSmoothTauDisabled(row);
+        saveDebounced();
+      });
+    }
+  }
 }
 
 function attrLabel(device, a) {
@@ -1054,6 +1154,7 @@ function scheduleUiRefresh() {
     } else if (state.routeView === 'instruments') {
       renderInstruments();
     }
+    markStaleness();
   });
 }
 
@@ -1116,18 +1217,31 @@ async function loadAttrs(name) {
   } catch {}
 }
 
+function noteWsSnapshot(snap) {
+  const now = Date.now();
+  state.lastWsAt = now;
+  if (!snap || !snap.devices) return;
+  for (const name of Object.keys(snap.devices)) {
+    state.deviceSeenAt.set(name, now);
+  }
+}
+
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onopen = () => {
+    state.wsOpen = true;
+    state.lastWsAt = Date.now();
     setServerConnected(true);
     refreshStatus();
   };
   ws.onmessage = (ev) => {
+    state.wsOpen = true;
     setServerConnected(true);
     let snap;
     try { snap = JSON.parse(ev.data); } catch { return; }
     if (!snap || !snap.devices) return;
+    noteWsSnapshot(snap);
     let battUpdated = false;
     for (const [name, sample] of Object.entries(snap.devices)) {
       state.devices.set(name, sample);
@@ -1140,8 +1254,12 @@ function connect() {
     if (battUpdated) renderStatusChips();
     onWsTick();
   };
-  ws.onerror = () => setServerConnected(false);
+  ws.onerror = () => {
+    state.wsOpen = false;
+    setServerConnected(false);
+  };
   ws.onclose = () => {
+    state.wsOpen = false;
     setServerConnected(false);
     setTimeout(connect, 1000);
   };
@@ -1226,11 +1344,11 @@ async function refreshStatus() {
   try {
     const r = await fetch('/api/status');
     if (!r.ok) {
-      setServerConnected(false);
+      if (!state.wsOpen) setServerConnected(false);
       renderStatusChips();
       return;
     }
-    setServerConnected(true);
+    if (state.wsOpen) setServerConnected(true);
     const s = await r.json();
     if (s.db_size_bytes != null && recSizeEl) {
       recSizeEl.textContent = formatRecSize(s.db_size_bytes);
@@ -1253,7 +1371,7 @@ async function refreshStatus() {
     state.clock = s.clock || null;
     renderStatusChips();
   } catch {
-    setServerConnected(false);
+    if (!state.wsOpen) setServerConnected(false);
     renderStatusChips();
   }
 }
@@ -1294,7 +1412,10 @@ async function loadIIODevices() {
 async function loadConfig() {
   try {
     const r = await fetch('/api/config');
-    if (r.ok) state.config = await r.json();
+    if (r.ok) {
+      state.config = await r.json();
+      KFSmooth.setConfig(state.config?.display);
+    }
   } catch {}
 }
 
@@ -1320,47 +1441,38 @@ function setBigText(on) {
 }
 setBigText(bigTextEnabled());
 
-// A value is "stale" once its source sample's ts_ns is older than this.
-// Lower thresholds (e.g. 1 s) cause flicker on slower sensors (gps at 1 Hz,
-// derive devices at 5 Hz); 3 s comfortably covers normal cadence.
-const STALENESS_MS = 3000;
+// Stale when the WebSocket stops delivering a device (not when sample.ts_ns
+// ages on the Pi — phone/Pi clock skew and 1 Hz GPS should not grey tiles).
+const STALENESS_MS = 4000;
 
 function markStaleness() {
   const now = Date.now();
-  for (const [name, sample] of state.devices) {
-    if (!sample || !sample.ts_ns) continue;
-    const ageMs = now - sample.ts_ns / 1e6;
-    const stale = ageMs > STALENESS_MS;
+  const linkAgeMs = state.lastWsAt ? now - state.lastWsAt : Infinity;
+  for (const name of state.deviceNames) {
+    const seen = state.deviceSeenAt.get(name) ?? 0;
+    const ageMs = seen ? now - seen : Infinity;
+    const stale = !state.wsOpen || ageMs > STALENESS_MS;
     for (const el of document.querySelectorAll(`[data-device="${CSS.escape(name)}"]`)) {
       el.classList.toggle('kf-stale', stale);
-      if (stale) {
-        const ageS = Math.round(ageMs / 1000);
-        el.dataset.staleSec = String(ageS);
+      if (stale && Number.isFinite(ageMs)) {
+        el.dataset.staleSec = String(Math.round(ageMs / 1000));
       } else {
         delete el.dataset.staleSec;
       }
     }
   }
-  // Disconnect banner shows the WORST-case staleness so a pilot sees a
-  // single signal ("values from N s ago") rather than per-tile maths.
   const banner = document.getElementById('staleBanner');
   if (!banner) return;
-  if (state.serverConnected) {
+  if (state.wsOpen && linkAgeMs < STALENESS_MS) {
     banner.hidden = true;
     return;
   }
-  let oldestMs = 0;
-  for (const [, sample] of state.devices) {
-    if (!sample || !sample.ts_ns) continue;
-    const age = now - sample.ts_ns / 1e6;
-    if (age > oldestMs) oldestMs = age;
-  }
-  if (oldestMs < 2000) {
+  if (linkAgeMs < STALENESS_MS) {
     banner.hidden = true;
     return;
   }
   banner.hidden = false;
-  banner.textContent = `Disconnected — values ${Math.round(oldestMs / 1000)} s old`;
+  banner.textContent = `Link interrupted — last update ${Math.round(linkAgeMs / 1000)} s ago`;
 }
 setInterval(markStaleness, 1000);
 
@@ -1401,7 +1513,7 @@ function wireUiTaps() {
     powerOffDlg.showModal();
   });
 
-  KFTap.bindPress(document.getElementById('powerOffConfirm'), async () => {
+  KFTap.bindTap(document.getElementById('powerOffConfirm'), async () => {
     powerOffDlg.close();
     powerOffPending = true;
     setPowerOffUI();

@@ -720,6 +720,45 @@ body.shutting-down::after {
 .attrRow input:disabled { opacity: 0.5; }
 .attrRow .ro { color: var(--fg); font-variant-numeric: tabular-nums; }
 
+.smoothSettings {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.smoothSettings h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.smoothHint {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+}
+
+.smoothCtrls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.smoothMode label {
+  margin-right: 0.35rem;
+  white-space: nowrap;
+}
+
+.smoothTauLbl {
+  white-space: nowrap;
+}
+
+.smoothTau {
+  width: 4em !important;
+  min-width: 3.5em;
+}
+
 .attrRow button {
   background: var(--panel);
   color: var(--accent);

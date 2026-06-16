@@ -38,7 +38,8 @@ const KFOverview = (function () {
   }
 
   function renderBlock(device, sample) {
-    const vals = sample?.values || {};
+    const raw = sample?.values || {};
+    const vals = KFSmooth.values(device, raw);
     const layout = KFDisplay.overviewLayout(device, vals);
     const loc = state.deviceLocation.get(device) || inferDeviceLocation(device) || '';
     let subHtml = '';

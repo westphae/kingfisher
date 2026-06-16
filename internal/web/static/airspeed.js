@@ -18,12 +18,9 @@ const KFAirspeed = (function () {
     return out.html ?? String(out.text ?? '');
   }
 
-  function pickVal(derived, source, channel) {
-    const d = derived?.values?.[channel];
-    if (d != null && Number.isFinite(Number(d))) return Number(d);
-    const s = source?.values?.[channel];
-    if (s != null && Number.isFinite(Number(s))) return Number(s);
-    return null;
+  function smoothChannel(device, sample, channel) {
+    const v = KFSmooth.values(device, sample?.values ?? {})[channel];
+    return v != null && Number.isFinite(Number(v)) ? Number(v) : null;
   }
 
   function fmtSpeedKt(value) {
@@ -66,7 +63,7 @@ const KFAirspeed = (function () {
     const root = kvEl.querySelector('[data-airspeed-root]');
     if (!root) return;
 
-    const asp = airspeedSample?.values ?? {};
+    const asp = KFSmooth.values('airspeed', airspeedSample?.values ?? {});
     const iasEl = root.querySelector('[data-asp-ias]');
     const tasEl = root.querySelector('[data-asp-tas]');
     if (iasEl) iasEl.textContent = fmtSpeedKt(asp.ias_kt);
@@ -84,18 +81,19 @@ const KFAirspeed = (function () {
       const cell = tr.querySelector('[data-asp-val]');
       if (!cell) continue;
       let val = null;
+      let fmtDevice = row.device;
+      let fmtChannel = row.key;
       if (row.key === 'pressure_alt_m') {
-        val = pickVal(null, pressAltSample, row.key);
+        val = smoothChannel('press_alt', pressAltSample, row.key);
+        fmtDevice = 'press_alt';
       } else if (row.key === 'airspeed_dp_cal_pa') {
-        val = pickVal(airspeedSample, null, row.key);
+        val = smoothChannel('airspeed', airspeedSample, row.key);
+        fmtDevice = 'airspeed';
+        fmtChannel = 'airspeed_dp_pa';
       } else {
-        val = pickVal(airspeedSample, sources[row.device], row.key);
+        val = smoothChannel(row.device, sources[row.device], row.key);
       }
-      cell.innerHTML = fmtCell(
-        row.key === 'airspeed_dp_cal_pa' ? 'airspeed' : (row.device === 'press_alt' ? 'press_alt' : row.device),
-        row.key === 'airspeed_dp_cal_pa' ? 'airspeed_dp_pa' : row.key,
-        val
-      );
+      cell.innerHTML = fmtCell(fmtDevice, fmtChannel, val);
     }
   }
 
