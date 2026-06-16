@@ -30,6 +30,7 @@ var KFHowgozit = (function () {
   let editDraft = null;
   let editOriginalKeys = new Set();
   let rowEditId = null;
+  let rowEditSnapshot = null;
 
   let patchTimers = new Map();
   let mounted = false;
@@ -408,6 +409,40 @@ var KFHowgozit = (function () {
   // debounces). Returns a promise that settles when all PATCHes complete;
   // await it when the writes must be durable before mutating schema, or
   // fire-and-forget (void) when an instant dialog close matters more.
+  function snapshotRow(row) {
+    return {
+      ts_ns: row.ts_ns,
+      values: { ...(row.values || {}) },
+      prefill: data.prefill.has(row.rowid) ? new Set(data.prefill.get(row.rowid)) : null,
+    };
+  }
+
+  function clearRowPatchTimers(rowid) {
+    for (const key of [...patchTimers.keys()]) {
+      if (key.startsWith(`${rowid}:`)) {
+        clearTimeout(patchTimers.get(key));
+        patchTimers.delete(key);
+      }
+    }
+  }
+
+  async function revertRowToSnapshot(log, rowid, snap) {
+    const row = data.rows.find((r) => Number(r.rowid) === rowid);
+    if (!row || !snap) return;
+    row.ts_ns = snap.ts_ns;
+    row.values = { ...snap.values };
+    if (snap.prefill && snap.prefill.size) data.prefill.set(rowid, new Set(snap.prefill));
+    else data.prefill.delete(rowid);
+    const values = {};
+    for (const f of fieldsForLog(log)) {
+      values[f.key] = snap.values[f.key] ?? '';
+    }
+    await api('PATCH', `/logs/${encodeURIComponent(log.log_id)}/rows/${rowid}`, {
+      ts_ns: snap.ts_ns,
+      values,
+    });
+  }
+
   function flushRowPatches() {
     if (!ui.rowDlg || rowEditId == null) return Promise.resolve();
     const rowid = rowEditId;
@@ -650,6 +685,7 @@ var KFHowgozit = (function () {
     const row = data.rows.find((r) => Number(r.rowid) === rid);
     if (!log || !row || !ui.rowDlg) return;
     rowEditId = rid;
+    rowEditSnapshot = snapshotRow(row);
     hideRowAddFieldPanel();
     const titleEl = ui.rowDlg.querySelector('[data-hgz-row-title]');
     if (titleEl) titleEl.textContent = log.display_name || 'Entry';
@@ -668,6 +704,28 @@ var KFHowgozit = (function () {
     if (!ui.rowDlg?.open) return;
     hideRowAddFieldPanel();
     void flushRowPatches();
+    rowEditSnapshot = null;
+    ui.rowDlg.close();
+  }
+
+  async function cancelRowDialog() {
+    if (!ui.rowDlg?.open || rowEditId == null) return;
+    const log = activeLog();
+    if (!log) return;
+    const rowid = rowEditId;
+    const snap = rowEditSnapshot;
+    clearRowPatchTimers(rowid);
+    hideRowAddFieldPanel();
+    if (snap) {
+      try {
+        await revertRowToSnapshot(log, rowid, snap);
+      } catch (e) {
+        console.error('howgozit cancel row', e);
+        alert('Could not discard changes: ' + e.message);
+        return;
+      }
+    }
+    rowEditSnapshot = null;
     ui.rowDlg.close();
   }
 
@@ -685,9 +743,11 @@ var KFHowgozit = (function () {
       }
     }
     KFTap.bindPress(ui.rowDlg, '[data-hgz-row-done]', () => closeRowDialog());
+    KFTap.bindPress(ui.rowDlg, '[data-hgz-row-cancel]', () => void cancelRowDialog());
     KFTap.bindPress(ui.rowDlg, '[data-hgz-row-del]', async () => {
       if (rowEditId == null) return;
       const id = rowEditId;
+      rowEditSnapshot = null;
       closeRowDialog();
       await deleteRow(id);
     });
@@ -696,7 +756,7 @@ var KFHowgozit = (function () {
     KFTap.bindPress(ui.rowDlg, '[data-hgz-row-add-field-save]', () => void saveRowAddField());
     ui.rowDlg.addEventListener('cancel', (ev) => {
       ev.preventDefault();
-      closeRowDialog();
+      void cancelRowDialog();
     });
     ui.rowDlg.addEventListener('close', () => {
       rowEditId = null;

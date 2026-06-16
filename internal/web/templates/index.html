@@ -152,7 +152,10 @@
   <dialog id="hgzRowDlg" class="sheet sheet-wide hgz-row-dlg" data-hgz-row-dlg>
     <form method="dialog" id="hgzRowForm">
       <div class="hgz-row-dlg-head">
-        <h2 data-hgz-row-title>Entry</h2>
+        <div class="hgz-row-dlg-titlebar">
+          <h2 data-hgz-row-title>Entry</h2>
+          <button type="button" class="hgz-row-closeBtn" data-hgz-row-cancel aria-label="Cancel">×</button>
+        </div>
         <p class="dim hgz-row-dlg-hint">Tap a field to edit. Use <strong>Add field</strong> to add a column to this log.</p>
       </div>
       <div class="hgz-row-fields" data-hgz-row-fields></div>
@@ -203,6 +206,7 @@
       <div class="hgz-row-dlg-actions">
         <button type="button" class="hgz-row-delBtn" data-hgz-row-del>Delete entry</button>
         <button type="button" class="hgz-row-addFieldBtn" data-hgz-row-add-field>Add field</button>
+        <button type="button" class="hgz-row-cancelBtn" data-hgz-row-cancel>Cancel</button>
         <button type="button" class="hgz-row-doneBtn" data-hgz-row-done>Done</button>
       </div>
     </form>
