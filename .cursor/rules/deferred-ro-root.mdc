@@ -1,0 +1,40 @@
+---
+description: Deferred Pi read-only root plan (microSD protection). Apply when discussing ro root, fstab, overlayroot, or /boot/firmware mounts.
+alwaysApply: false
+---
+
+# Deferred: read-only root on the Kingfisher Pi
+
+**Status:** Not implemented — user defers; graceful OFF shutdown is the interim mitigation.
+
+## Current layout (Eric's Pi)
+
+- `/` on ext4 (root) — still **rw** today
+- `/home` on separate ext4 partition — **must stay rw** (flight DBs, `~/.config/kingfisher`, user systemd, `go install` bin)
+- `/boot/firmware` vfat — still **rw** today
+
+Goal when implemented: **ro `/` and ro `/boot/firmware`**, **rw `/home`**.
+
+## Implementation outline (from prior discussion)
+
+1. **`/boot/firmware`:** fstab `defaults,ro`; remount rw only for `config.txt` / kernel updates.
+2. **`/` (root):** fstab `defaults,noatime,ro` **or** `overlayroot` package (tmpfs overlay).
+3. **Writable paths on ro root:** tmpfs for `/tmp`, `/var/tmp`, `/var/log`; bind mounts or tmpfs for needed `/var/lib` subtrees.
+4. **Maintenance helpers:** `rw-root` / `ro-root` scripts to remount `/` and `/boot/firmware` for apt, `/etc` edits, then `sync` + remount ro.
+5. **Kingfisher gotchas:**
+   - `kingfisher-resync-time.sh --fix-offset` writes `/etc/chrony/chrony.conf` — needs rw remount or chrony config on a writable bind mount.
+   - Helpers in `/usr/local/bin/` and sudoers — install once while rw.
+   - Flight data already on `/home` ✓
+
+## Suggested rollout order
+
+1. Verify `/home` + Kingfisher paths.
+2. Remount `/boot/firmware` ro; test remount rw for edits.
+3. Add tmpfs fstab lines; test ro remount on `/` before reboot.
+4. Reboot test; exercise chrony, gpsd, kingfisher, cockpit OFF button.
+5. Optional: `deploy/read-only-root.md` doc in repo when implementing.
+
+## Related
+
+- OFF button + `deploy/kingfisher-poweroff.sh` + `deploy/poweroff/verify.md` (committed)
+- microSD hygiene notes in `deploy/poweroff/verify.md`
