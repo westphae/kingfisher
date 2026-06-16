@@ -34,7 +34,7 @@ chronyc sourcestats
 Check that:
 
 - GPS and PPS have non-zero **Reach** (octal column in `sources -v`)
-- with pool commented out and offset tuned: **`#* PPS`**, **`#- GPS`**
+- with pool commented out and offset tuned: **`#* PPS`**, **`#- GPS`** within ~1 min of 3D fix
 - GPS **`sourcestats` Offset** is near zero (not hundreds of ms)
 - `Leap status` is normal after lock
 

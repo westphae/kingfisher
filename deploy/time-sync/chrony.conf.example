@@ -1,30 +1,40 @@
-# Kingfisher UART-only GNSS discipline example.
-# Merge this into /etc/chrony/chrony.conf or /etc/chrony.conf as appropriate.
+# Kingfisher GNSS discipline example.
+# Merge into /etc/chrony/chrony.conf (Debian / Raspberry Pi OS).
 #
-# Boot policy: allow a few early steps, then slew only.
-makestep 1.0 3
+# Boot policy: step (not just slew) when offset exceeds 0.5 s, with no limit on
+# how many times at boot. Required for automatic PPS lock on RTC-backed Pi boot:
+# GPS serial and PPS can disagree by ~600 ms until chrony steps; makestep 1.0 3
+# never fires and both sources stay #x ("no majority").
+makestep 0.5 -1
 rtcsync
 
-# Optional: enable when the Pi has reliable internet and you want NTP as well.
-# While pool sources are reachable, chrony may ignore a mis-tuned GPS refclock.
-# For offline-first flight recording, leave this commented out.
+# Offline-first flight recording: leave pool commented out.
 #pool pool.ntp.org iburst
 
 # gpsd serial-time SOCK for /dev/ttyAMA0.
 # Recent gpsd uses chrony.clk.<device>.sock for serial time and chrony.<pps>.sock
 # for PPS time.
 #
-# Tune with chronyc sourcestats at offset 0.0 (NTP-synced): use the same sign
-# as the GPS Offset column in seconds (+620ms -> offset 0.62 on this M9N path).
+# offset 0.62: pipeline delay between PPS edge and gpsd serial time-of-day on the
+# M9N (independent of RTC battery). Tune once via NTP cross-check at offset 0.0
+# if receiver or gpsd version changes — see docs/time-sync.md.
 #
-# poll/filter: default refclock poll is 4 (16s/sample), which makes GPS take
+# poll/filter: default refclock poll is 4 (16 s/sample), which makes GPS take
 # minutes to become selectable and PPS (lock GPS) even longer at boot. poll 2
-# (4s) + filter 3 lets GPS converge and PPS lock within tens of seconds once a
-# fix exists. GPS serial only carries time-of-day for lock, so the lower poll
-# does not hurt steady-state accuracy (PPS still steers the clock).
+# (4 s) + filter 3 lets GPS converge and PPS lock within ~1 min of 3D fix.
 refclock SOCK /run/chrony.clk.ttyAMA0.sock refid GPS precision 1e-1 offset 0.62 delay 0.1 poll 2 filter 3
 
 # PPS follow-on (GPIO 18 -> /dev/pps0, also in gpsd DEVICES). Use SOCK PPS —
 # do not also enable refclock PPS /dev/pps0; gpsd holds the device.
 # Keep PPS poll == GPS poll so lock GPS always has a recent time-of-day sample.
-# refclock SOCK /run/chrony.pps0.sock refid PPS precision 1e-7 lock GPS poll 2
+refclock SOCK /run/chrony.pps0.sock refid PPS precision 1e-7 lock GPS poll 2
+
+# --- Alternative profiles (pick one set of refclock lines) ---
+#
+# UART-only (no PPS in chrony): simpler auto-boot with RTC battery; ~ms accuracy.
+# Use offset 0.0 when the Pi RTC keeps coarse time at boot (not +620 ms).
+# refclock SOCK /run/chrony.clk.ttyAMA0.sock refid GPS precision 1e-1 offset 0.0 delay 0.1 poll 2 filter 3
+#
+# PPS-only (no GPS refclock): sub-us accuracy; gpsd still needs GPS fix so PPS
+# SOCK carries absolute UTC seconds. RTC + makestep 0.5 -1 provide coarse boot time.
+# refclock SOCK /run/chrony.pps0.sock refid PPS precision 1e-7 poll 2

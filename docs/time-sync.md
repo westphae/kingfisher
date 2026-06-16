@@ -105,19 +105,20 @@ Prefer gpsd **SOCK** refclocks over SHM. Recent gpsd creates:
 ### UART-only (no PPS)
 
 ```conf
-makestep 1.0 3
+makestep 0.5 -1
 rtcsync
 
 # Offline-first flight recording: leave pool commented out.
 #pool pool.ntp.org iburst
 
-refclock SOCK /run/chrony.clk.ttyAMA0.sock refid GPS precision 1e-1 offset 0.62 delay 0.1
+# With Pi RTC battery: offset 0.0 auto-locks; offset 0.62 is for PPS lock GPS.
+refclock SOCK /run/chrony.clk.ttyAMA0.sock refid GPS precision 1e-1 offset 0.0 delay 0.1 poll 2 filter 3
 ```
 
 ### UART + PPS (recommended)
 
 ```conf
-makestep 1.0 3
+makestep 0.5 -1
 rtcsync
 
 #pool pool.ntp.org iburst
@@ -128,8 +129,15 @@ refclock SOCK /run/chrony.pps0.sock refid PPS precision 1e-7 lock GPS poll 2
 
 Directive notes:
 
-- **`makestep 1.0 3`** — allow a few large steps early at boot, then slew only.
+- **`makestep 0.5 -1`** — step (not slew) whenever offset exceeds **0.5 s**, with
+  no cap on step count. Required for **automatic** PPS lock on boot: GPS serial
+  and PPS can disagree by ~600 ms until chrony steps; the old `makestep 1.0 3`
+  never fired and both sources stayed `#x` (“no majority”). After lock, chrony
+  slews normally.
 - **`offset`** — added to the gpsd serial SOCK timestamp (see tuning section).
+  **`0.62`** compensates M9N pipeline delay for **`lock GPS`**; it is **not** a
+  substitute for Pi RTC coarse time. With RTC battery at boot, GPS-only setups
+  often use **`offset 0.0`** instead.
 - **`lock GPS`** — PPS steers the clock but needs the GPS refclock for which
   UTC second each pulse belongs to.
 - **`poll 2 filter 3`** — faster boot lock. The default refclock `poll` is 4
@@ -152,6 +160,45 @@ gpsd-free PPS path — not worth it on this deployment.
 
 On systems that use `/var/run` instead of `/run`, adjust SOCK paths to match
 what chronyd creates.
+
+### Automatic boot (RTC battery + airplane sit)
+
+With a Pi RTC battery, the host boots with roughly correct **date/time**. That
+changes two things:
+
+1. **GPS-only chrony** can auto-lock at **`offset 0.0`** within ~1 min of 3D
+   fix (ms-level accuracy — often enough for IIO/pod fusion).
+2. **PPS + `lock GPS`** still needs **`offset 0.62`** (pipeline delay between
+   PPS edge and gpsd serial time — independent of RTC). Boot used to fail with
+   both sources `#x` because **`makestep 1.0 3`** never stepped the ~600 ms
+   sub-second disagreement; **`makestep 0.5 -1`** fixes that.
+
+**Do not omit gpsd/GPS entirely.** Kingfisher still needs the receiver for fixes;
+chrony only chooses which gpsd SOCK feeds discipline. Even “PPS-only” chrony
+(below) still requires a GPS fix so gpsd can tag PPS pulses with the correct UTC
+second.
+
+Expected unattended timeline after power-on (outdoor/hangar with sky view):
+
+| Phase | Duration | What happens |
+|-------|----------|--------------|
+| Boot | 0–30 s | RTC sets coarse wall clock; gpsd + chronyd start |
+| GNSS acquisition | 1–5 min | Cold start if M9N V_BCKP flat; faster with receiver backup |
+| chrony lock | ~30–90 s after 3D fix | `#* PPS` (or `#* GPS` UART-only) without manual steps |
+
+### Alternative chrony profiles
+
+| Profile | chrony refclocks | Accuracy | Notes |
+|---------|------------------|----------|-------|
+| **UART + PPS** (default) | GPS SOCK + PPS SOCK `lock GPS` | sub-µs | Best; needs `offset 0.62` + `makestep 0.5 -1` |
+| **PPS-only** | PPS SOCK only (no `lock GPS`) | sub-µs | Auto-boot tested; gpsd still needs fix for UTC second on PPS |
+| **UART-only** | GPS SOCK only | ~ms | Simplest; use `offset 0.0` with RTC battery |
+
+See commented alternatives in `deploy/time-sync/chrony.conf.example`.
+
+**Omitting the GPS chrony refclock** is feasible when PPS is wired and the RTC
+keeps coarse time within ~0.5 s. **Omitting gpsd/GPS hardware** is not — you
+lose navigation data and PPS second tagging.
 
 ## 5. Tune the GPS `offset`
 
@@ -263,7 +310,7 @@ See `deploy/time-sync/verify.md` for the kingfisher UI checks.
 | GPS `#?` / `#x`, large `sourcestats` Offset | Wrong **`offset` sign** (negated) or magnitude — re-run NTP tune |
 | NTP `*` instead of PPS `*` | **`pool`** enabled while online — comment out for offline |
 | PPS Reach `0` | `/dev/pps0` missing (no overlay/reboot), or not in gpsd **`DEVICES`** |
-| PPS samples OK but `#x`, GPS `#x` | GPS **`offset`** still wrong — PPS `lock GPS` needs serial within ~0.5 s |
+| PPS samples OK but `#x`, GPS `#x` | GPS **`offset`** wrong, **or** `makestep 1.0 3` (use **`makestep 0.5 -1`**) |
 | `cgps` OK, chrony dead | Almost always gpsd not feeding SOCK — restart pair above |
 
 ## 9. Expected accuracy
@@ -306,8 +353,9 @@ For what each flight DB **`ts_ns`** column means (including GPS row time vs
 ## 10. Kingfisher startup ordering
 
 Kingfisher performs a short startup assessment of Pi-vs-GPS time before opening
-the flight DB (`/api/status` and cockpit header). To protect DB filenames and
-session start times on cold boot, order kingfisher after chrony is healthy:
+the flight DB (`/api/status` and cockpit header). Order it after chrony/gpsd,
+wait for discipline when possible, but **do not block forever** if chrony never
+locks (Pi RTC battery keeps DB filenames sane):
 
 ```ini
 [Unit]
@@ -315,8 +363,17 @@ After=chronyd.service gpsd.service
 Wants=chronyd.service gpsd.service
 
 [Service]
-ExecStartPre=/usr/bin/chronyc waitsync 20 0.25
+TimeoutStartSec=900
+ExecStartPre=/bin/sleep 120
+ExecStartPre=-/usr/bin/chronyc waitsync 60 0.1
 ```
 
-That waits for sync at startup; kingfisher's status model still reports if the
-clock later drifts or goes stale.
+- **`sleep 120`** — GNSS acquisition and chrony lock usually need a few minutes
+  after cold boot.
+- **`waitsync 60 0.1`** — wait up to ~10 min more for `#* PPS` (or `#* GPS`);
+  returns immediately when already synced.
+- **Leading `-`** — start kingfisher anyway if waitsync times out; metadata and
+  the clock badge flag unsynced discipline.
+
+See **`deploy/systemd/kingfisher.service.example`** for the full user unit.
+Kingfisher's status model still reports if the clock later drifts or goes stale.

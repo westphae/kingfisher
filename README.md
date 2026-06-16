@@ -255,14 +255,20 @@ kingfisher first so the reverse proxy has a backend on `:8080`.
    file under `/run/user/$UID/journal`, so `journalctl --user` shows nothing even
    though `systemctl --user status` does.
 
-The unit runs `chronyc waitsync 120 0.25` before opening today's flight DB:
-up to **120 tries** at the default **10 s** interval (~**20 minutes** worst case)
-until chrony reports synchronized with remaining correction ≤ **0.25 s** (returns
-immediately when already synced). Session filenames and startup timestamps then
-reflect disciplined time. On a cold GPS start that can still fail if the receiver
-has not locked yet; retry with `systemctl --user restart kingfisher.service` once
-`#* PPS` appears, or temporarily comment out the `ExecStartPre=` line while
-bench-testing.
+The unit waits for chrony before opening today's flight DB, but **always starts**
+eventually:
+
+1. **`sleep 120`** — give the receiver time to acquire and chrony time to lock
+   (typical 2–5 min after boot with `makestep 0.5 -1`; see `docs/time-sync.md`).
+2. **`chronyc waitsync 60 0.1`** — up to **60 tries** at **10 s** (~**10 minutes**
+   more) until chrony reports synchronized with remaining correction ≤ **0.1 s**
+   (returns immediately when already synced, e.g. `#* PPS`).
+3. **Leading `-` on waitsync** — if chrony never locks, kingfisher still starts.
+   With a Pi **RTC battery**, flight DB filenames stay sane; startup metadata and
+   the cockpit clock badge record unsynced discipline.
+
+`TimeoutStartSec=900` allows the full pre-start wait (the default **90 s** is too
+short). `RestartSec=30` retries a failed start (e.g. transient IIO error).
 
 **After upgrading:** `go install ./cmd/kingfisher`, then
 `systemctl --user restart kingfisher.service`.

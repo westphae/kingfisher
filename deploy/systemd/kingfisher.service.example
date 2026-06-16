@@ -23,10 +23,15 @@ Wants=network-online.target chronyd.service gpsd.service
 
 [Service]
 Type=simple
-ExecStartPre=/usr/bin/chronyc waitsync 120 0.25
+# waitsync can take sleep(120) + up to 60×10 s; default TimeoutStartSec (90 s) is too short.
+TimeoutStartSec=900
+# GNSS acquisition + chrony lock usually need 2–5 min after boot; see docs/time-sync.md.
+ExecStartPre=/bin/sleep 120
+# Leading `-`: start kingfisher even if chrony never locks (RTC keeps DB naming sane).
+ExecStartPre=-/usr/bin/chronyc waitsync 60 0.1
 ExecStart=__KINGFISHER_BIN__
 Restart=on-failure
-RestartSec=5
+RestartSec=30
 TimeoutStopSec=45
 
 # Flight DBs default to ~/kingfisher/flights; config to ~/.config/kingfisher/config.json
