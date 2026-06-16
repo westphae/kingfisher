@@ -86,6 +86,98 @@ const KFTap = (function () {
     );
   }
 
+  /** Visible viewport band (shrinks when the soft keyboard is open on mobile). */
+  function visibleViewportBounds(marginPx) {
+    const margin = marginPx ?? 12;
+    const vv = window.visualViewport;
+    if (vv) {
+      return {
+        top: vv.offsetTop + margin,
+        bottom: vv.offsetTop + vv.height - margin,
+      };
+    }
+    return { top: margin, bottom: window.innerHeight - margin };
+  }
+
+  function isRectInBounds(rect, bounds) {
+    return rect.top >= bounds.top && rect.bottom <= bounds.bottom;
+  }
+
+  /** Keep a focused control above the soft keyboard by scrolling scrollable ancestors. */
+  function scrollFormControlIntoView(inp) {
+    if (!inp?.isConnected || !isFormControl(inp)) return;
+
+    const bounds = visibleViewportBounds(12);
+    let rect = inp.getBoundingClientRect();
+    if (isRectInBounds(rect, bounds)) return;
+
+    let el = inp.parentElement;
+    while (el && el !== document.documentElement) {
+      const style = getComputedStyle(el);
+      const oy = style.overflowY;
+      if (
+        (oy === 'auto' || oy === 'scroll' || oy === 'overlay') &&
+        el.scrollHeight > el.clientHeight + 1
+      ) {
+        rect = inp.getBoundingClientRect();
+        if (rect.bottom > bounds.bottom) {
+          el.scrollTop += rect.bottom - bounds.bottom + 8;
+        } else if (rect.top < bounds.top) {
+          el.scrollTop -= bounds.top - rect.top + 8;
+        }
+        rect = inp.getBoundingClientRect();
+        if (isRectInBounds(rect, bounds)) return;
+      }
+      el = el.parentElement;
+    }
+
+    try {
+      inp.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+    } catch {
+      inp.scrollIntoView({ block: 'center', inline: 'nearest' });
+    }
+  }
+
+  const keyboardScrollTimers = new WeakMap();
+
+  function scheduleKeyboardScroll(inp) {
+    if (!inp) return;
+    const prev = keyboardScrollTimers.get(inp);
+    if (prev) prev.forEach(clearTimeout);
+    const ids = [0, 80, 200, 450, 750].map((ms) =>
+      window.setTimeout(() => {
+        if (document.activeElement === inp) scrollFormControlIntoView(inp);
+      }, ms)
+    );
+    keyboardScrollTimers.set(inp, ids);
+  }
+
+  let keyboardScrollWired = false;
+
+  function wireKeyboardScroll() {
+    if (keyboardScrollWired) return;
+    keyboardScrollWired = true;
+
+    const onViewportChange = () => {
+      const el = document.activeElement;
+      if (isFormControl(el)) scrollFormControlIntoView(el);
+    };
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', onViewportChange);
+      window.visualViewport.addEventListener('scroll', onViewportChange);
+    }
+
+    document.addEventListener(
+      'focusin',
+      (ev) => {
+        if (!isFormControl(ev.target)) return;
+        scheduleKeyboardScroll(ev.target);
+      },
+      true
+    );
+  }
+
   // Blur-then-focus so iOS WebKit picks up inputmode/type when switching fields.
   function focusFormControl(inp) {
     if (!inp || inp.disabled) return;
@@ -99,6 +191,7 @@ const KFTap = (function () {
         inp.inputMode = inp.getAttribute('inputmode');
       }
       inp.focus({ preventScroll: true });
+      scheduleKeyboardScroll(inp);
     };
 
     if (switching) {
@@ -168,5 +261,7 @@ const KFTap = (function () {
     });
   }
 
-  return { bindTap, bindPress, bindFieldFocus, focusFormControl, wireDialogCloses, wireCheckboxLabels };
+  return { bindTap, bindPress, bindFieldFocus, focusFormControl, wireDialogCloses, wireCheckboxLabels, wireKeyboardScroll };
 })();
+
+KFTap.wireKeyboardScroll();
