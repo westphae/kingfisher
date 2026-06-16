@@ -54,21 +54,56 @@ var KFHowgozit = (function () {
     return log?.fields || [];
   }
 
+  function pad2(n) {
+    return String(n).padStart(2, '0');
+  }
+
+  /** Format ts_ns as UTC HHMM, or HHMMSS when seconds are non-zero. */
   function formatTime(tsNs) {
     if (!tsNs) return '';
     const d = new Date(tsNs / 1e6);
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    const h = d.getUTCHours();
+    const m = d.getUTCMinutes();
+    const s = d.getUTCSeconds();
+    if (s === 0) {
+      return pad2(h) + pad2(m);
+    }
+    return pad2(h) + pad2(m) + pad2(s);
   }
 
-  function parseTimeToTsNs(hhmm, baseTsNs) {
-    const parts = String(hhmm).trim().split(':');
-    if (parts.length < 2) return null;
-    const h = Number(parts[0]);
-    const m = Number(parts[1]);
-    if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  /** Parse UTC HHMM or HHMMSS (also accepts HH:MM[:SS]) into ts_ns on baseTsNs's UTC date. */
+  function parseTimeToTsNs(raw, baseTsNs) {
+    const s = String(raw).trim();
+    if (!s) return null;
+
+    let h;
+    let m;
+    let sec = 0;
+
+    if (/^\d{4}$/.test(s)) {
+      h = Number(s.slice(0, 2));
+      m = Number(s.slice(2, 4));
+    } else if (/^\d{6}$/.test(s)) {
+      h = Number(s.slice(0, 2));
+      m = Number(s.slice(2, 4));
+      sec = Number(s.slice(4, 6));
+    } else if (s.includes(':')) {
+      const parts = s.split(':');
+      if (parts.length < 2 || parts.length > 3) return null;
+      if (parts.some((p) => p.trim() === '')) return null;
+      h = Number(parts[0]);
+      m = Number(parts[1]);
+      if (parts.length === 3) sec = Number(parts[2]);
+    } else {
+      return null;
+    }
+
+    if (!Number.isFinite(h) || !Number.isFinite(m) || !Number.isFinite(sec)) return null;
+    if (h < 0 || h > 23 || m < 0 || m > 59 || sec < 0 || sec > 59) return null;
+
     const base = new Date((baseTsNs || Date.now() * 1e6) / 1e6);
-    base.setHours(h, m, 0, 0);
-    return Math.round(base.getTime() * 1e6);
+    const ms = Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), h, m, sec, 0);
+    return Math.round(ms * 1e6);
   }
 
   function escapeHtml(s) {
@@ -584,8 +619,8 @@ var KFHowgozit = (function () {
     const timePrefill = prefilled.has('__time__');
     html +=
       `<label class="hgz-row-field">` +
-      `<span class="hgz-row-label">Time (HH:MM)</span>` +
-      `<input type="text" class="hgz-row-input hgz-row-input-time${timePrefill ? ' hgz-prefill' : ''}" data-rowid="${rid}" data-field="__time__" value="${escapeHtml(formatTime(row.ts_ns))}" inputmode="numeric" placeholder="21:15" />` +
+      `<span class="hgz-row-label">Time UTC (HHMM or HHMMSS)</span>` +
+      `<input type="text" class="hgz-row-input hgz-row-input-time${timePrefill ? ' hgz-prefill' : ''}" data-rowid="${rid}" data-field="__time__" value="${escapeHtml(formatTime(row.ts_ns))}" inputmode="numeric" placeholder="143055" maxlength="6" pattern="[0-9]{4,6}" />` +
       `</label>`;
 
     for (const f of fields) {
@@ -723,7 +758,7 @@ var KFHowgozit = (function () {
     if (field === '__time__') {
       const ts = parseTimeToTsNs(inp.value, row.ts_ns);
       if (ts == null) {
-        markCellError(inp, 'Enter time as HH:MM.');
+        markCellError(inp, 'Enter UTC time as HHMM or HHMMSS.');
         return;
       }
       try {
@@ -777,10 +812,8 @@ var KFHowgozit = (function () {
         ts_ns: tsNs,
         values,
       });
-      if (prefillSet.size) {
-        prefillSet.add('__time__');
-        data.prefill.set(row.rowid, prefillSet);
-      }
+      prefillSet.add('__time__');
+      data.prefill.set(row.rowid, prefillSet);
       data.rows.push(row);
       renderRows();
       ui.scrollEl?.scrollTo({ top: ui.scrollEl.scrollHeight, behavior: 'smooth' });

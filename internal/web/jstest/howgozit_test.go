@@ -171,43 +171,52 @@ func TestFieldInputHtmlEscapesValue(t *testing.T) {
 
 func TestParseTimeToTsNs(t *testing.T) {
 	vm := newVM(t)
-	// Use a fixed base so the date component is deterministic; getHours/
-	// getMinutes read back in local time (set by setHours), so the timezone
-	// cancels out.
-	const base = "1700000000000000000" // arbitrary ns base
+	// Fixed UTC instant: 2023-11-14 21:15:30 UTC
+	const base = "1700000000000000000"
 
-	// Valid HH:MM, including single-digit fields.
+	utcHMS := func(in string) (h, m, s int64) {
+		expr := "T.parseTimeToTsNs(" + in + ", " + base + ")"
+		h = evalInt(t, vm, "new Date("+expr+"/1e6).getUTCHours()")
+		m = evalInt(t, vm, "new Date("+expr+"/1e6).getUTCMinutes()")
+		s = evalInt(t, vm, "new Date("+expr+"/1e6).getUTCSeconds()")
+		return h, m, s
+	}
+
 	for _, c := range []struct {
 		in       string
 		wantH    int64
 		wantMin  int64
+		wantSec  int64
 	}{
-		{"'21:15'", 21, 15},
-		{"'09:05'", 9, 5},
-		{"'9:5'", 9, 5},
-		{"'00:00'", 0, 0},
+		{"'2115'", 21, 15, 0},
+		{"'0915'", 9, 15, 0},
+		{"'211530'", 21, 15, 30},
+		{"'0000'", 0, 0, 0},
+		{"'21:15'", 21, 15, 0},
+		{"'21:15:30'", 21, 15, 30},
 	} {
-		h := evalInt(t, vm, "new Date(T.parseTimeToTsNs("+c.in+", "+base+")/1e6).getHours()")
-		m := evalInt(t, vm, "new Date(T.parseTimeToTsNs("+c.in+", "+base+")/1e6).getMinutes()")
-		if h != c.wantH || m != c.wantMin {
-			t.Errorf("parseTimeToTsNs(%s) -> %02d:%02d, want %02d:%02d", c.in, h, m, c.wantH, c.wantMin)
+		h, m, s := utcHMS(c.in)
+		if h != c.wantH || m != c.wantMin || s != c.wantSec {
+			t.Errorf("parseTimeToTsNs(%s) -> %02d:%02d:%02d, want %02d:%02d:%02d", c.in, h, m, s, c.wantH, c.wantMin, c.wantSec)
 		}
 	}
 
-	// Invalid inputs must return null (never a bogus timestamp).
-	for _, in := range []string{"'abc'", "'21'", "''", "'  '", "'x:y'"} {
+	for _, in := range []string{"'abc'", "'21'", "''", "'  '", "'x:y'", "':'", "'21:'"} {
 		v, err := vm.RunString("T.parseTimeToTsNs(" + in + ", " + base + ") === null")
 		if err != nil || !v.ToBoolean() {
 			t.Errorf("parseTimeToTsNs(%s) should be null (err=%v)", in, err)
 		}
 	}
+}
 
-	// KNOWN QUIRK (tracked in internal/web/TODO.md): an empty HH or MM part
-	// coerces to 0 via Number(''), so ':' parses to 00:00 and '21:' to 21:00
-	// rather than being rejected. Locked here so any future tightening is a
-	// deliberate change, not an accident.
-	if h := evalInt(t, vm, "new Date(T.parseTimeToTsNs(':', "+base+")/1e6).getHours()"); h != 0 {
-		t.Errorf("known-quirk ':' should parse to hour 0, got %d", h)
+func TestFormatTimeUTC(t *testing.T) {
+	vm := newVM(t)
+	const base = "1700000000000000000"
+	if got := evalStr(t, vm, "T.formatTime(T.parseTimeToTsNs('2115', "+base+"))"); got != "2115" {
+		t.Errorf("formatTime HHMM roundtrip: got %q want 2115", got)
+	}
+	if got := evalStr(t, vm, "T.formatTime(T.parseTimeToTsNs('211530', "+base+"))"); got != "211530" {
+		t.Errorf("formatTime HHMMSS roundtrip: got %q want 211530", got)
 	}
 }
 

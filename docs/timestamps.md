@@ -173,8 +173,11 @@ header for live discipline.
 ## Howgozit manual logs
 
 Pilot-entered rows live in per-log tables named `hgz_<log_id>` (registry in
-`howgozit_log`). Each row has **`ts_ns`** set at row creation (Pi wall clock)
-and custom REAL/TEXT columns from templates in `config.json` (`howgozit`).
+`howgozit_log`). Each row has **`ts_ns`** set at row creation (Pi wall clock,
+UTC-aligned) and custom REAL/TEXT columns from templates in `config.json`
+(`howgozit`). The cockpit time field is **UTC** entered as **HHMM** or
+**HHMMSS** (no colon); new rows prepopulate with the current UTC time in that
+format.
 
 To annotate sensor data with a manual entry, join on Pi time — for example,
 nearest sensor sample within a window:

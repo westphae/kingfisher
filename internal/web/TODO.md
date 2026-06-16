@@ -44,12 +44,9 @@ are cleanup/consistency, not correctness-critical — safe to defer.
 
 ## Surfaced by the new JS tests (internal/web/jstest)
 
-- **`parseTimeToTsNs` empty-part quirk** (`static/howgozit.js`): an empty HH or MM
-  part coerces to 0 via `Number('')`, so `':'` parses to 00:00 and `'21:'` to
-  21:00 instead of being rejected as incomplete. Currently a debounced edit of a
-  half-typed time can silently persist `*:00`. Consider rejecting empty parts
-  (then M1's cell-error surfaces it). Behavior is locked by a test, so tightening
-  is a deliberate change. Low priority.
+- **`parseTimeToTsNs` incomplete colon input** (`static/howgozit.js`): empty HH
+  or MM parts in legacy `HH:MM[:SS]` input are rejected (returns null). Digit
+  forms `HHMM` / `HHMMSS` are preferred.
 
 ## Related (surfaced while fixing M1)
 
