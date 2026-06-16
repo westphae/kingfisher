@@ -112,6 +112,17 @@ type PressAlt struct {
 	KollsmanInHg float64 `json:"kollsman_inhg"`
 }
 
+// DisplaySmoothGroup is per-device UI smoothing (browser display only).
+type DisplaySmoothGroup struct {
+	Mode string  `json:"mode"` // "raw" or "smoothed"
+	TauS float64 `json:"tau_s"`
+}
+
+// Display holds cockpit presentation settings (not used by derive/store).
+type Display struct {
+	Smooth map[string]map[string]DisplaySmoothGroup `json:"smooth,omitempty"`
+}
+
 // Airspeed configures pitot processing for the derived airspeed device.
 type Airspeed struct {
 	// DpZeroPa is subtracted from raw differential pressure before IAS (Pa).
@@ -448,6 +459,7 @@ type Config struct {
 	Compass    Compass           `json:"compass"`
 	Howgozit   Howgozit          `json:"howgozit,omitempty"`
 	Terminal   Terminal          `json:"terminal,omitempty"`
+	Display    Display           `json:"display,omitempty"`
 }
 
 // Terminal configures the optional browser shell (/terminal).
