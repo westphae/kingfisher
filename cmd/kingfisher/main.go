@@ -20,6 +20,7 @@ import (
 	"github.com/westphae/kingfisher/internal/clock"
 	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/derive"
+	"github.com/westphae/kingfisher/internal/gdl90"
 	"github.com/westphae/kingfisher/internal/gps"
 	"github.com/westphae/kingfisher/internal/live"
 	"github.com/westphae/kingfisher/internal/pod"
@@ -193,7 +194,9 @@ func main() {
 		}
 	}
 
-	srv, err := web.New(holder, hub, st, buf, gpsClient, podClient, registry, compassEngine, autoNudger, requestShutdown, devRoot)
+	gdl90BC := gdl90.Run(ctx, stop, holder, hub, gpsClient)
+
+	srv, err := web.New(holder, hub, st, buf, gpsClient, podClient, registry, compassEngine, autoNudger, requestShutdown, devRoot, gdl90BC)
 	if err != nil {
 		log.Fatalf("web: %v", err)
 	}

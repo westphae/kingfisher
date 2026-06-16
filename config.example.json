@@ -25,5 +25,18 @@
     "buffer_max_readings": 128,
     "flush_interval_s": 3,
     "flush_high_watermark": 24
+  },
+  "gdl90": {
+    "enabled": false,
+    "port": 4000,
+    "dhcp_leases": "/var/lib/dhcp/dhcpd.leases",
+    "static_ips": [],
+    "ownship_hz": 5,
+    "ahrs_hz": 10,
+    "ff_ahrs_hz": 5,
+    "heartbeat_hz": 1,
+    "ownship_mode_s": "F00000",
+    "device_short_name": "Kingfisher",
+    "device_long_name": "kingfisher"
   }
 }

@@ -188,6 +188,136 @@ type AHRS struct {
 	RateHz  float64 `json:"rate_hz"`
 }
 
+// GDL90 configures Stratux-compatible UDP output for EFB apps (ForeFlight, iFly).
+type GDL90 struct {
+	Enabled         bool     `json:"enabled"`
+	Port            int      `json:"port,omitempty"`
+	DHCPLeases      string   `json:"dhcp_leases,omitempty"`
+	StaticIPs       []string `json:"static_ips,omitempty"`
+	OwnshipHz       float64  `json:"ownship_hz,omitempty"`
+	AHRSHz          float64  `json:"ahrs_hz,omitempty"`
+	FFAHRSHz        float64  `json:"ff_ahrs_hz,omitempty"`
+	HeartbeatHz     float64  `json:"heartbeat_hz,omitempty"`
+	OwnshipModeS    string   `json:"ownship_mode_s,omitempty"`
+	DeviceShortName string   `json:"device_short_name,omitempty"`
+	DeviceLongName  string   `json:"device_long_name,omitempty"`
+}
+
+const (
+	defaultGDL90Port           = 4000
+	defaultGDL90DHCPLeases       = "/var/lib/dhcp/dhcpd.leases"
+	defaultGDL90OwnshipHz        = 5.0
+	defaultGDL90AHRSHz         = 10.0
+	defaultGDL90FFAHRSHz       = 5.0
+	defaultGDL90HeartbeatHz    = 1.0
+	defaultGDL90OwnshipModeS   = "F00000"
+	defaultGDL90DeviceShort    = "Kingfisher"
+	defaultGDL90DeviceLong     = "kingfisher"
+)
+
+func (g *GDL90) PortEffective() int {
+	if g == nil || g.Port <= 0 {
+		return defaultGDL90Port
+	}
+	return g.Port
+}
+
+func (g *GDL90) DHCPLeasesEffective() string {
+	if g == nil || strings.TrimSpace(g.DHCPLeases) == "" {
+		return defaultGDL90DHCPLeases
+	}
+	return g.DHCPLeases
+}
+
+func (g *GDL90) OwnshipHzEffective() float64 {
+	if g == nil || g.OwnshipHz <= 0 {
+		return defaultGDL90OwnshipHz
+	}
+	return g.OwnshipHz
+}
+
+func (g *GDL90) AHRSHzEffective() float64 {
+	if g == nil || g.AHRSHz <= 0 {
+		return defaultGDL90AHRSHz
+	}
+	return g.AHRSHz
+}
+
+func (g *GDL90) FFAHRSHzEffective() float64 {
+	if g == nil || g.FFAHRSHz <= 0 {
+		return defaultGDL90FFAHRSHz
+	}
+	return g.FFAHRSHz
+}
+
+func (g *GDL90) HeartbeatHzEffective() float64 {
+	if g == nil || g.HeartbeatHz <= 0 {
+		return defaultGDL90HeartbeatHz
+	}
+	return g.HeartbeatHz
+}
+
+func (g *GDL90) OwnshipModeSEffective() string {
+	if g == nil || strings.TrimSpace(g.OwnshipModeS) == "" {
+		return defaultGDL90OwnshipModeS
+	}
+	return strings.TrimSpace(g.OwnshipModeS)
+}
+
+func (g *GDL90) DeviceShortNameEffective() string {
+	if g == nil || strings.TrimSpace(g.DeviceShortName) == "" {
+		return defaultGDL90DeviceShort
+	}
+	return truncateRunes(g.DeviceShortName, 8)
+}
+
+func (g *GDL90) DeviceLongNameEffective() string {
+	if g == nil || strings.TrimSpace(g.DeviceLongName) == "" {
+		return defaultGDL90DeviceLong
+	}
+	return truncateRunes(g.DeviceLongName, 16)
+}
+
+func MergeGDL90Defaults(g *GDL90) {
+	if g == nil {
+		return
+	}
+	if g.Port <= 0 {
+		g.Port = defaultGDL90Port
+	}
+	if strings.TrimSpace(g.DHCPLeases) == "" {
+		g.DHCPLeases = defaultGDL90DHCPLeases
+	}
+	if g.OwnshipHz <= 0 {
+		g.OwnshipHz = defaultGDL90OwnshipHz
+	}
+	if g.AHRSHz <= 0 {
+		g.AHRSHz = defaultGDL90AHRSHz
+	}
+	if g.FFAHRSHz <= 0 {
+		g.FFAHRSHz = defaultGDL90FFAHRSHz
+	}
+	if g.HeartbeatHz <= 0 {
+		g.HeartbeatHz = defaultGDL90HeartbeatHz
+	}
+	if strings.TrimSpace(g.OwnshipModeS) == "" {
+		g.OwnshipModeS = defaultGDL90OwnshipModeS
+	}
+	if strings.TrimSpace(g.DeviceShortName) == "" {
+		g.DeviceShortName = defaultGDL90DeviceShort
+	}
+	if strings.TrimSpace(g.DeviceLongName) == "" {
+		g.DeviceLongName = defaultGDL90DeviceLong
+	}
+}
+
+func truncateRunes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}
+
 // CompassKalman holds EKF parameters for magnetometer calibration (magkal).
 type CompassKalman struct {
 	SigmaK0      float64               `json:"sigma_k0,omitempty"`
@@ -460,6 +590,7 @@ type Config struct {
 	Howgozit   Howgozit          `json:"howgozit,omitempty"`
 	Terminal   Terminal          `json:"terminal,omitempty"`
 	Display    Display           `json:"display,omitempty"`
+	GDL90      GDL90             `json:"gdl90,omitempty"`
 }
 
 // Terminal configures the optional browser shell (/terminal).
@@ -557,6 +688,18 @@ func Defaults() *Config {
 			Enabled:           false,
 			SessionTimeoutMin: 480,
 			MaxSessions:       2,
+		},
+		GDL90: GDL90{
+			Enabled:         false,
+			Port:            defaultGDL90Port,
+			DHCPLeases:      defaultGDL90DHCPLeases,
+			OwnshipHz:       defaultGDL90OwnshipHz,
+			AHRSHz:          defaultGDL90AHRSHz,
+			FFAHRSHz:        defaultGDL90FFAHRSHz,
+			HeartbeatHz:     defaultGDL90HeartbeatHz,
+			OwnshipModeS:    defaultGDL90OwnshipModeS,
+			DeviceShortName: defaultGDL90DeviceShort,
+			DeviceLongName:  defaultGDL90DeviceLong,
 		},
 	}
 }
@@ -696,6 +839,7 @@ func Load(path string) (*Config, error) {
 	MergePodDefaults(&c.Pod)
 	MergeClockDefaults(&c.Clock)
 	MergeHowgozitDefaults(&c.Howgozit)
+	MergeGDL90Defaults(&c.GDL90)
 	return c, nil
 }
 

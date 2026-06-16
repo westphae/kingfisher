@@ -39,6 +39,7 @@ import (
 	"github.com/westphae/kingfisher/internal/clock"
 	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/derive"
+	"github.com/westphae/kingfisher/internal/gdl90"
 	"github.com/westphae/kingfisher/internal/gps"
 	"github.com/westphae/kingfisher/internal/live"
 	"github.com/westphae/kingfisher/internal/location"
@@ -79,6 +80,7 @@ type Server struct {
 	reg     *sensors.Registry
 	compass derive.CompassAligner
 	nudger  *clock.AutoNudger
+	gdl90   *gdl90.Broadcaster
 
 	requestShutdown func(powerOff bool)
 
@@ -93,7 +95,7 @@ type Server struct {
 // on disk (parent of static/ and templates/). UI assets are read on each
 // request with Cache-Control: no-cache — no go build/restart needed for CSS/JS
 // edits. Production binaries leave devWebRoot empty and use go:embed instead.
-func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, gpsc *gps.Client, podc *pod.Client, reg *sensors.Registry, compass derive.CompassAligner, nudger *clock.AutoNudger, requestShutdown func(powerOff bool), devWebRoot string) (*Server, error) {
+func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, gpsc *gps.Client, podc *pod.Client, reg *sensors.Registry, compass derive.CompassAligner, nudger *clock.AutoNudger, requestShutdown func(powerOff bool), devWebRoot string, gdl90bc *gdl90.Broadcaster) (*Server, error) {
 	tpl, err := template.ParseFS(assets, "templates/*.html")
 	if err != nil {
 		return nil, err
@@ -114,6 +116,7 @@ func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, 
 		reg:        reg,
 		compass:    compass,
 		nudger:     nudger,
+		gdl90:      gdl90bc,
 		requestShutdown: requestShutdown,
 		tpl:        tpl,
 		devWebRoot: devWebRoot,
@@ -301,6 +304,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		st["pod"] = s.pod.LinkStats()
 	} else {
 		st["pod"] = pod.LinkStats{Enabled: false}
+	}
+	if s.gdl90 != nil {
+		st["gdl90"] = s.gdl90.Stats()
+	} else {
+		st["gdl90"] = gdl90.Stats{Enabled: s.cfg.Get().GDL90.Enabled}
 	}
 	writeJSON(w, st)
 }
