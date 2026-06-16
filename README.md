@@ -199,6 +199,33 @@ the nag and enables secure-context APIs (clipboard, etc.) over HTTPS.
 Open the cockpit at **`https://<pi-hostname-or-ip>/`** (port 443; HTTP on port 80
 redirects automatically).
 
+### EFB apps (ForeFlight, iFlyEFB)
+
+Kingfisher can broadcast **Stratux-compatible GDL90** over UDP port **4000** so
+iPads on the Pi access point receive GPS position and AHRS attitude without a
+separate Stratux box. Enable in `config.json`:
+
+```json
+"gdl90": {
+  "enabled": true
+}
+```
+
+When the Pi is the Wi‑Fi AP, kingfisher discovers EFB clients from
+`/var/lib/dhcp/dhcpd.leases` (same as Stratux). Add fixed iPad addresses to
+`static_ips` if you use DHCP reservations.
+
+**ForeFlight:** connect the iPad to the Pi Wi‑Fi → *More* → *Devices* → enable
+the GDL90 receiver at **`192.168.10.1`** (or your AP address). Use GDL90 for GPS
+and attitude.
+
+**iFlyEFB:** *Settings* → *GDL90* → enable GDL90, use GDL90 GPS and AHRS.
+
+Requires `ahrs.enabled` for attitude. Traffic and weather are not sent (no ADS-B
+receiver). Check `/api/status` → `gdl90` for connected client count and last
+send time during ground testing; `tcpdump -i wlan0 udp port 4000` should show
+steady packets when an EFB is connected.
+
 ### systemd user service (boot)
 
 Kingfisher is normally run as your Pi login user (IIO device access, config under
