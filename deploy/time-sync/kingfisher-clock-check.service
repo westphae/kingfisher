@@ -1,0 +1,14 @@
+[Unit]
+Description=Kingfisher boot-time clock sanity check (GPS vs system; wrong-second detector)
+Documentation=file:///usr/local/bin/kingfisher-clock-check.sh
+After=chrony.service gpsd.service
+Wants=chrony.service gpsd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/kingfisher-clock-check.sh
+TimeoutStartSec=90
+# Logs to the journal; nothing depends on this unit, so it never blocks boot.
+
+[Install]
+WantedBy=multi-user.target
