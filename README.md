@@ -49,10 +49,11 @@ lean NAV-PVT-only stream the receiver is configured to emit, so we get a
 clean 10 Hz.
 
 For time discipline, prefer chrony's SOCK integration over SHM and keep
-`chronyd` ahead of `gpsd` in the service order. The repo-owned examples live in
-`deploy/time-sync/`. For UART-only serial time, tune the chrony `offset` for
-your receiver; do not copy the large `0.9999` placeholder from old gpsd examples
-verbatim.
+`chronyd` ahead of `gpsd` in the service order (and restart `gpsd` after any
+`chronyd` restart). The repo-owned examples live in `deploy/time-sync/`. With PPS
+wired, PPS disciplines the clock and the GPS serial source is marked `noselect`
+(time-of-day only) — no per-receiver `offset` tuning is needed. See
+`docs/time-sync.md`.
 
 The receiver itself is configured once with `ubxtool` and the settings
 are saved to its flash (they survive power-off). With gpsd running:
@@ -202,29 +203,30 @@ redirects automatically).
 ### EFB apps (ForeFlight, iFlyEFB)
 
 Kingfisher can broadcast **Stratux-compatible GDL90** over UDP port **4000** so
-iPads on the Pi access point receive GPS position and AHRS attitude without a
+tablets on the Pi access point receive GPS position and AHRS attitude without a
 separate Stratux box. Enable in `config.json`:
 
 ```json
 "gdl90": {
-  "enabled": true
+  "enabled": true,
+  "static_ips": ["192.168.10.141", "192.168.10.40"]
 }
 ```
 
-When the Pi is the Wi‑Fi AP, kingfisher discovers EFB clients from
-`/var/lib/dhcp/dhcpd.leases` (same as Stratux). Add fixed iPad addresses to
-`static_ips` if you use DHCP reservations.
+On the Pi AP (NetworkManager + dnsmasq), list each tablet’s reserved IP in
+`static_ips` — see **`deploy/efb/ap-setup.md`** for DHCP reservations, MAC
+privacy settings, and verification.
 
-**ForeFlight:** connect the iPad to the Pi Wi‑Fi → *More* → *Devices* → enable
-the GDL90 receiver at **`192.168.10.1`** (or your AP address). Use GDL90 for GPS
-and attitude.
+**ForeFlight:** connect to the Pi Wi‑Fi → *More* → *Devices* → enable GDL90 at
+**`192.168.10.1`**.
 
-**iFlyEFB:** *Settings* → *GDL90* → enable GDL90, use GDL90 GPS and AHRS.
+**iFlyEFB:** *Menu* → *About* → *Connected Devices* → Stratux/FlightBox;
+*Setup* → *ADS-B* → Stratux/Flightbox (manual). Expect **GPS Data Only**.
 
 Requires `ahrs.enabled` for attitude. Traffic and weather are not sent (no ADS-B
-receiver). Check `/api/status` → `gdl90` for connected client count and last
-send time during ground testing; `tcpdump -i wlan0 udp port 4000` should show
-steady packets when an EFB is connected.
+receiver). Check `/api/status` → `gdl90` for client count and last send time;
+`tcpdump -i wlan0 udp port 4000` should show steady packets when an EFB is
+connected.
 
 ### systemd user service (boot)
 
@@ -247,6 +249,7 @@ kingfisher first so the reverse proxy has a backend on `:8080`.
 2. **Install the user unit** from the repo example (path must match step 1):
 
    ```bash
+   sudo install -m 755 deploy/systemd/kingfisher-prestart.sh /usr/local/bin/
    mkdir -p ~/.config/systemd/user
    bin="$(go env GOBIN)"
    [ -z "$bin" ] && bin="$(go env GOPATH)/bin"
@@ -282,20 +285,21 @@ kingfisher first so the reverse proxy has a backend on `:8080`.
    file under `/run/user/$UID/journal`, so `journalctl --user` shows nothing even
    though `systemctl --user status` does.
 
-The unit waits for chrony before opening today's flight DB, but **always starts**
-eventually:
+The unit runs **`/usr/local/bin/kingfisher-prestart.sh`** before opening today's
+flight DB:
 
-1. **`sleep 120`** — give the receiver time to acquire and chrony time to lock
-   (typical 2–5 min after boot with `makestep 0.5 -1`; see `docs/time-sync.md`).
-2. **`chronyc waitsync 60 0.1`** — up to **60 tries** at **10 s** (~**10 minutes**
-   more) until chrony reports synchronized with remaining correction ≤ **0.1 s**
-   (returns immediately when already synced, e.g. `#* PPS`).
-3. **Leading `-` on waitsync** — if chrony never locks, kingfisher still starts.
-   With a Pi **RTC battery**, flight DB filenames stay sane; startup metadata and
-   the cockpit clock badge record unsynced discipline.
+| Situation | Behavior |
+|-----------|----------|
+| **Restart while `#* PPS` or `#* GPS`** | `waitsync` returns immediately (~5 ms) |
+| **Cold boot, chrony not locked yet** | `waitsync` returns as soon as PPS locks, bounded ~120 s |
+| **Restart while chrony unsynced** | Up to ~30 s `waitsync`, then start anyway |
+| **Chrony never locks** | Start anyway (RTC keeps DB filenames sane) |
 
-`TimeoutStartSec=900` allows the full pre-start wait (the default **90 s** is too
-short). `RestartSec=30` retries a failed start (e.g. transient IIO error).
+The script always exits 0 — kingfisher is not blocked forever. Startup metadata
+and the cockpit clock badge record unsynced discipline.
+
+`TimeoutStartSec=180` covers the cold-boot path. `RestartSec=30` retries a failed
+main process (not prestart).
 
 **After upgrading:** `go install ./cmd/kingfisher`, then
 `systemctl --user restart kingfisher.service`.

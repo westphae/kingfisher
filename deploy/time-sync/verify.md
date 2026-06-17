@@ -34,8 +34,10 @@ chronyc sourcestats
 Check that:
 
 - GPS and PPS have non-zero **Reach** (octal column in `sources -v`)
-- with pool commented out and offset tuned: **`#* PPS`**, **`#- GPS`** within ~1 min of 3D fix
-- GPS **`sourcestats` Offset** is near zero (not hundreds of ms)
+- with pool commented out: **`#* PPS`** within ~1 min of 3D fix, and **`#? GPS`**
+  (serial source present but `noselect` — the `?` is **expected**, not an error)
+- GPS **`sourcestats` Offset** ≈ serial latency (a few hundred ms is fine with
+  `noselect`); PPS offset in µs
 - `Leap status` is normal after lock
 
 If Reach stays 0 after a chrony restart:
@@ -52,13 +54,26 @@ Open the cockpit UI and confirm the header clock badge shows:
 - skew under about 250 ms once settled (fix-epoch lag ~650 ms is normal)
 - no persistent `startup fallback` warning after a clean synchronized boot
 
+### Boot-time wrong-second check
+
+If `kingfisher-clock-check` is installed (see `docs/time-sync.md` §8a):
+
+```bash
+journalctl -b -u kingfisher-clock-check
+```
+
+Expect `OK: ... within latency band — second-numbering looks correct`. A
+`WARN: ... possible WRONG-SECOND clock error!` means PPS locked to the wrong UTC
+second (check the GPS fix/almanac and RTC sanity) — it never changes the clock.
+
 ## 5. Troubleshooting
 
 See the table in `docs/time-sync.md`. Common fixes:
 
 - enable and start `gpsd.service` at boot
 - restart `gpsd` after every `chronyd` restart
-- tune GPS `offset` with the NTP cross-check (same sign as `sourcestats`, do not negate)
+- if both GPS and PPS sit `#x` (“no majority”), ensure the GPS refclock has
+  `noselect` (`docs/time-sync.md` §4) — do **not** tune `offset`
 - comment `pool pool.ntp.org` for offline GPS/PPS discipline
 
 ## 6. In-flight resync helper (optional)
