@@ -573,9 +573,21 @@ function debounce(fn, ms) {
 }
 
 function renderSmoothSettings(device) {
+  if (typeof KFSmooth === 'undefined') {
+    return (
+      '<section class="smoothSettings"><h4>Display smoothing</h4>' +
+      '<p class="dim smoothHint">Smoothing UI unavailable — rebuild and restart kingfisher ' +
+      '(this binary is missing <code>smooth.js</code>).</p></section>'
+    );
+  }
   const vals = state.devices.get(device)?.values ?? {};
   const groups = KFSmooth.listGroups(device, vals);
-  if (groups.length === 0) return '';
+  if (groups.length === 0) {
+    return (
+      '<section class="smoothSettings"><h4>Display smoothing</h4>' +
+      '<p class="dim smoothHint">No smoothable channel groups for this device yet.</p></section>'
+    );
+  }
   let rows = '';
   for (const g of groups) {
     const ui = KFSmooth.uiGroup(device, g.id);
@@ -585,12 +597,12 @@ function renderSmoothSettings(device) {
     rows +=
       `<div class="smoothRow attrRow" data-smooth-group="${escapeAttr(g.id)}">` +
       `<div class="k">${escapeHtml(KFSmooth.groupLabel(device, g.id, g.channels))}</div>` +
-      `<div class="v smoothCtrls">` +
-      `<span class="smoothMode">` +
-      `<label><input type="radio" name="${escapeAttr(nameBase)}" value="raw"${rawOn ? ' checked' : ''}/> Raw</label> ` +
+      `<div class="v">` +
+      `<div class="smoothMode">` +
+      `<label><input type="radio" name="${escapeAttr(nameBase)}" value="raw"${rawOn ? ' checked' : ''}/> Raw</label>` +
       `<label><input type="radio" name="${escapeAttr(nameBase)}" value="smoothed"${!rawOn ? ' checked' : ''}/> Smoothed</label>` +
-      `</span> ` +
-      `<label class="smoothTauLbl">τ <input type="number" class="smoothTau" step="0.05" min="0.05" value="${escapeAttr(ui.tau_s)}" style="width:4em"${tauDisabled}/> s</label>` +
+      `</div>` +
+      `<label class="smoothTauLbl">τ <input type="number" class="smoothTau" step="0.05" min="0.05" value="${escapeAttr(ui.tau_s)}"${tauDisabled}/> s</label>` +
       `</div></div>`;
   }
   let hint = '<p class="dim smoothHint">Affects cockpit display only; flight recording is unchanged.</p>';
@@ -1161,7 +1173,7 @@ function escapeHtml(s) {
 }
 
 function wireAttrEdits(name) {
-  for (const inp of panelRegions.attrs.querySelectorAll('input,select')) {
+  for (const inp of panelRegions.attrs.querySelectorAll('.attrRow:not(.smoothRow) input, .attrRow:not(.smoothRow) select')) {
     const handler = async () => {
       const channel = inp.dataset.channel || '';
       const attr = inp.dataset.attr;
