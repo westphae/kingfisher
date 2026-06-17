@@ -3,7 +3,6 @@ package clock
 import (
 	"context"
 	"fmt"
-	"math"
 	"os"
 	"os/exec"
 	"strings"
@@ -16,8 +15,6 @@ type ResyncLevel string
 const (
 	ResyncLight ResyncLevel = "light"
 	ResyncFull  ResyncLevel = "full"
-
-	gpsOffsetFixThresholdMs = 150.0
 )
 
 // ResyncResult captures discipline state before and after a resync attempt.
@@ -27,7 +24,6 @@ type ResyncResult struct {
 	After       DisciplineStatus
 	Err         string
 	SyncedAfter bool
-	OffsetFixed bool
 }
 
 // HelperInstalled reports whether the configured resync helper script exists.
@@ -61,8 +57,6 @@ func Resync(ctx context.Context, level ResyncLevel, helper string) ResyncResult 
 		Before: QueryDiscipline(ctx),
 	}
 
-	fixOffset := level == ResyncFull && math.Abs(result.Before.GPSOffsetMs) > gpsOffsetFixThresholdMs
-
 	switch level {
 	case ResyncLight:
 		if err := Reselect(ctx); err != nil {
@@ -74,10 +68,8 @@ func Resync(ctx context.Context, level ResyncLevel, helper string) ResyncResult 
 			result.After = result.Before
 			return result
 		}
-		if err := runResyncHelper(ctx, helper, fixOffset); err != nil {
+		if err := runResyncHelper(ctx, helper); err != nil {
 			result.Err = err.Error()
-		} else {
-			result.OffsetFixed = fixOffset
 		}
 	default:
 		result.Err = fmt.Sprintf("unknown resync level %q", level)
@@ -115,15 +107,12 @@ func runChronycSudo(ctx context.Context, args ...string) error {
 	return nil
 }
 
-func runResyncHelper(ctx context.Context, helper string, fixOffset bool) error {
+func runResyncHelper(ctx context.Context, helper string) error {
 	helper = strings.TrimSpace(helper)
 	if helper == "" {
 		return fmt.Errorf("resync helper not configured")
 	}
 	args := []string{helper}
-	if fixOffset {
-		args = append(args, "--fix-offset")
-	}
 	qctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(qctx, "sudo", args...).CombinedOutput()

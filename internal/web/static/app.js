@@ -860,9 +860,6 @@ function clockUnsyncedDetail(d, resync) {
       parts.push('PPS wired, not steering');
     }
   }
-  if (d.gps_state === 'error' && Math.abs(d.gps_offset_ms || 0) > 200) {
-    parts.push('Use Restart time services to auto-correct GPS offset (requires Pi setup)');
-  }
   if (resync?.last_result && resync.last_result.includes('error')) {
     const err = resync.last_result.split(':error:').pop();
     if (err) parts.push(`Last retry failed: ${err}`);

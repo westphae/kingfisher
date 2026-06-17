@@ -862,7 +862,6 @@ func (s *Server) handleClockResync(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{
 		"level":          result.Level,
 		"synced_after":   result.SyncedAfter,
-		"offset_fixed":   result.OffsetFixed,
 		"before":         disciplineView(result.Before),
 		"after":          disciplineView(result.After),
 		"discipline":     disciplineView(result.After),
@@ -995,9 +994,6 @@ func clockDetailTooltip(disc clock.DisciplineStatus, st gps.ClockStatus) string 
 		parts = append(parts, "chrony is not synchronized to a time reference.")
 		if disc.PPSPresent && !disc.PPSSteering && disc.PPSState == clock.SourceStateError {
 			parts = append(parts, "PPS is present but marked in error (often waiting on GPS lock).")
-		}
-		if disc.GPSState == clock.SourceStateError && disc.GPSOffsetMs != 0 {
-			parts = append(parts, fmt.Sprintf("GPS refclock offset %.0f ms — may need ground offset retune if persistent.", disc.GPSOffsetMs))
 		}
 	} else {
 		parts = append(parts, "chrony status unavailable.")
