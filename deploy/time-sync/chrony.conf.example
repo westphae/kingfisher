@@ -1,28 +1,40 @@
 # Kingfisher GNSS discipline example.
 # Merge into /etc/chrony/chrony.conf (Debian / Raspberry Pi OS).
 #
-# Boot policy: step (not just slew) when offset exceeds 0.5 s, with no limit on
-# how many times at boot. Required for automatic PPS lock on RTC-backed Pi boot:
-# GPS serial and PPS can disagree by ~600 ms until chrony steps; makestep 1.0 3
-# never fires and both sources stay #x ("no majority").
-makestep 0.5 -1
+# Boot policy: allow the clock to be *stepped* (not just slewed) for the first few
+# updates, then slew only. The step lets PPS snap the clock to true time at boot
+# even if the RTC drifted; limiting it to the first 3 updates avoids backward
+# clock jumps mid-flight (which would corrupt logged flight timing). The 0.5 s
+# threshold keeps boot recovery fast.
+makestep 0.5 3
 rtcsync
 
 # Offline-first flight recording: leave pool commented out.
 #pool pool.ntp.org iburst
 
-# gpsd serial-time SOCK for /dev/ttyAMA0.
-# Recent gpsd uses chrony.clk.<device>.sock for serial time and chrony.<pps>.sock
-# for PPS time.
+# gpsd SOCK refclocks. Recent gpsd creates chrony.clk.<device>.sock for serial
+# time-of-day and chrony.<pps>.sock for PPS.
 #
-# offset 0.62: pipeline delay between PPS edge and gpsd serial time-of-day on the
-# M9N (independent of RTC battery). Tune once via NTP cross-check at offset 0.0
-# if receiver or gpsd version changes — see docs/time-sync.md.
+# IMPORTANT — the GPS serial source is `noselect`:
+# The gpsd serial (NMEA) time-of-day has a latency relative to the true second
+# that VARIES from boot to boot (seen ~0 on some boots, ~0.6 s on others, as the
+# receiver's reported fix epoch wanders). With GPS + PPS both selectable, whenever
+# that latency lands far from PPS the two disagree, chrony marks BOTH as
+# falsetickers ("#x", "Can't synchronise: no majority"), and the deadlock never
+# self-heals — the classic "sometimes locks in seconds, sometimes never" symptom.
+# Chasing it with the `offset` directive CANNOT work: the latency is not constant,
+# so no fixed offset keeps GPS and PPS agreeing.
 #
-# poll/filter: default refclock poll is 4 (16 s/sample), which makes GPS take
-# minutes to become selectable and PPS (lock GPS) even longer at boot. poll 2
-# (4 s) + filter 3 lets GPS converge and PPS lock within ~1 min of 3D fix.
-refclock SOCK /run/chrony.clk.ttyAMA0.sock refid GPS precision 1e-1 offset 0.62 delay 0.1 poll 2 filter 3
+# Fix: mark the serial source `noselect` so it can never be selected or step the
+# clock — it only supplies the time-of-day that PPS `lock GPS` needs to number the
+# second. PPS (sub-µs, always correct) becomes the sole timekeeper. Keep
+# `offset 0.0` so the serial time stays honest for that second-numbering and for
+# the boot-time wrong-second cross-check (see kingfisher-clock-check.sh).
+#
+# Expected steady state in `chronyc sources`:
+#   #? GPS  ...  Reach 377   <- present & reachable, but noselect: NOT an error
+#   #* PPS  ...  offset in ns/µs
+refclock SOCK /run/chrony.clk.ttyAMA0.sock refid GPS precision 1e-1 offset 0.0 delay 0.1 poll 2 filter 3 noselect
 
 # PPS follow-on (GPIO 18 -> /dev/pps0, also in gpsd DEVICES). Use SOCK PPS —
 # do not also enable refclock PPS /dev/pps0; gpsd holds the device.
@@ -31,10 +43,11 @@ refclock SOCK /run/chrony.pps0.sock refid PPS precision 1e-7 lock GPS poll 2
 
 # --- Alternative profiles (pick one set of refclock lines) ---
 #
-# UART-only (no PPS in chrony): simpler auto-boot with RTC battery; ~ms accuracy.
-# Use offset 0.0 when the Pi RTC keeps coarse time at boot (not +620 ms).
+# UART-only (no PPS in chrony): simplest; ~ms accuracy. Here the serial source IS
+# the timekeeper, so it is selectable (no noselect). Use offset 0.0 with RTC battery.
 # refclock SOCK /run/chrony.clk.ttyAMA0.sock refid GPS precision 1e-1 offset 0.0 delay 0.1 poll 2 filter 3
 #
-# PPS-only (no GPS refclock): sub-us accuracy; gpsd still needs GPS fix so PPS
-# SOCK carries absolute UTC seconds. RTC + makestep 0.5 -1 provide coarse boot time.
+# PPS-only (no GPS refclock at all): sub-µs. gpsd still needs a GPS fix so the PPS
+# SOCK carries absolute UTC seconds. RTC + makestep provide coarse boot time.
+# Equivalent to the noselect setup above, but without the serial wrong-second cross-check.
 # refclock SOCK /run/chrony.pps0.sock refid PPS precision 1e-7 poll 2
