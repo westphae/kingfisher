@@ -89,7 +89,8 @@ func TestReaderRespectsEnabledFalse(t *testing.T) {
 	if f.calls != 0 {
 		t.Errorf("disabled reader should not have been called; calls=%d", f.calls)
 	}
+	// Reader stays open while paused; Run closes it when the context ends.
 	if !f.closed.Load() {
-		t.Errorf("disabled reader should still be closed")
+		t.Errorf("reader should be closed after Run returned")
 	}
 }

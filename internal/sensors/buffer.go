@@ -152,6 +152,8 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		return
 	}
 
+	paused := !dev.Enabled
+
 	effectiveHz := clampBufferedHz(r, dev.SampleHz)
 	if effectiveHz != dev.SampleHz {
 		log.Printf("sensors: %s: sample_hz %.0f exceeds max %.1f for oversampling — using %.1f Hz",
@@ -169,35 +171,42 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		triggerName string
 		err         error
 	)
-	if hasTriggerSysfs {
-		if chipTrig := discoverIIOTrigger(r.Name()); chipTrig != "" {
-			triggerName = chipTrig
-			log.Printf("sensors: %s: binding chip trigger %q", name, chipTrig)
-		} else {
-			trig, err = iio.EnsureHRTimer(tname, hz)
-			if err != nil {
-				log.Printf("sensors: %s: buffer trigger: %v — using polled reads", name, err)
-				runOne(ctx, r, name, holder, hub, buf, st, reg)
-				return
+	if !paused {
+		if hasTriggerSysfs {
+			if chipTrig := discoverIIOTrigger(r.Name()); chipTrig != "" {
+				triggerName = chipTrig
+				log.Printf("sensors: %s: binding chip trigger %q", name, chipTrig)
+			} else {
+				trig, err = iio.EnsureHRTimer(tname, hz)
+				if err != nil {
+					log.Printf("sensors: %s: buffer trigger: %v — using polled reads", name, err)
+					runOne(ctx, r, name, holder, hub, buf, st, reg)
+					return
+				}
+				triggerName = trig.Name()
+				defer releaseHRTimer(trig)
 			}
-			triggerName = trig.Name()
-			defer releaseHRTimer(trig)
+		} else if hwFIFO {
+			if err := syncDeviceSamplingHz(r, effectiveHz); err != nil {
+				log.Printf("sensors: %s: sampling_frequency: %v", name, err)
+			}
+			log.Printf("sensors: %s: hwfifo buffer (INT1); no trigger/current_trigger", name)
+		} else {
+			log.Printf("sensors: %s: no trigger/current_trigger; trying device-native buffer", name)
 		}
-	} else if hwFIFO {
-		if err := syncDeviceSamplingHz(r, effectiveHz); err != nil {
-			log.Printf("sensors: %s: sampling_frequency: %v", name, err)
-		}
-		log.Printf("sensors: %s: hwfifo buffer (INT1); no trigger/current_trigger", name)
 	} else {
-		log.Printf("sensors: %s: no trigger/current_trigger; trying device-native buffer", name)
+		log.Printf("sensors: %s: disabled — paused until enabled in config", name)
 	}
 
 	blen := bufferLengthForHz(effectiveHz)
-	iobuf, err := r.openIIOBuffer(chans, blen, triggerName)
-	if err != nil {
-		log.Printf("sensors: %s: open buffer: %v — using polled reads", name, err)
-		runOne(ctx, r, name, holder, hub, buf, st, reg)
-		return
+	var iobuf *iio.Buffer
+	if !paused {
+		iobuf, err = r.openIIOBuffer(chans, blen, triggerName)
+		if err != nil {
+			log.Printf("sensors: %s: open buffer: %v — using polled reads", name, err)
+			runOne(ctx, r, name, holder, hub, buf, st, reg)
+			return
+		}
 	}
 	// Close whatever buffer iobuf points to AT RETURN TIME, not the one
 	// captured now: restartCapture / cooldownAndRetryBuffered reassign
@@ -211,17 +220,20 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		}
 	}()
 
-	clock := iobuf.TimestampClock()
+	var clock string
 	triggerLabel := triggerName
-	switch {
-	case triggerLabel != "":
-	case hwFIFO:
-		triggerLabel = "hwfifo-int1"
-	default:
-		triggerLabel = "device-native"
+	if iobuf != nil {
+		clock = iobuf.TimestampClock()
+		switch {
+		case triggerLabel != "":
+		case hwFIFO:
+			triggerLabel = "hwfifo-int1"
+		default:
+			triggerLabel = "device-native"
+		}
+		log.Printf("sensors: %s: IIO buffer %d frames @ %d Hz (trigger %s, clock %q, channels %v)",
+			name, blen, hz, triggerLabel, clock, chans)
 	}
-	log.Printf("sensors: %s: IIO buffer %d frames @ %d Hz (trigger %s, clock %q, channels %v)",
-		name, blen, hz, triggerLabel, clock, chans)
 
 	reload := holder.Subscribe()
 	colMap := buildColumnMap(filterDataChannels(chans), dev.Channels)
@@ -248,6 +260,9 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 	)
 
 	restartCapture := func(newDev config.Device) bool {
+		if !newDev.Enabled {
+			return false
+		}
 		if iobuf != nil {
 			_ = iobuf.Close()
 			iobuf = nil
@@ -318,6 +333,49 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 	}
 
 	for {
+		if !dev.Enabled || iobuf == nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-reload:
+				cfg = holder.Get()
+				newDev := cfg.DeviceOrDefault(r.Name(), 10)
+				if !newDev.Enabled {
+					if iobuf != nil {
+						_ = iobuf.Close()
+						iobuf = nil
+					}
+					dev = newDev
+					continue
+				}
+				if !dev.Enabled {
+					log.Printf("sensors: %s enabled by config reload — resuming buffered capture", name)
+				}
+				if !newDev.WantBuffer(len(chans)) {
+					log.Printf("sensors: %s: use_buffer off — restart kingfisher to switch to polled mode", name)
+				}
+				if !restartCapture(newDev) {
+					continue
+				}
+				if iobuf != nil {
+					clock = iobuf.TimestampClock()
+				}
+				curr := SnapshotAttrs(r)
+				diff := DiffAttrs(prevAttrs, curr)
+				if len(diff) > 0 && st != nil {
+					if err := st.LogAttrs(r.Name(), location.Hub, diff); err != nil {
+						log.Printf("sensors: %s log attr diff: %v", name, err)
+					}
+				}
+				if reg != nil {
+					reg.Update(r.Name(), curr)
+				}
+				prevAttrs = curr
+				dev = newDev
+				colMap = buildColumnMap(filterDataChannels(chans), dev.Channels)
+			}
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -325,8 +383,13 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 			cfg = holder.Get()
 			newDev := cfg.DeviceOrDefault(r.Name(), 10)
 			if !newDev.Enabled {
-				log.Printf("sensors: %s disabled by config reload — stopping", name)
-				return
+				log.Printf("sensors: %s disabled by config reload — pausing", name)
+				if iobuf != nil {
+					_ = iobuf.Close()
+					iobuf = nil
+				}
+				dev = newDev
+				continue
 			}
 			if !newDev.WantBuffer(len(chans)) {
 				log.Printf("sensors: %s: use_buffer off — restart kingfisher to switch to polled mode", name)
@@ -334,6 +397,7 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 			if !restartCapture(newDev) {
 				continue
 			}
+			clock = iobuf.TimestampClock()
 			curr := SnapshotAttrs(r)
 			diff := DiffAttrs(prevAttrs, curr)
 			if len(diff) > 0 && st != nil {

@@ -184,9 +184,7 @@ func Run(ctx context.Context, holder *config.Holder, readers []Reader, hub *live
 		name := alloc.Next(r.Name())
 		dev := cfg.DeviceOrDefault(r.Name(), 10)
 		if !dev.Enabled {
-			log.Printf("sensors: %s disabled by config", name)
-			r.Close()
-			continue
+			log.Printf("sensors: %s disabled by config (paused until enabled)", name)
 		}
 		active = append(active, runCtx{r: r, name: name})
 	}
@@ -295,10 +293,13 @@ func runOne(ctx context.Context, r Reader, name string, holder *config.Holder, h
 		case <-reload:
 			cfg = holder.Get()
 			newDev := cfg.DeviceOrDefault(r.Name(), 10)
-			// If the user disabled the device, exit the goroutine cleanly.
 			if !newDev.Enabled {
-				log.Printf("sensors: %s disabled by config reload — stopping", name)
-				return
+				log.Printf("sensors: %s disabled by config reload — pausing", name)
+				dev = newDev
+				continue
+			}
+			if !dev.Enabled && newDev.Enabled {
+				log.Printf("sensors: %s enabled by config reload — resuming", name)
 			}
 			if newDev.SampleHz != dev.SampleHz && newDev.SampleHz > 0 {
 				interval = tickInterval(newDev.SampleHz)
@@ -322,6 +323,9 @@ func runOne(ctx context.Context, r Reader, name string, holder *config.Holder, h
 			dev = newDev
 			colMap = buildColumnMap(channels, dev.Channels)
 		case <-t.C:
+			if !dev.Enabled {
+				continue
+			}
 			values := make(map[string]float64, len(channels))
 			for _, ch := range channels {
 				v, err := r.ReadFloat(ch)
