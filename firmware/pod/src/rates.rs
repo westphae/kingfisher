@@ -337,10 +337,7 @@ pub fn note_tick_overrun() -> bool {
     let n = OVERRUN_STREAK.load(Ordering::Relaxed).saturating_add(1);
     OVERRUN_STREAK.store(n, Ordering::Relaxed);
     if n >= OVERRUN_BACKOFF_THRESHOLD {
-        println!(
-            "pod: poll tick overrun ({} consecutive ticks >80 ms)",
-            n
-        );
+        println!("pod: poll tick overrun ({} consecutive ticks >80 ms)", n);
         OVERRUN_STREAK.store(0, Ordering::Relaxed);
         if let Some(s) = sensor_from_tag(LAST_CHANGED.load(Ordering::Relaxed)) {
             return backoff(s);
@@ -378,10 +375,7 @@ fn backoff(sensor: SensorId) -> bool {
         );
         return false;
     }
-    println!(
-        "pod: backing off {:?} {} -> {} Hz",
-        sensor, cur, next
-    );
+    println!("pod: backing off {:?} {} -> {} Hz", sensor, cur, next);
     store_hz(sensor, next);
     link::request_hello();
     true

@@ -95,7 +95,10 @@ pub fn note_battery_sample(
 ) -> bool {
     if is_charging(current_a) {
         if REQUESTED.load(Ordering::Relaxed) {
-            println!("pod: wake from sleep (charging {:.0} mA)", current_a * 1000.0);
+            println!(
+                "pod: wake from sleep (charging {:.0} mA)",
+                current_a * 1000.0
+            );
             clear_sleep();
         }
         return false;

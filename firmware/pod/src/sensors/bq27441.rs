@@ -210,14 +210,16 @@ fn read_design_capacity(bus: &mut I2cBus, addr: u8) -> Result<u16, ()> {
 
 fn read_control_word(bus: &mut I2cBus, addr: u8, function: u16) -> Result<u16, ()> {
     let cmd = function.to_le_bytes();
-    bus.write(addr, &[CMD_CONTROL, cmd[0], cmd[1]]).map_err(|_| ())?;
+    bus.write(addr, &[CMD_CONTROL, cmd[0], cmd[1]])
+        .map_err(|_| ())?;
     i2c_gap();
     read_word(bus, addr, CMD_CONTROL)
 }
 
 fn execute_control(bus: &mut I2cBus, addr: u8, function: u16) -> Result<(), ()> {
     let cmd = function.to_le_bytes();
-    bus.write(addr, &[CMD_CONTROL, cmd[0], cmd[1]]).map_err(|_| ())?;
+    bus.write(addr, &[CMD_CONTROL, cmd[0], cmd[1]])
+        .map_err(|_| ())?;
     i2c_gap();
     Ok(())
 }
@@ -314,15 +316,7 @@ fn set_design_capacity(bus: &mut I2cBus, addr: u8, mah: u16) -> Result<(), ()> {
         log_program_fail(addr, mah, ProgramFail::EnterConfig, 0);
         return Err(());
     }
-    if write_extended_bytes(
-        bus,
-        addr,
-        ID_STATE,
-        DESIGN_CAPACITY_OFFSET,
-        &payload,
-    )
-    .is_err()
-    {
+    if write_extended_bytes(bus, addr, ID_STATE, DESIGN_CAPACITY_OFFSET, &payload).is_err() {
         log_program_fail(addr, mah, ProgramFail::WriteBlock, 0);
         let _ = exit_config_resim(bus, addr);
         return Err(());

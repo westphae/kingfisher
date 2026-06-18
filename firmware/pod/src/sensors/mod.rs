@@ -31,8 +31,7 @@ pub const MMC_BIT: u8 = 2;
 pub const MS4525_BIT: u8 = 4;
 pub const BATTERY_BIT: u8 = 8;
 
-static LATEST_BATTERY_V: core::sync::atomic::AtomicU32 =
-    core::sync::atomic::AtomicU32::new(0);
+static LATEST_BATTERY_V: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 static DROPPED_READINGS: Mutex<RefCell<u32>> = Mutex::new(RefCell::new(0));
 
 const MAX_BUFFERED_READINGS: usize = crate::cfg::BUFFER_MAX_READINGS as usize;
@@ -209,10 +208,7 @@ fn drain_one_mag(
     let age = age_us(pod_uptime_us, s.captured_us);
     let wire = match s.reading {
         Reading::Mag {
-            x_ut,
-            y_ut,
-            z_ut,
-            ..
+            x_ut, y_ut, z_ut, ..
         } => Reading::Mag {
             x_ut,
             y_ut,
@@ -364,13 +360,10 @@ pub fn push_static(reading: Reading, captured_us: u64) {
 
 pub fn push_mag(reading: Reading, captured_us: u64) {
     critical_section::with(|cs| {
-        SAMPLES
-            .borrow(cs)
-            .borrow_mut()
-            .enqueue_mag(StampedReading {
-                reading,
-                captured_us,
-            });
+        SAMPLES.borrow(cs).borrow_mut().enqueue_mag(StampedReading {
+            reading,
+            captured_us,
+        });
     });
 }
 
@@ -507,9 +500,8 @@ pub fn bringup_board(bus: &mut Bus) -> SensorBoard {
 pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
     use pod_wire::SensorId;
 
-    let mut ticker = embassy_time::Ticker::every(embassy_time::Duration::from_millis(
-        crate::cfg::TICK_MS,
-    ));
+    let mut ticker =
+        embassy_time::Ticker::every(embassy_time::Duration::from_millis(crate::cfg::TICK_MS));
     let mut attach_ticks: u32 = 0;
     const ATTACH_INTERVAL: u32 = 50; // 5 s at 10 Hz
 
@@ -571,9 +563,7 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
                     Err(()) => {
                         crate::battery_cfg::note_program_fail(tick_us);
                         if crate::battery_cfg::should_log_program_fail() {
-                            println!(
-                                "pod: bq27441 design capacity program failed; retry in 60s"
-                            );
+                            println!("pod: bq27441 design capacity program failed; retry in 60s");
                         }
                     }
                 }

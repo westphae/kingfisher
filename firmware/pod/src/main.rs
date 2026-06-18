@@ -32,8 +32,7 @@ use esp_hal::{
 };
 use esp_println::println;
 use esp_radio::wifi::{
-    sta::StationConfig, AuthenticationMethod, Config, ControllerConfig, Interface,
-    WifiController,
+    sta::StationConfig, AuthenticationMethod, Config, ControllerConfig, Interface, WifiController,
 };
 use pod_wire::{Frame, Status};
 
@@ -113,10 +112,7 @@ async fn main(spawner: Spawner) -> ! {
     loop {
         if power::sleep_requested() {
             power::mark_sleeping();
-            println!(
-                "pod: sleep mode entered reason={:?}",
-                power::sleep_reason()
-            );
+            println!("pod: sleep mode entered reason={:?}", power::sleep_reason());
             Timer::after(Duration::from_secs(30)).await;
             continue;
         }
@@ -184,13 +180,7 @@ async fn uplink_task(stack: Stack<'static>) {
     let mut rx_buf = [0u8; 256];
     let mut tx_meta = [PacketMetadata::EMPTY; 4];
     let mut tx_buf = [0u8; 1024];
-    let mut socket = UdpSocket::new(
-        stack,
-        &mut rx_meta,
-        &mut rx_buf,
-        &mut tx_meta,
-        &mut tx_buf,
-    );
+    let mut socket = UdpSocket::new(stack, &mut rx_meta, &mut rx_buf, &mut tx_meta, &mut tx_buf);
     if let Err(e) = socket.bind(0) {
         println!("pod: socket bind: {:?}", e);
         return;

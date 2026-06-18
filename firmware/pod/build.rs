@@ -36,7 +36,10 @@ struct PodSection {
     sleep_voltage_v_uncalibrated: f32,
     #[serde(default = "default_sleep_debounce_s", rename = "sleep_debounce_s")]
     sleep_debounce_s: u16,
-    #[serde(default = "default_sleep_emergency_v", rename = "sleep_emergency_voltage_v")]
+    #[serde(
+        default = "default_sleep_emergency_v",
+        rename = "sleep_emergency_voltage_v"
+    )]
     sleep_emergency_voltage_v: f32,
     #[serde(default = "default_flush_interval_s", rename = "flush_interval_s")]
     flush_interval_s: u16,
@@ -132,7 +135,10 @@ fn main() {
         "cargo:rustc-env=SLEEP_EMERGENCY_V={:.3}",
         cfg.pod.sleep_emergency_voltage_v
     );
-    println!("cargo:rustc-env=FLUSH_INTERVAL_S={}", cfg.pod.flush_interval_s);
+    println!(
+        "cargo:rustc-env=FLUSH_INTERVAL_S={}",
+        cfg.pod.flush_interval_s
+    );
     println!(
         "cargo:rustc-env=FLUSH_HIGH_WATERMARK={}",
         cfg.pod.flush_high_watermark
@@ -148,9 +154,7 @@ fn resolve_config_path() -> PathBuf {
         return PathBuf::from(p);
     }
     let home = env::var("HOME").unwrap_or_else(|_| {
-        panic!(
-            "pod firmware build: HOME not set; export KINGFISHER_CONFIG=/path/to/config.json"
-        );
+        panic!("pod firmware build: HOME not set; export KINGFISHER_CONFIG=/path/to/config.json");
     });
     PathBuf::from(home)
         .join(".config")

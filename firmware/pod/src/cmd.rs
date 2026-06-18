@@ -64,11 +64,7 @@ fn sensor_attached(sensor: SensorId) -> bool {
 }
 
 /// Decode and handle one inbound datagram; returns frames to transmit (Pong, Ack).
-pub fn handle_datagram(
-    bytes: &[u8],
-    now_us: u64,
-    uptime_us: u64,
-) -> heapless::Vec<Frame, 4> {
+pub fn handle_datagram(bytes: &[u8], now_us: u64, uptime_us: u64) -> heapless::Vec<Frame, 4> {
     use heapless::Vec;
 
     let mut out: Vec<Frame, 4> = Vec::new();

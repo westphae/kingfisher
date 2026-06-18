@@ -66,10 +66,7 @@ impl Bmp581 {
                 Ok(id) => {
                     println!("pod: i2c 0x{addr:02x} chip_id=0x{id:02x}");
                     if id == CHIP_ID_BMP581 || id == CHIP_ID_BMP585 {
-                        return Some(Self {
-                            addr,
-                            active_hz: 0,
-                        });
+                        return Some(Self { addr, active_hz: 0 });
                     }
                 }
                 Err(e) => println!("pod: i2c 0x{addr:02x} chip_id read: {:?}", e),
@@ -232,11 +229,9 @@ fn decode_pt_frame(data: &[u8; FIFO_FRAME_BYTES]) -> Result<Sample, ()> {
 }
 
 fn decode_sample(data: &[u8; 6]) -> Sample {
-    let raw_temp =
-        ((data[2] as i32) << 16) | ((data[1] as i32) << 8) | (data[0] as i32);
+    let raw_temp = ((data[2] as i32) << 16) | ((data[1] as i32) << 8) | (data[0] as i32);
     let raw_temp = (raw_temp << 8) >> 8;
-    let raw_press =
-        ((data[5] as i32) << 16) | ((data[4] as i32) << 8) | (data[3] as i32);
+    let raw_press = ((data[5] as i32) << 16) | ((data[4] as i32) << 8) | (data[3] as i32);
     Sample {
         temp_c: raw_temp as f32 / 65536.0,
         p_pa: raw_press as f32 / 64.0,
@@ -253,12 +248,7 @@ fn write_u8(bus: &mut I2cBus, addr: u8, reg: u8, val: u8) -> Result<(), ()> {
     bus.write(addr, &[reg, val]).map_err(|_| ())
 }
 
-fn read_block(
-    bus: &mut I2cBus,
-    addr: u8,
-    reg: u8,
-    buf: &mut [u8],
-) -> Result<(), ()> {
+fn read_block(bus: &mut I2cBus, addr: u8, reg: u8, buf: &mut [u8]) -> Result<(), ()> {
     bus.write_read(addr, &[reg], buf).map_err(|_| ())
 }
 
