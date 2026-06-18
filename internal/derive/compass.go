@@ -26,24 +26,19 @@ const mpsPerKt = 1.94384
 type Engine struct {
 	holder *config.Holder
 
-	mu            sync.Mutex
-	kf            *kalman.Filter
-	alignR             field.Mat3
+	mu                   sync.Mutex
+	kf                   *kalman.Filter
+	alignR               field.Mat3
 	alignAircraftToEarth field.Mat3
-	alignActive        bool
-	alignHeading       float64
-	alignMethod        string
-	alignYawTrueDeg    float64
-	prevMode      kalman.Mode
-	alignAccelEMA *vec3EMA
-	alignMagEMA   *vec3EMA
-	lastAccel     field.Vec3
-	hasLastAccel  bool
-}
-
-// CompassAligner is implemented by *Engine for the web align API.
-type CompassAligner interface {
-	Align(manualHeadingDeg *float64, fix gps.Fix, modelDeclDeg float64, method string, snap live.Snapshot) error
+	alignActive          bool
+	alignHeading         float64
+	alignMethod          string
+	alignYawTrueDeg      float64
+	prevMode             kalman.Mode
+	alignAccelEMA        *vec3EMA
+	alignMagEMA          *vec3EMA
+	lastAccel            field.Vec3
+	hasLastAccel         bool
 }
 
 func compassInterval(cfg *config.Config) time.Duration {
@@ -343,7 +338,7 @@ func (e *Engine) tick(hub *live.Hub, gpsc *gps.Client, buf *store.Buffer, dt flo
 	}
 }
 
-// Align implements CompassAligner using the latest GPS fix and geo declination.
+// Align captures sensor→vehicle alignment using the latest GPS fix and geo declination.
 func (e *Engine) Align(manualHeadingDeg *float64, fix gps.Fix, modelDeclDeg float64, method string, snap live.Snapshot) error {
 	if err := alignMethodName(method); err != nil {
 		return err

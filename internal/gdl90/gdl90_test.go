@@ -18,7 +18,7 @@ func TestCRCComputeKnown(t *testing.T) {
 
 func TestPrepareMessageFlags(t *testing.T) {
 	raw := []byte{0x00, 0x01}
-	framed := PrepareMessage(raw)
+	framed := Pack(raw)
 	if framed[0] != 0x7E || framed[len(framed)-1] != 0x7E {
 		t.Fatalf("expected 0x7E flags, got % x", framed)
 	}
@@ -29,7 +29,7 @@ func TestPrepareMessageFlags(t *testing.T) {
 
 func TestPrepareMessageByteStuffing(t *testing.T) {
 	raw := []byte{0x4C, 0x7E, 0x7D, 0x01}
-	framed := PrepareMessage(raw)
+	framed := Pack(raw)
 	inner := framed[1 : len(framed)-1]
 	if !bytes.Contains(inner, []byte{0x7D, 0x5E}) {
 		t.Fatalf("expected stuffed 0x7E, got % x", inner)

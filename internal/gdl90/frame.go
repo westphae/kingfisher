@@ -31,8 +31,8 @@ func crcCompute(data []byte) uint16 {
 	return ret
 }
 
-// PrepareMessage appends CRC, byte-stuffs, and wraps payload in GDL90 flag bytes.
-func PrepareMessage(data []byte) []byte {
+// Pack appends CRC, byte-stuffs, and wraps payload in GDL90 flag bytes.
+func Pack(data []byte) []byte {
 	crc := crcCompute(data)
 	payload := append(append([]byte(nil), data...), byte(crc&0xFF), byte(crc>>8))
 
@@ -48,6 +48,3 @@ func PrepareMessage(data []byte) []byte {
 	out = append(out, flagByte)
 	return out
 }
-
-// Pack is an alias for PrepareMessage.
-func Pack(data []byte) []byte { return PrepareMessage(data) }

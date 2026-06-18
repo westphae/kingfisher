@@ -9,7 +9,7 @@ import (
 // bmp280ConvMs is typical active conversion time per channel (ms) from the
 // BMP280 datasheet rev 1.20, Table 6. Buffered capture runs temp then pressure
 // per trigger, so the minimum period is their sum.
-var bmp280ConvMs = map[int]struct{ press, temp float64}{
+var bmp280ConvMs = map[int]struct{ press, temp float64 }{
 	1:  {2.3, 1.8},
 	2:  {5.5, 2.2},
 	4:  {10.5, 3.8},
@@ -38,8 +38,8 @@ func MaxBufferedHz(r Reader) (float64, bool) {
 }
 
 func bmp280MaxBufferedHz(r Reader) float64 {
-	pOSR := oversamplingRatio(r, "pressure", 1)
-	tOSR := oversamplingRatio(r, "temp", 1)
+	pOSR := oversamplingRatio(r, "pressure")
+	tOSR := oversamplingRatio(r, "temp")
 	tP, okP := bmp280ConvMs[pOSR]
 	if !okP {
 		pOSR = 1
@@ -67,14 +67,14 @@ func floorBufferedHz(hz float64) float64 {
 	return math.Floor(hz*2) / 2
 }
 
-func oversamplingRatio(r Reader, channel string, defaultOSR int) int {
+func oversamplingRatio(r Reader, channel string) int {
 	v, err := r.ChannelAttr(channel, "oversampling_ratio")
 	if err != nil {
-		return defaultOSR
+		return 1
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(v))
 	if err != nil || n <= 0 {
-		return defaultOSR
+		return 1
 	}
 	return n
 }
