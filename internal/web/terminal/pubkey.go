@@ -7,7 +7,6 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
-	"fmt"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -58,19 +57,4 @@ func verifyPubKeySignature(pub ssh.PublicKey, message, sig []byte) bool {
 	default:
 		return false
 	}
-}
-
-// SSHPublicKeyLine encodes raw Ed25519 public key bytes as an authorized_keys line.
-func SSHPublicKeyLine(rawPub []byte, comment string) (string, error) {
-	if len(rawPub) != ed25519.PublicKeySize {
-		return "", fmt.Errorf("terminal: ed25519 public key must be %d bytes", ed25519.PublicKeySize)
-	}
-	pub, err := ssh.NewPublicKey(ed25519.PublicKey(rawPub))
-	if err != nil {
-		return "", err
-	}
-	if comment == "" {
-		comment = "kingfisher-terminal"
-	}
-	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pub)) + " " + comment), nil
 }

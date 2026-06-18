@@ -22,7 +22,7 @@ func TestStoreCRUD(t *testing.T) {
 
 	hs := howgozit.NewStore(st)
 	tmpl := config.DefaultHowgozitTemplates()[0]
-	meta, err := hs.EnsureLog(&tmpl)
+	meta, err := hs.CreateLog(tmpl.Name, tmpl.Fields, tmpl.ID, tmpl.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

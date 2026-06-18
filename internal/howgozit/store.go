@@ -131,23 +131,6 @@ func addMissingColumns(conn dbConn, table string, fields []config.HowgozitField,
 	return nil
 }
 
-// EnsureLog creates a log from a template using the template id as log_id when free.
-// Deprecated for new code: use CreateLog so each instance gets a unique id.
-func (s *Store) EnsureLog(tmpl *config.HowgozitTemplate) (*LogMeta, error) {
-	if tmpl == nil || tmpl.ID == "" {
-		return nil, fmt.Errorf("howgozit: empty template")
-	}
-	if meta, err := s.GetLog(store.Sanitize(tmpl.ID)); err == nil && meta != nil {
-		if err := s.ensureDataTable(meta.TableName, meta.Fields); err != nil {
-			return nil, err
-		}
-		return meta, nil
-	} else if err != nil && err != sql.ErrNoRows {
-		return nil, err
-	}
-	return s.CreateLog(tmpl.Name, tmpl.Fields, tmpl.ID, store.Sanitize(tmpl.ID))
-}
-
 // CreateLog opens a new log instance with a unique log_id. seedTemplateID is optional
 // (records which template was used as a seed) and preferredLogID may pin the id when unused.
 func (s *Store) CreateLog(displayName string, fields []config.HowgozitField, seedTemplateID, preferredLogID string) (*LogMeta, error) {

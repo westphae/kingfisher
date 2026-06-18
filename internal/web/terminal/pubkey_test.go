@@ -3,7 +3,10 @@ package terminal
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"strings"
 	"testing"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func TestVerifyAuthorizedSignature_ed25519(t *testing.T) {
@@ -11,10 +14,11 @@ func TestVerifyAuthorizedSignature_ed25519(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	line, err := SSHPublicKeyLine(pub, "test")
+	sshPub, err := ssh.NewPublicKey(pub)
 	if err != nil {
 		t.Fatal(err)
 	}
+	line := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub)) + " test")
 	id := "abc123"
 	nonce := []byte("nonce-bytes-for-test-challenge!!")
 	msg := BuildChallengeMessage(id, nonce)
