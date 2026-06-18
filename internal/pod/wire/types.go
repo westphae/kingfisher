@@ -5,7 +5,7 @@
 package wire
 
 const (
-	ProtoVersion     = 4
+	ProtoVersion     = 5
 	MaxDeviceNameLen = 12
 	MaxReadings      = 8
 	MaxSensors       = 4

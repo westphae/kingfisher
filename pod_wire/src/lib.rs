@@ -12,7 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTO_VERSION: u8 = 4;
+pub const PROTO_VERSION: u8 = 5;
 pub const MAX_DEVICE_NAME: usize = 12;
 pub const MAX_READINGS: usize = 8;
 pub const MAX_SENSORS: usize = 4;
