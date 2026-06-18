@@ -1,6 +1,9 @@
 package pod
 
 import (
+	"bytes"
+	"log"
+	"strings"
 	"testing"
 
 	"github.com/westphae/kingfisher/internal/live"
@@ -159,6 +162,36 @@ func TestSetDesignCapacityEnqueuesCmd(t *testing.T) {
 
 	if err := c.reader.SetChannelAttr(BatteryDeviceName, AttrDesignCapacityMah, "50"); err == nil {
 		t.Fatal("expected out-of-range error")
+	}
+}
+
+func TestHelloProtoVersionMismatchWarns(t *testing.T) {
+	var buf bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(old)
+
+	hub := live.NewHub()
+	c := New("", nil, hub, nil, nil, nil, nil)
+	mismatch := wire.Hello{FwVersion: 1, ProtoVersion: wire.ProtoVersion + 1}
+
+	c.dispatch(mismatch, "test")
+	if !strings.Contains(buf.String(), "proto mismatch") {
+		t.Fatalf("expected proto mismatch warning, got: %q", buf.String())
+	}
+
+	// Same mismatched version again -> deduped, no second warning.
+	buf.Reset()
+	c.dispatch(mismatch, "test")
+	if strings.Contains(buf.String(), "proto mismatch") {
+		t.Errorf("duplicate proto mismatch warning not suppressed: %q", buf.String())
+	}
+
+	// Matching version -> no warning.
+	buf.Reset()
+	c.dispatch(wire.Hello{FwVersion: 1, ProtoVersion: wire.ProtoVersion}, "test")
+	if strings.Contains(buf.String(), "proto mismatch") {
+		t.Errorf("unexpected warning for matching proto: %q", buf.String())
 	}
 }
 

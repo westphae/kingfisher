@@ -58,6 +58,10 @@ type Client struct {
 
 	reader *reader
 
+	// protoWarned is the last pod proto_version we logged a wire-mismatch
+	// warning for (touched only on the recv goroutine in dispatch; 0 = none).
+	protoWarned uint8
+
 	loggedMu sync.Mutex
 	logged   map[string][]store.AttrRecord
 	cmdOut   chan outboundCmd
@@ -256,6 +260,11 @@ func (c *Client) dispatch(frame wire.Frame, peer string) {
 	switch f := frame.(type) {
 	case wire.Hello:
 		log.Printf("pod: hello from %s fw=%#x sensors=%d", peer, f.FwVersion, len(f.Caps.Sensors))
+		if f.ProtoVersion != wire.ProtoVersion && f.ProtoVersion != c.protoWarned {
+			log.Printf("pod: WARNING: wire proto mismatch — pod reports proto_version=%d but Pi expects %d; reflash the pod to match (sensor frames may be mis-decoded)",
+				f.ProtoVersion, wire.ProtoVersion)
+			c.protoWarned = f.ProtoVersion
+		}
 		c.reader.applyHello(f)
 		c.syncRegistryAliases()
 		c.applySavedSettings(true)
