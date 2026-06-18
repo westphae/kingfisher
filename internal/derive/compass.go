@@ -523,7 +523,7 @@ func extractMag(vals map[string]float64) (field.Vec3, bool) {
 	if !hx || !hy || !hz {
 		return field.Vec3{}, false
 	}
-	return field.Vec3{mx, my, mz}, true
+	return field.Vec3{X: mx, Y: my, Z: mz}, true
 }
 
 func pickAccel(snap live.Snapshot, want, magDevice string) (field.Vec3, bool) {
@@ -552,7 +552,7 @@ func extractAccel(vals map[string]float64) (field.Vec3, bool) {
 	if !okx || !oky || !okz {
 		return field.Vec3{}, false
 	}
-	return field.Vec3{ax, ay, az}, true
+	return field.Vec3{X: ax, Y: ay, Z: az}, true
 }
 
 type vec3EMA struct {

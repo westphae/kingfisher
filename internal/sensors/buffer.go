@@ -289,9 +289,13 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		return true
 	}
 
-	handleStall := func(err error) (retry bool, stop bool) {
+	// handleStall advances the consecutive-stall counter on a buffer read error
+	// and reports whether the read loop should stop (fall back to polled or the
+	// context ended). A successful mid-stall restart returns false so the loop
+	// keeps reading.
+	handleStall := func(err error) (stop bool) {
 		if ctx.Err() != nil {
-			return false, true
+			return true
 		}
 		consecutiveStalls++
 		if consecutiveStalls >= 3 {
@@ -302,18 +306,18 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 				if stallRestartCycles >= maxStallRestartCycles {
 					log.Printf("sensors: %s: buffer restarts exhausted — using polled reads", name)
 					fallbackToPolled = true
-					return false, true
+					return true
 				}
-				return true, false
+				return false
 			}
 			log.Printf("sensors: %s: buffer restart failed — using polled reads", name)
 			fallbackToPolled = true
-			return false, true
+			return true
 		}
 		if consecutiveStalls == 1 {
 			log.Printf("sensors: %s: buffer read: %v", name, err)
 		}
-		return false, false
+		return false
 	}
 
 	// applyReload reacts to a config change: pause (close the buffer) when the
@@ -386,7 +390,7 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 				time.Sleep(5 * time.Millisecond)
 			}
 			if avail, aerr := r.bufferBytesAvailable(); aerr != nil || avail < frame {
-				retry, stop := handleStall(context.DeadlineExceeded)
+				stop := handleStall(context.DeadlineExceeded)
 				if stop {
 					if fallbackToPolled {
 						if !cooldownAndRetryBuffered(ctx, r, name, holder, hub, buf, st, reg, &iobuf, restartCapture, dev) {
@@ -398,9 +402,7 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 					}
 					return
 				}
-				if retry {
-					continue
-				}
+				// retry vs non-retry both fall back to re-reading the buffer.
 				continue
 			}
 		}
@@ -409,7 +411,7 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		n, err := iobuf.Read(readCtx, recs)
 		cancel()
 		if err != nil {
-			retry, stop := handleStall(err)
+			stop := handleStall(err)
 			if stop {
 				if fallbackToPolled {
 					if !cooldownAndRetryBuffered(ctx, r, name, holder, hub, buf, st, reg, &iobuf, restartCapture, dev) {
@@ -421,9 +423,7 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 				}
 				return
 			}
-			if retry {
-				continue
-			}
+			// retry vs non-retry both fall back to re-reading the buffer.
 			continue
 		}
 		consecutiveStalls = 0

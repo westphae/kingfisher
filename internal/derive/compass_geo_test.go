@@ -27,18 +27,18 @@ func TestEffectiveAlignMethodPodMag(t *testing.T) {
 }
 
 func TestSolveAircraftToEarthMagDown(t *testing.T) {
-	magAircraft := field.Vec3{10, 0, 30}
-	bEarth := field.Vec3{0, 10, 30}
+	magAircraft := field.Vec3{X: 10, Y: 0, Z: 30}
+	bEarth := field.Vec3{X: 0, Y: 10, Z: 30}
 	R, err := solveAircraftToEarthMagDown(magAircraft, bEarth)
 	if err != nil {
 		t.Fatalf("solve: %v", err)
 	}
 	got := field.ApplyRot(R, magAircraft)
-	ga, ok := projectHorizDown(got, field.Vec3{0, 0, 1})
+	ga, ok := projectHorizDown(got, field.Vec3{X: 0, Y: 0, Z: 1})
 	if !ok {
 		t.Fatal("got horiz failed")
 	}
-	ge, ok := projectHorizDown(bEarth, field.Vec3{0, 0, 1})
+	ge, ok := projectHorizDown(bEarth, field.Vec3{X: 0, Y: 0, Z: 1})
 	if !ok {
 		t.Fatal("earth horiz failed")
 	}
@@ -49,7 +49,7 @@ func TestSolveAircraftToEarthMagDown(t *testing.T) {
 
 func TestApplySensorMountMMCDefault(t *testing.T) {
 	cfg := &config.Compass{SensorMountR: map[string][3][3]float64{}}
-	v := field.Vec3{1, 2, 3}
+	v := field.Vec3{X: 1, Y: 2, Z: 3}
 	got := applySensorMount(cfg, "mmc5983", v)
 	if got.Z != -3 {
 		t.Fatalf("mmc default should invert z, got %+v", got)

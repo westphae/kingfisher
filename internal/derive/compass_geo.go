@@ -54,7 +54,7 @@ func nedFieldUt(snap live.Snapshot) (field.Vec3, bool) {
 	if !hx || !hy || !hz {
 		return field.Vec3{}, false
 	}
-	return field.Vec3{x / 1000, y / 1000, z / 1000}, true
+	return field.Vec3{X: x / 1000, Y: y / 1000, Z: z / 1000}, true
 }
 
 func applySensorMount(cfg *config.Compass, sensor string, v field.Vec3) field.Vec3 {
@@ -121,14 +121,14 @@ func projectHorizDown(v, down field.Vec3) (field.Vec3, bool) {
 	if dn == 0 {
 		return field.Vec3{}, false
 	}
-	d := field.Vec3{down.X / dn, down.Y / dn, down.Z / dn}
+	d := field.Vec3{X: down.X / dn, Y: down.Y / dn, Z: down.Z / dn}
 	c := fieldDot(v, d)
-	h := field.Vec3{v.X - c*d.X, v.Y - c*d.Y, v.Z - c*d.Z}
+	h := field.Vec3{X: v.X - c*d.X, Y: v.Y - c*d.Y, Z: v.Z - c*d.Z}
 	n := math.Sqrt(fieldDot(h, h))
 	if n == 0 {
 		return field.Vec3{}, false
 	}
-	return field.Vec3{h.X / n, h.Y / n, h.Z / n}, true
+	return field.Vec3{X: h.X / n, Y: h.Y / n, Z: h.Z / n}, true
 }
 
 func alignMethodName(m string) error {
