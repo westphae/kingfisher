@@ -61,10 +61,14 @@ async fn main(spawner: Spawner) -> ! {
     .with_sda(peripherals.GPIO5)
     .with_scl(peripherals.GPIO6);
     esp_hal::delay::Delay::new().delay_millis(50);
-    // Lifetime-launder the I²C bus to 'static for the StaticCell; the source
-    // type is the esp-hal builder result, so leave it inferred.
-    #[allow(clippy::missing_transmute_annotations)]
-    let i2c = mk_static!(sensors::bus::Bus, unsafe { core::mem::transmute(i2c) });
+    // Lifetime-launder the I²C bus to 'static for the StaticCell (peripherals
+    // are effectively 'static singletons). Types are spelled out so a shape
+    // change on either side fails the build; only the lifetimes are inferred.
+    let i2c = mk_static!(sensors::bus::Bus, unsafe {
+        core::mem::transmute::<esp_hal::i2c::master::I2c<'_, esp_hal::Blocking>, sensors::bus::Bus>(
+            i2c,
+        )
+    });
     spawner.spawn(sensor_bringup_task(i2c).unwrap());
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
