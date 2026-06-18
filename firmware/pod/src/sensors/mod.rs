@@ -112,7 +112,7 @@ pub struct StampedReading {
     pub captured_us: u64,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct LatestSamples {
     /// Static readings queued since the last uplink (FIFO drain may add several).
     pub pending_static: Vec<StampedReading, MAX_BUFFERED_READINGS>,
@@ -122,10 +122,6 @@ pub struct LatestSamples {
     pub pending_airspeed: Vec<StampedReading, MAX_BUFFERED_READINGS>,
     /// Battery readings queued since the last uplink.
     pub pending_battery: Vec<StampedReading, MAX_BUFFERED_READINGS>,
-    pub static_sample: Option<StampedReading>,
-    pub mag_sample: Option<StampedReading>,
-    pub airspeed_sample: Option<StampedReading>,
-    pub battery_sample: Option<StampedReading>,
 }
 
 fn age_us(pod_uptime_us: u64, captured_us: u64) -> u32 {
@@ -136,7 +132,6 @@ fn age_us(pod_uptime_us: u64, captured_us: u64) -> u32 {
 
 impl LatestSamples {
     fn enqueue_static(&mut self, stamped: StampedReading) {
-        self.static_sample = Some(stamped.clone());
         if self.pending_static.len() >= MAX_BUFFERED_READINGS {
             let _ = self.pending_static.remove(0);
             note_dropped_reading("static");
@@ -145,7 +140,6 @@ impl LatestSamples {
     }
 
     fn enqueue_mag(&mut self, stamped: StampedReading) {
-        self.mag_sample = Some(stamped.clone());
         if self.pending_mag.len() >= MAX_BUFFERED_READINGS {
             let _ = self.pending_mag.remove(0);
             note_dropped_reading("mag");
@@ -154,7 +148,6 @@ impl LatestSamples {
     }
 
     fn enqueue_airspeed(&mut self, stamped: StampedReading) {
-        self.airspeed_sample = Some(stamped.clone());
         if self.pending_airspeed.len() >= MAX_BUFFERED_READINGS {
             let _ = self.pending_airspeed.remove(0);
             note_dropped_reading("airspeed");
@@ -163,7 +156,6 @@ impl LatestSamples {
     }
 
     fn enqueue_battery(&mut self, stamped: StampedReading) {
-        self.battery_sample = Some(stamped.clone());
         if self.pending_battery.len() >= MAX_BUFFERED_READINGS {
             let _ = self.pending_battery.remove(0);
             note_dropped_reading("battery");
@@ -351,10 +343,6 @@ const EMPTY_SAMPLES: LatestSamples = LatestSamples {
     pending_mag: Vec::new(),
     pending_airspeed: Vec::new(),
     pending_battery: Vec::new(),
-    static_sample: None,
-    mag_sample: None,
-    airspeed_sample: None,
-    battery_sample: None,
 };
 static SAMPLES: Mutex<RefCell<LatestSamples>> = Mutex::new(RefCell::new(EMPTY_SAMPLES));
 
@@ -541,7 +529,6 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
                 match bq27441.read_when_due(bus) {
                     Ok(Some(s)) => {
                         store_latest_battery_v(s.voltage_v);
-                        crate::battery_cfg::note_gauge_full_capacity(s.capacity_full_mah);
                         let _ = power::note_battery_sample(
                             cap_us,
                             s.voltage_v,

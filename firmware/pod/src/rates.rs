@@ -180,7 +180,7 @@ fn tick_work_us(static_hz: u16, mag_hz: u16, air_hz: u16, battery_hz: u16) -> u6
 }
 
 /// Whether these rates fit the shared bus time budget (before accepting SetRate).
-pub fn sustainable(static_hz: u16, mag_hz: u16, air_hz: u16, battery_hz: u16) -> bool {
+fn sustainable(static_hz: u16, mag_hz: u16, air_hz: u16, battery_hz: u16) -> bool {
     tick_work_us(static_hz, mag_hz, air_hz, battery_hz) <= MAX_TICK_WORK_US as u64
 }
 

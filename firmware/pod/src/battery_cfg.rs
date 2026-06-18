@@ -81,13 +81,6 @@ pub fn should_log_program_fail() -> bool {
     true
 }
 
-/// Observe learned FullChargeCapacity (0x0E) for telemetry only.
-///
-/// Design programming success is tracked separately via [`note_program_ok`];
-/// FCC often stays wrong until Impedance Track learns, and must not clear
-/// [`PROGRAM_DONE`].
-pub fn note_gauge_full_capacity(_full_mah: f32) {}
-
 /// Queue design capacity if data-memory DesignCapacity (0x3C) does not match target.
 pub fn queue_design_if_mismatch(design_reg_mah: u16) {
     let design = design_mah();
