@@ -100,16 +100,6 @@ func (d *decoder) uvarint() (uint64, error) {
 	return 0, ErrVarintTooLong
 }
 
-// svarint decodes a zigzag-encoded signed varint (i16/i32/i64).
-// Postcard does NOT zigzag i8 — that's a raw byte. See `byte()` for i8.
-func (d *decoder) svarint() (int64, error) {
-	u, err := d.uvarint()
-	if err != nil {
-		return 0, err
-	}
-	return int64((u >> 1) ^ -(u & 1)), nil
-}
-
 func (d *decoder) f32() (float32, error) {
 	if d.pos+4 > len(d.buf) {
 		return 0, ErrShort

@@ -142,10 +142,6 @@ func New(addr string, transport Transport, hub *live.Hub, buf *store.Buffer, st 
 	return c
 }
 
-// Reader exposes the pod's sensors.Reader handle for callers that want
-// to register it with a custom registry (tests, mainly).
-func (c *Client) Reader() sensors.Reader { return c.reader }
-
 // Run blocks until stop is closed. It runs four concurrent loops:
 // recv (decodes frames from the transport), send (writes outbound Cmd
 // frames), pinger (periodic time-sync probes), and the stop watcher.

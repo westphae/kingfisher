@@ -89,10 +89,6 @@ type dbConn interface {
 	Query(query string, args ...any) (*sql.Rows, error)
 }
 
-func (s *Store) addMissingColumns(table string, fields []config.HowgozitField, wantCols []string) error {
-	return addMissingColumns(s.db, table, fields, wantCols)
-}
-
 func addMissingColumns(conn dbConn, table string, fields []config.HowgozitField, wantCols []string) error {
 	rows, err := conn.Query(fmt.Sprintf(`PRAGMA table_info(%q)`, table))
 	if err != nil {

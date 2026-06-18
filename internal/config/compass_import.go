@@ -2,7 +2,6 @@ package config
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"math"
 	"os"
@@ -78,29 +77,6 @@ func MergeCompassKalman(k *CompassKalman) {
 	if sm.NISThreshold == 0 {
 		sm.NISThreshold = dsm.NISThreshold
 	}
-}
-
-// ValidateCompassAlign returns an error if R is present but not a valid rotation.
-func ValidateCompassAlign(a *CompassAlign) error {
-	if a == nil {
-		return nil
-	}
-	zero := true
-	for i := 0; i < 3; i++ {
-		for j := 0; j < 3; j++ {
-			if a.R[i][j] != 0 {
-				zero = false
-			}
-		}
-	}
-	if zero {
-		return nil
-	}
-	// defer to field.IsValidRot at runtime; config load stays permissive
-	if len(a.R) != 3 {
-		return fmt.Errorf("compass.align.r must be 3x3")
-	}
-	return nil
 }
 
 func isValidRotApprox(R [3][3]float64) bool {

@@ -3,7 +3,6 @@ package gps
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"net"
 	"time"
 )
@@ -42,29 +41,6 @@ func feedUBX(buf []byte, onNumSV func(int)) int {
 		i += frameLen
 	}
 	return i
-}
-
-func readUBXStream(r io.Reader, onNumSV func(int)) error {
-	var carry []byte
-	buf := make([]byte, 4096)
-	for {
-		n, err := r.Read(buf)
-		if n > 0 {
-			carry = append(carry, buf[:n]...)
-			consumed := feedUBX(carry, onNumSV)
-			if consumed > 0 {
-				copy(carry, carry[consumed:])
-				carry = carry[:len(carry)-consumed]
-			}
-			if len(carry) > 8192 {
-				// Resync if we never find a valid frame.
-				carry = carry[len(carry)-256:]
-			}
-		}
-		if err != nil {
-			return err
-		}
-	}
 }
 
 // pollUBXNumSV dials gpsd briefly, reads until the first NAV-PVT numSV byte,

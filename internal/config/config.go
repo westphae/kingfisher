@@ -579,7 +579,6 @@ type Config struct {
 	Pod          Pod    `json:"pod,omitempty"`
 	// PodUDPAddr is deprecated; use pod.udp_addr. Kept for migration.
 	PodUDPAddr string            `json:"pod_udp_addr,omitempty"`
-	GPSFields  []string          `json:"gps_fields,omitempty"`
 	Devices    map[string]Device `json:"devices,omitempty"`
 	GPS        GPS               `json:"gps"`
 	Clock      Clock             `json:"clock,omitempty"`
@@ -653,11 +652,6 @@ func Defaults() *Config {
 			WiFiSSID:           "kingfisher",
 			WiFiPassword:       "",
 			BatteryCapacityMah: DefaultPodBatteryCapacityMah,
-		},
-		GPSFields: []string{
-			"lat", "lon", "alt_msl", "gs", "track", "vs",
-			"h_acc", "v_acc", "gs_acc", "vs_acc", "track_acc",
-			"fix", "sats",
 		},
 		Devices:  map[string]Device{},
 		GPS:      GPS{RateHz: 5},

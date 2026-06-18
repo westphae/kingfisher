@@ -150,17 +150,6 @@ func (rg *Registry) MaxBufferedHzFor(kernelName string) (float64, bool) {
 	return MaxBufferedHz(e.reader)
 }
 
-// Names returns every registered device name (including UI aliases).
-func (rg *Registry) Names() []string {
-	rg.mu.RLock()
-	defer rg.mu.RUnlock()
-	out := make([]string, 0, len(rg.entries))
-	for n := range rg.entries {
-		out = append(out, n)
-	}
-	return out
-}
-
 // WriteAttr writes one attribute on the device's reader. channel may be
 // empty for device-level attrs. Returns an error if the device is unknown
 // or the attr is not writable.

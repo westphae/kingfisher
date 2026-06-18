@@ -74,16 +74,6 @@ func applySensorMount(cfg *config.Compass, sensor string, v field.Vec3) field.Ve
 	return v
 }
 
-func scaleToMag(magCal, target field.Vec3) field.Vec3 {
-	m := math.Sqrt(fieldDot(magCal, magCal))
-	t := math.Sqrt(fieldDot(target, target))
-	if m == 0 || t == 0 {
-		return target
-	}
-	s := m / t
-	return field.Vec3{target.X * s, target.Y * s, target.Z * s}
-}
-
 func fieldDot(a, b field.Vec3) float64 {
 	return a.X*b.X + a.Y*b.Y + a.Z*b.Z
 }
@@ -91,16 +81,6 @@ func fieldDot(a, b field.Vec3) float64 {
 func rotZ(a float64) field.Mat3 {
 	c, s := math.Cos(a), math.Sin(a)
 	return field.Mat3{{c, -s, 0}, {s, c, 0}, {0, 0, 1}}
-}
-
-func mulFieldMat(a, b field.Mat3) field.Mat3 {
-	var out field.Mat3
-	for i := 0; i < 3; i++ {
-		for j := 0; j < 3; j++ {
-			out[i][j] = a[i][0]*b[0][j] + a[i][1]*b[1][j] + a[i][2]*b[2][j]
-		}
-	}
-	return out
 }
 
 func publishNEDField(vals map[string]float64, bNedUt field.Vec3) {

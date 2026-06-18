@@ -247,16 +247,7 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		stallRestartCycles int
 		fallbackToPolled   bool
 	)
-	const (
-		maxStallRestartCycles = 8
-		// initialFallbackCooldown is the first polled-mode burst length
-		// after a buffered-capture exhaustion. Each successive failed
-		// recovery attempt doubles the cooldown up to maxFallbackCooldown,
-		// so a transient DMA stall no longer permanently drops the device
-		// from 100 Hz buffered to ~10 Hz polled for the rest of the flight.
-		initialFallbackCooldown = 30 * time.Second
-		maxFallbackCooldown     = 5 * time.Minute
-	)
+	const maxStallRestartCycles = 8
 
 	restartCapture := func(newDev config.Device) bool {
 		if !newDev.Enabled {

@@ -305,17 +305,6 @@ func (r *reader) batteryValuesFromStatus(voltageV float32) map[string]float64 {
 	return out
 }
 
-// snapshotValues returns a copy of the sticky cache for publishing.
-func (r *reader) snapshotValues() map[string]float64 {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	out := make(map[string]float64, len(r.values))
-	for k, v := range r.values {
-		out[k] = v
-	}
-	return out
-}
-
 // applyHello captures advertised capabilities and seeds the rate cache
 // from each sensor's default rate.
 func (r *reader) applyHello(h wire.Hello) {

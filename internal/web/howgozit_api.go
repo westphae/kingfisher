@@ -505,11 +505,3 @@ func (e templateError) Error() string { return string(e) }
 
 func errBadTemplate(msg string) error { return templateError(msg) }
 
-func stringInSlice(s string, list []string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
-}
