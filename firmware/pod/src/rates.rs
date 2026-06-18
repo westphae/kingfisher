@@ -155,7 +155,7 @@ fn reads_per_tick(hz: u16) -> u64 {
         return 0;
     }
     let base = cfg::BASE_HZ as u64;
-    ((hz as u64) + base - 1) / base
+    (hz as u64).div_ceil(base)
 }
 
 fn reads_per_tick_capped(hz: u16) -> u64 {

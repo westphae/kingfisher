@@ -140,6 +140,9 @@ impl Bmp581 {
         self.enter_standby(bus)?;
 
         write_u8(bus, self.addr, REG_INT_SOURCE, 0x01)?; // drdy_data_reg_en
+
+        // Field layout kept explicit (`<< 0` documents the temp-OSR bit offset).
+        #[allow(clippy::identity_op)]
         let osr = (OSR_PRESS_NONE << 3) | (OSR_TEMP_NONE << 0) | (1 << 6); // press_en
         write_u8(bus, self.addr, REG_OSR, osr)?;
         // PT frames, no decimation, streaming FIFO, threshold off.

@@ -31,9 +31,7 @@ pub fn handle(envelope: CmdEnvelope) -> Ack {
     RX_SEQ_LAST.store(seq, Ordering::Relaxed);
     let ok = match envelope.cmd {
         Cmd::SetRate { sensor, hz } => {
-            if !rate_ok(sensor, hz) {
-                false
-            } else if !sensor_attached(sensor) {
+            if !rate_ok(sensor, hz) || !sensor_attached(sensor) {
                 false
             } else {
                 rates::try_set(sensor, hz)

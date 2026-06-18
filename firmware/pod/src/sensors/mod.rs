@@ -343,7 +343,7 @@ const EMPTY_SAMPLES: LatestSamples = LatestSamples {
 static SAMPLES: Mutex<RefCell<LatestSamples>> = Mutex::new(RefCell::new(EMPTY_SAMPLES));
 
 pub fn with_samples_mut<R>(f: impl FnOnce(&mut LatestSamples) -> R) -> R {
-    critical_section::with(|cs| f(&mut *SAMPLES.borrow(cs).borrow_mut()))
+    critical_section::with(|cs| f(&mut SAMPLES.borrow(cs).borrow_mut()))
 }
 
 pub fn push_static(reading: Reading, captured_us: u64) {
@@ -698,7 +698,7 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
             }
         }
 
-        let elapsed_ms = tick_start.elapsed().as_millis() as u64;
+        let elapsed_ms = tick_start.elapsed().as_millis();
         if elapsed_ms > 80 {
             if rates::note_tick_overrun() {
                 need_recovery = true;

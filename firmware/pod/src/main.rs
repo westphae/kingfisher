@@ -41,7 +41,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 macro_rules! mk_static {
     ($t:ty, $val:expr) => {{
         static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
-        STATIC_CELL.uninit().write(($val))
+        STATIC_CELL.uninit().write($val)
     }};
 }
 
@@ -61,6 +61,9 @@ async fn main(spawner: Spawner) -> ! {
     .with_sda(peripherals.GPIO5)
     .with_scl(peripherals.GPIO6);
     esp_hal::delay::Delay::new().delay_millis(50);
+    // Lifetime-launder the I²C bus to 'static for the StaticCell; the source
+    // type is the esp-hal builder result, so leave it inferred.
+    #[allow(clippy::missing_transmute_annotations)]
     let i2c = mk_static!(sensors::bus::Bus, unsafe { core::mem::transmute(i2c) });
     spawner.spawn(sensor_bringup_task(i2c).unwrap());
 
@@ -288,11 +291,8 @@ async fn uplink_task(stack: Stack<'static>) {
                 let uptime_us = now_us;
                 let replies = cmd::handle_datagram(&udp_rx[..n], now_us, uptime_us);
                 for reply in replies {
-                    match &reply {
-                        Frame::Ack(a) => {
-                            println!("pod: ack for_seq={} ok={}", a.for_seq, a.ok);
-                        }
-                        _ => {}
+                    if let Frame::Ack(a) = &reply {
+                        println!("pod: ack for_seq={} ok={}", a.for_seq, a.ok);
                     }
                     if let Ok(bytes) = pod_wire::encode_to_slice(&reply, &mut frame_buf) {
                         let _ = socket.send_to(bytes, peer).await;
