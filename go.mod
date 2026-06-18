@@ -22,11 +22,13 @@ require (
 	modernc.org/sqlite v1.50.1
 )
 
-require golang.org/x/crypto v0.52.0
+require (
+	github.com/dop251/goja v0.0.0-20260603143327-1f200ca63355
+	golang.org/x/crypto v0.52.0
+)
 
 require (
 	github.com/dlclark/regexp2/v2 v2.1.1 // indirect
-	github.com/dop251/goja v0.0.0-20260603143327-1f200ca63355 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/google/pprof v0.0.0-20250317173921-a4b03ec1a45e // indirect
 	golang.org/x/text v0.37.0 // indirect
