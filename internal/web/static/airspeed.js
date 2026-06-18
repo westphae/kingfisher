@@ -10,14 +10,6 @@ const KFAirspeed = (function () {
     { key: 'pressure_alt_m', label: 'Pressure altitude', device: 'press_alt' },
   ];
 
-  function fmtCell(device, channel, value) {
-    if (value == null || !Number.isFinite(Number(value))) {
-      return '—';
-    }
-    const out = KFDisplay.formatValue(device, channel, Number(value));
-    return out.html ?? String(out.text ?? '');
-  }
-
   function smoothChannel(device, sample, channel) {
     const v = KFSmooth.values(device, sample?.values ?? {})[channel];
     return v != null && Number.isFinite(Number(v)) ? Number(v) : null;
@@ -93,9 +85,9 @@ const KFAirspeed = (function () {
       } else {
         val = smoothChannel(row.device, sources[row.device], row.key);
       }
-      cell.innerHTML = fmtCell(fmtDevice, fmtChannel, val);
+      cell.innerHTML = KFDisplay.fmtCell(fmtDevice, fmtChannel, val);
     }
   }
 
-  return { renderPanel, INPUT_ROWS };
+  return { renderPanel };
 })();

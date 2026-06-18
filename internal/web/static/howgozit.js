@@ -538,8 +538,7 @@ var KFHowgozit = (function () {
     if (step) {
       return ` type="number" step="${escapeHtml(step)}" inputmode="${escapeHtml(im)}"`;
     }
-    const mode = field.input_mode || 'decimal';
-    return ` type="text" inputmode="${escapeHtml(mode)}"`;
+    return ` type="text" inputmode="${escapeHtml(im)}"`;
   }
 
   function fieldLabel(f) {
@@ -1213,6 +1212,6 @@ var KFHowgozit = (function () {
     fieldInputHtml,
   };
 
-  return { show, mount, _test };
+  return { show, _test };
 })();
 window.KFHowgozit = KFHowgozit;

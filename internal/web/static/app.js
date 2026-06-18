@@ -111,7 +111,6 @@ function setRoute(hash) {
   }
   applyRoute();
 }
-window.KFSetRoute = setRoute;
 
 function applyRoute() {
   const r = parseRoute();
@@ -815,11 +814,6 @@ function formatTimeOffsetNs(ns) {
   if (abs < 1e6) return `${sign}${(abs / 1000).toFixed(1)} µs`;
   if (abs < 1e9) return `${sign}${(abs / 1e6).toFixed(2)} ms`;
   return `${sign}${(abs / 1e9).toFixed(2)} s`;
-}
-
-function formatClockOffsetMs(ms) {
-  if (!Number.isFinite(ms)) return '—';
-  return formatTimeOffsetNs(ms * 1e6);
 }
 
 function formatAgeSeconds(sec) {

@@ -232,5 +232,5 @@ const KFPFD = (function () {
     if (lo) lo.textContent = fmt(Math.max(0, r - step));
   }
 
-  return { renderPanel, mount };
+  return { renderPanel };
 })();

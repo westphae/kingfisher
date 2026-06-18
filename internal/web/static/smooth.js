@@ -25,9 +25,6 @@ const KFSmooth = (function () {
   };
 
   const SINGLETON_DEFAULT = { mode: 'raw', tau_s: 0.5 };
-  const KNOWN_GROUP_IDS = new Set([
-    'default', 'pos', 'vel', 'acc', 'fix', 'field', 'heading', 'accel', 'gyro', 'mag',
-  ]);
 
   let smoothConfig = {};
   const filterState = new Map();
@@ -40,8 +37,7 @@ const KFSmooth = (function () {
     const dev = DEVICE_GROUP_DEFAULTS[device];
     if (dev && dev[groupId]) return { ...dev[groupId] };
     if (GROUP_DEFAULTS[groupId]) return { ...GROUP_DEFAULTS[groupId] };
-    if (!KNOWN_GROUP_IDS.has(groupId)) return { ...SINGLETON_DEFAULT };
-    return { mode: 'raw', tau_s: 0.5 };
+    return { ...SINGLETON_DEFAULT };
   }
 
   function savedGroup(device, groupId) {
@@ -162,7 +158,6 @@ const KFSmooth = (function () {
     sampleValues,
     effectiveGroup,
     uiGroup,
-    defaultGroup,
     clearGroup,
     listGroups(device, rawValues) {
       return KFDisplay.listSmoothGroups(device, rawValues);

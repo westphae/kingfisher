@@ -21,14 +21,6 @@ const KFCompass = (function () {
     { key: 'heading_sensor_deg', label: 'Heading (sensor)' },
   ];
 
-  function fmtCell(device, channel, value) {
-    if (value == null || !Number.isFinite(Number(value))) {
-      return '—';
-    }
-    const out = KFDisplay.formatValue(device, channel, Number(value));
-    return out.html ?? String(out.text ?? '');
-  }
-
   function smoothedVals(device, sample) {
     return KFSmooth.values(device, sample?.values ?? {});
   }
@@ -198,11 +190,11 @@ const KFCompass = (function () {
       if (!tr) continue;
       const modelCell = tr.querySelector('[data-cmp-model]');
       const measCell = tr.querySelector('[data-cmp-meas]');
-      if (modelCell) modelCell.innerHTML = fmtCell('geo', row.key, geoVals[row.key]);
+      if (modelCell) modelCell.innerHTML = KFDisplay.fmtCell('geo', row.key, geoVals[row.key]);
       if (measCell) {
         measCell.innerHTML = row.modelOnly
           ? '—'
-          : fmtCell('compass', row.key, compassVals[row.key]);
+          : KFDisplay.fmtCell('compass', row.key, compassVals[row.key]);
       }
     }
   }
@@ -238,5 +230,5 @@ const KFCompass = (function () {
     updateDiag(root, compassVals);
   }
 
-  return { renderPanel, COMPARE_ROWS };
+  return { renderPanel };
 })();

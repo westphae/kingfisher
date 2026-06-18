@@ -1104,9 +1104,19 @@ const KFDisplay = (function () {
     return String(value);
   }
 
+  // fmtCell renders a single value to display HTML, or an em dash when absent.
+  function fmtCell(device, channel, value) {
+    if (value == null || !Number.isFinite(Number(value))) {
+      return '—';
+    }
+    const out = formatValue(device, channel, Number(value));
+    return out.html ?? String(out.text ?? '');
+  }
+
   return {
     channelLabel,
     formatValue,
+    fmtCell,
     sortKeys,
     rowClass,
     gpsFootnote,
