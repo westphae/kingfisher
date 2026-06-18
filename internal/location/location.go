@@ -6,8 +6,3 @@ const (
 	Pod  = "pod"
 	Calc = "calc" // derived / model devices (not a physical sensor location)
 )
-
-// Valid reports whether s is a known location label.
-func Valid(s string) bool {
-	return s == Hub || s == Pod || s == Calc
-}
