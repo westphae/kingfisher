@@ -504,4 +504,3 @@ type templateError string
 func (e templateError) Error() string { return string(e) }
 
 func errBadTemplate(msg string) error { return templateError(msg) }
-

@@ -44,4 +44,3 @@ func parsePodAttrKey(full string) (device, attr string, ok bool) {
 	}
 	return "", "", false
 }
-
