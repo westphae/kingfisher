@@ -50,13 +50,7 @@ func bufferLengthForHz(hz float64) int {
 	}
 	// Ring depth ~2× one second of samples at the trigger rate.
 	n := int(math.Ceil(hz * 2))
-	if n < minBufferLength {
-		return minBufferLength
-	}
-	if n > maxBufferLength {
-		return maxBufferLength
-	}
-	return n
+	return min(max(n, minBufferLength), maxBufferLength)
 }
 
 func triggerName(uiName string) string {

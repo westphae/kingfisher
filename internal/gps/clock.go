@@ -3,8 +3,7 @@ package gps
 import (
 	"context"
 	"fmt"
-	"math"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -51,12 +50,12 @@ func (s StartupClockCheck) Summary() string {
 
 // ClockStatus is the live Pi-vs-GPS clock-health view exposed to the web UI.
 type ClockStatus struct {
-	State        string
-	HasFix       bool
-	Fresh        bool
-	Disciplined  bool
-	FixTime      time.Time
-	FixAge       time.Duration
+	State         string
+	HasFix        bool
+	Fresh         bool
+	Disciplined   bool
+	FixTime       time.Time
+	FixAge        time.Duration
 	Offset        time.Duration // recv wall minus fix epoch (includes receiver/pipeline lag)
 	Baseline      time.Duration // median fix-epoch lag once enough samples exist
 	Skew          time.Duration // Offset - Baseline; true wall-clock error indicator
@@ -95,7 +94,7 @@ func medianDuration(ds []time.Duration) time.Duration {
 	if len(ds) == 0 {
 		return 0
 	}
-	sort.Slice(ds, func(i, j int) bool { return ds[i] < ds[j] })
+	slices.Sort(ds)
 	return ds[len(ds)/2]
 }
 
@@ -206,9 +205,5 @@ func absDuration(d time.Duration) time.Duration {
 }
 
 func roundMillis(d time.Duration) time.Duration {
-	ms := float64(d) / float64(time.Millisecond)
-	if math.IsNaN(ms) || math.IsInf(ms, 0) {
-		return 0
-	}
-	return time.Duration(math.Round(ms)) * time.Millisecond
+	return d.Round(time.Millisecond)
 }

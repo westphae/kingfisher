@@ -79,8 +79,8 @@ type airspeedZeroError string
 func (e airspeedZeroError) Error() string { return string(e) }
 
 const (
-	errPitotAbsent              = airspeedZeroError("pitot not present")
-	errInsufficientZeroSamples  = airspeedZeroError("insufficient pitot samples during zero capture")
+	errPitotAbsent             = airspeedZeroError("pitot not present")
+	errInsufficientZeroSamples = airspeedZeroError("insufficient pitot samples during zero capture")
 )
 
 type airspeedProcessor struct {
@@ -239,6 +239,6 @@ func findPitot(s live.Snapshot) (dpPa, tempC float64, ok bool) {
 	if !ok || math.IsNaN(dp) {
 		return 0, 0, false
 	}
-	tempC, _ = sm.Values[pod.ChAirspeedTemp]
+	tempC = sm.Values[pod.ChAirspeedTemp]
 	return dp, tempC, true
 }

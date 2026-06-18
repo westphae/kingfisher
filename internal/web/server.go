@@ -30,6 +30,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -107,21 +108,21 @@ func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, 
 		log.Printf("web: dev UI from %s (reload on refresh; no binary rebuild for static edits)", devWebRoot)
 	}
 	return &Server{
-		cfg:        cfg,
-		hub:        hub,
-		store:      st,
-		buf:        buf,
-		gps:        gpsc,
-		pod:        podc,
-		reg:        reg,
-		compass:    compass,
-		nudger:     nudger,
-		gdl90:      gdl90bc,
+		cfg:             cfg,
+		hub:             hub,
+		store:           st,
+		buf:             buf,
+		gps:             gpsc,
+		pod:             podc,
+		reg:             reg,
+		compass:         compass,
+		nudger:          nudger,
+		gdl90:           gdl90bc,
 		requestShutdown: requestShutdown,
-		tpl:        tpl,
-		devWebRoot: devWebRoot,
-		up:         websocket.Upgrader{CheckOrigin: sameOriginCheck},
-		term:       terminal.New(func() config.Terminal { return cfg.Get().Terminal }, tpl),
+		tpl:             tpl,
+		devWebRoot:      devWebRoot,
+		up:              websocket.Upgrader{CheckOrigin: sameOriginCheck},
+		term:            terminal.New(func() config.Terminal { return cfg.Get().Terminal }, tpl),
 	}, nil
 }
 
@@ -272,13 +273,13 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	cfg := s.cfg.Get()
 	st := map[string]any{
-		"aircraft":         cfg.Aircraft,
-		"aircraft_name":    cfg.AircraftName,
-		"db_path":          s.store.Path(),
-		"db_size_bytes":    s.store.Size(),
-		"buffered_rows":    s.buf.BufferedRows(),
-		"recording_paused": s.buf.Paused(),
-		"recording":        s.buf.RecordingState(),
+		"aircraft":           cfg.Aircraft,
+		"aircraft_name":      cfg.AircraftName,
+		"db_path":            s.store.Path(),
+		"db_size_bytes":      s.store.Size(),
+		"buffered_rows":      s.buf.BufferedRows(),
+		"recording_paused":   s.buf.Paused(),
+		"recording":          s.buf.RecordingState(),
 		"poweroff_available": clock.HelperInstalled(cfg.Clock.PoweroffHelper),
 	}
 	if free, err := s.store.VolumeFreeBytes(); err == nil {
@@ -460,12 +461,7 @@ func derivedDeviceLocation(device string) string {
 }
 
 func (s *Server) isIIODevice(name string) bool {
-	for _, n := range s.cfg.IIODeviceNames() {
-		if n == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.cfg.IIODeviceNames(), name)
 }
 
 // gpsDeviceName is the hub/UI device id for the gpsd source (see internal/gps).
@@ -860,11 +856,11 @@ func (s *Server) handleClockResync(w http.ResponseWriter, r *http.Request) {
 
 	result := s.nudger.ManualResync(r.Context(), level)
 	out := map[string]any{
-		"level":          result.Level,
-		"synced_after":   result.SyncedAfter,
-		"before":         disciplineView(result.Before),
-		"after":          disciplineView(result.After),
-		"discipline":     disciplineView(result.After),
+		"level":        result.Level,
+		"synced_after": result.SyncedAfter,
+		"before":       disciplineView(result.Before),
+		"after":        disciplineView(result.After),
+		"discipline":   disciplineView(result.After),
 	}
 	if result.Err != "" {
 		out["error"] = result.Err
@@ -940,11 +936,11 @@ func disciplineView(disc clock.DisciplineStatus) map[string]any {
 
 func resyncView(st clock.NudgeState) map[string]any {
 	v := map[string]any{
-		"auto_enabled":    st.AutoEnabled,
-		"attempt_count":   st.AttemptCount,
-		"max_attempts":    st.MaxAttempts,
-		"full_available":  st.FullAvailable,
-		"cooldown_s":      st.Cooldown.Seconds(),
+		"auto_enabled":   st.AutoEnabled,
+		"attempt_count":  st.AttemptCount,
+		"max_attempts":   st.MaxAttempts,
+		"full_available": st.FullAvailable,
+		"cooldown_s":     st.Cooldown.Seconds(),
 	}
 	if st.LastResult != "" {
 		v["last_result"] = st.LastResult

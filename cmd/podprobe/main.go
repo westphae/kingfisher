@@ -16,7 +16,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -227,7 +227,7 @@ func percentiles(samples []int64) (p50, p99 time.Duration) {
 	}
 	cp := make([]int64, len(samples))
 	copy(cp, samples)
-	sort.Slice(cp, func(i, j int) bool { return cp[i] < cp[j] })
+	slices.Sort(cp)
 	return time.Duration(cp[len(cp)*50/100]), time.Duration(cp[(len(cp)*99)/100])
 }
 
