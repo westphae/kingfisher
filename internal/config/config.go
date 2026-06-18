@@ -131,7 +131,7 @@ type Airspeed struct {
 	LowSpeedFloorKt float64 `json:"low_speed_floor_kt,omitempty"`
 	// EmaEnabled defaults to true when omitted (see EmaEnabledEffective).
 	EmaEnabled *bool   `json:"ema_enabled,omitempty"`
-	EmaTauS     float64 `json:"ema_tau_s,omitempty"`
+	EmaTauS    float64 `json:"ema_tau_s,omitempty"`
 }
 
 const (
@@ -204,15 +204,15 @@ type GDL90 struct {
 }
 
 const (
-	defaultGDL90Port           = 4000
-	defaultGDL90DHCPLeases       = "/var/lib/dhcp/dhcpd.leases"
-	defaultGDL90OwnshipHz        = 5.0
-	defaultGDL90AHRSHz         = 10.0
-	defaultGDL90FFAHRSHz       = 5.0
-	defaultGDL90HeartbeatHz    = 1.0
-	defaultGDL90OwnshipModeS   = "F00000"
-	defaultGDL90DeviceShort    = "Kingfisher"
-	defaultGDL90DeviceLong     = "kingfisher"
+	defaultGDL90Port         = 4000
+	defaultGDL90DHCPLeases   = "/var/lib/dhcp/dhcpd.leases"
+	defaultGDL90OwnshipHz    = 5.0
+	defaultGDL90AHRSHz       = 10.0
+	defaultGDL90FFAHRSHz     = 5.0
+	defaultGDL90HeartbeatHz  = 1.0
+	defaultGDL90OwnshipModeS = "F00000"
+	defaultGDL90DeviceShort  = "Kingfisher"
+	defaultGDL90DeviceLong   = "kingfisher"
 )
 
 func (g *GDL90) PortEffective() int {
@@ -320,12 +320,12 @@ func truncateRunes(s string, n int) string {
 
 // CompassKalman holds EKF parameters for magnetometer calibration (magkal).
 type CompassKalman struct {
-	SigmaK0      float64               `json:"sigma_k0,omitempty"`
-	SigmaK       float64               `json:"sigma_k,omitempty"`
-	SigmaM       float64               `json:"sigma_m,omitempty"`
-	MaxSigmaK    float64               `json:"max_sigma_k,omitempty"`
-	MaxSigmaL    float64               `json:"max_sigma_l,omitempty"`
-	StateMachine CompassStateMachine   `json:"state_machine,omitempty"`
+	SigmaK0      float64             `json:"sigma_k0,omitempty"`
+	SigmaK       float64             `json:"sigma_k,omitempty"`
+	SigmaM       float64             `json:"sigma_m,omitempty"`
+	MaxSigmaK    float64             `json:"max_sigma_k,omitempty"`
+	MaxSigmaL    float64             `json:"max_sigma_l,omitempty"`
+	StateMachine CompassStateMachine `json:"state_machine,omitempty"`
 	// Debug enables magkal per-step EKF log lines (Innovation, Jacobian, gain, ...).
 	Debug bool `json:"debug,omitempty"`
 }
@@ -347,35 +347,35 @@ type CompassCalibration struct {
 
 // CompassAlign is the sensor→vehicle rotation captured at align time.
 type CompassAlign struct {
-	R                 [3][3]float64 `json:"r"`
-	AircraftToEarthR  [3][3]float64 `json:"aircraft_to_earth_r,omitempty"`
-	AlignHeadingDeg   float64       `json:"align_heading_deg"`
-	YawTrueDeg        float64       `json:"yaw_true_deg,omitempty"`
+	R                [3][3]float64 `json:"r"`
+	AircraftToEarthR [3][3]float64 `json:"aircraft_to_earth_r,omitempty"`
+	AlignHeadingDeg  float64       `json:"align_heading_deg"`
+	YawTrueDeg       float64       `json:"yaw_true_deg,omitempty"`
 }
 
 // Compass configures the derived compass virtual device.
 type Compass struct {
-	Enabled      bool               `json:"enabled"`
-	RateHz       float64            `json:"rate_hz"`
-	Magnetometer string             `json:"magnetometer,omitempty"`
-	AccelDevice  string             `json:"accel_device,omitempty"`
+	Enabled      bool    `json:"enabled"`
+	RateHz       float64 `json:"rate_hz"`
+	Magnetometer string  `json:"magnetometer,omitempty"`
+	AccelDevice  string  `json:"accel_device,omitempty"`
 	// AlignMethod is "wmm" (geomagnetic field + cabin attitude) or "accel"
 	// (gravity + mag on one device). Empty defaults from device layout at runtime.
 	AlignMethod string `json:"align_method,omitempty"`
 	// SensorMountR maps device name -> fixed sensor->aircraft rotation (FRD).
 	SensorMountR map[string][3][3]float64 `json:"sensor_mount_r,omitempty"`
 	// PodMountR is an optional fixed pod-sensor→fuselage rotation (identity when unset).
-	PodMountR    [3][3]float64         `json:"pod_mount_r,omitempty"`
-	N0Ut         float64               `json:"n0_ut,omitempty"`
-	TaxiMinKt    float64               `json:"taxi_min_kt,omitempty"`
-	TaxiMaxKt    float64               `json:"taxi_max_kt,omitempty"`
-	Kalman       CompassKalman         `json:"kalman,omitempty"`
-	Calibration  CompassCalibration    `json:"calibration,omitempty"`
-	Align        CompassAlign          `json:"align,omitempty"`
+	PodMountR   [3][3]float64      `json:"pod_mount_r,omitempty"`
+	N0Ut        float64            `json:"n0_ut,omitempty"`
+	TaxiMinKt   float64            `json:"taxi_min_kt,omitempty"`
+	TaxiMaxKt   float64            `json:"taxi_max_kt,omitempty"`
+	Kalman      CompassKalman      `json:"kalman,omitempty"`
+	Calibration CompassCalibration `json:"calibration,omitempty"`
+	Align       CompassAlign       `json:"align,omitempty"`
 }
 
 const (
-	DefaultCompassN0Ut     = 50.0
+	DefaultCompassN0Ut      = 50.0
 	DefaultCompassTaxiMinKt = 2.0
 	DefaultCompassTaxiMaxKt = 40.0
 )
@@ -429,11 +429,11 @@ func boolPtr(v bool) *bool {
 // config.json. Firmware build.rs reads wifi_ssid/password/udp_addr.
 // Attrs are written on each UI change (config.Save) and survive power-off.
 type Pod struct {
-	WiFiSSID     string            `json:"wifi_ssid,omitempty"`
-	WiFiPassword string            `json:"wifi_password,omitempty"`
-	UDPAddr              string            `json:"udp_addr,omitempty"` // Pi host:port pod sends to; kingfisher binds :port on all ifaces
-	BatteryCapacityMah     uint16            `json:"battery_capacity_mah,omitempty"`
-	Attrs                  map[string]string `json:"attrs,omitempty"` // e.g. in_mag_sampling_frequency
+	WiFiSSID           string            `json:"wifi_ssid,omitempty"`
+	WiFiPassword       string            `json:"wifi_password,omitempty"`
+	UDPAddr            string            `json:"udp_addr,omitempty"` // Pi host:port pod sends to; kingfisher binds :port on all ifaces
+	BatteryCapacityMah uint16            `json:"battery_capacity_mah,omitempty"`
+	Attrs              map[string]string `json:"attrs,omitempty"` // e.g. in_mag_sampling_frequency
 }
 
 const (
@@ -653,8 +653,8 @@ func Defaults() *Config {
 			WiFiPassword:       "",
 			BatteryCapacityMah: DefaultPodBatteryCapacityMah,
 		},
-		Devices:  map[string]Device{},
-		GPS:      GPS{RateHz: 5},
+		Devices: map[string]Device{},
+		GPS:     GPS{RateHz: 5},
 		Clock: Clock{
 			AutoResync:          boolPtr(true),
 			AutoResyncCooldownS: DefaultAutoResyncCooldownS,

@@ -8,10 +8,10 @@ import (
 )
 
 const (
-	ubxSync1      = 0xB5
-	ubxSync2      = 0x62
-	ubxClassNAV   = 0x01
-	ubxIDNAVPVT   = 0x07
+	ubxSync1       = 0xB5
+	ubxSync2       = 0x62
+	ubxClassNAV    = 0x01
+	ubxIDNAVPVT    = 0x07
 	ubxNavPVTNumSV = 23
 )
 

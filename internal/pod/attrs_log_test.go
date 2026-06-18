@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/westphae/kingfisher/internal/live"
-	"github.com/westphae/kingfisher/internal/store"
 	"github.com/westphae/kingfisher/internal/pod/wire"
+	"github.com/westphae/kingfisher/internal/store"
 )
 
 func TestLogPodSensorAttrsOnHello(t *testing.T) {
@@ -20,10 +20,10 @@ func TestLogPodSensorAttrsOnHello(t *testing.T) {
 	c.dispatch(wire.Hello{
 		FwVersion: 0x0004_0004,
 		Caps: wire.Capabilities{Sensors: []wire.SensorCap{
-				{ID: wire.SensorStatic, MinHz: 1, MaxHz: 20, DefaultHz: 10, DeviceName: wire.NewDeviceName("bmp581")},
-				{ID: wire.SensorMag, MinHz: 1, MaxHz: 20, DefaultHz: 10, DeviceName: wire.NewDeviceName("mmc5983")},
-				{ID: wire.SensorAirspeed, MinHz: 1, MaxHz: 50, DefaultHz: 10, DeviceName: wire.NewDeviceName("ms4525")},
-			},
+			{ID: wire.SensorStatic, MinHz: 1, MaxHz: 20, DefaultHz: 10, DeviceName: wire.NewDeviceName("bmp581")},
+			{ID: wire.SensorMag, MinHz: 1, MaxHz: 20, DefaultHz: 10, DeviceName: wire.NewDeviceName("mmc5983")},
+			{ID: wire.SensorAirspeed, MinHz: 1, MaxHz: 50, DefaultHz: 10, DeviceName: wire.NewDeviceName("ms4525")},
+		},
 		},
 	}, "test")
 

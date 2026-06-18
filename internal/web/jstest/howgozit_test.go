@@ -83,12 +83,12 @@ func TestNormalizeFieldType(t *testing.T) {
 func TestLegacyInputMode(t *testing.T) {
 	vm := newVM(t)
 	cases := map[string]string{
-		"{type:'decimal'}":                "decimal", // legacy decimal -> decimal inputmode
-		"{type:'numeric'}":                "numeric",
-		"{type:'decimal', input_mode:''}": "decimal",
+		"{type:'decimal'}":                  "decimal", // legacy decimal -> decimal inputmode
+		"{type:'numeric'}":                  "numeric",
+		"{type:'decimal', input_mode:''}":   "decimal",
 		"{type:'number', input_mode:'tel'}": "tel", // explicit wins
-		"{type:'text'}":                   "",
-		"{type:'number'}":                 "",
+		"{type:'text'}":                     "",
+		"{type:'number'}":                   "",
 	}
 	for in, want := range cases {
 		if got := evalStr(t, vm, "T.legacyInputMode("+in+")"); got != want {
@@ -138,12 +138,12 @@ func TestEscapeHtml(t *testing.T) {
 	// The quote escape is what prevents attribute-injection when values are
 	// interpolated into value="..." (see fieldInputHtml).
 	cases := map[string]string{
-		`'<b>'`:           "&lt;b&gt;",
-		`'a & b'`:         "a &amp; b",
-		`'\"x\"'`:         "&quot;x&quot;",
-		`'plain'`:         "plain",
-		"null":           "",
-		"undefined":      "",
+		`'<b>'`:     "&lt;b&gt;",
+		`'a & b'`:   "a &amp; b",
+		`'\"x\"'`:   "&quot;x&quot;",
+		`'plain'`:   "plain",
+		"null":      "",
+		"undefined": "",
 	}
 	for in, want := range cases {
 		if got := evalStr(t, vm, "T.escapeHtml("+in+")"); got != want {
@@ -183,10 +183,10 @@ func TestParseTimeToTsNs(t *testing.T) {
 	}
 
 	for _, c := range []struct {
-		in       string
-		wantH    int64
-		wantMin  int64
-		wantSec  int64
+		in      string
+		wantH   int64
+		wantMin int64
+		wantSec int64
 	}{
 		{"'2115'", 21, 15, 0},
 		{"'0915'", 9, 15, 0},
@@ -223,11 +223,11 @@ func TestFormatTimeUTC(t *testing.T) {
 func TestLabelToKey(t *testing.T) {
 	vm := newVM(t)
 	cases := map[string]string{
-		"'Baro (inHg)'":   "baro_inhg",
+		"'Baro (inHg)'":    "baro_inhg",
 		"'  Hello World '": "hello_world",
-		"'ATC #1'":        "atc_1",
-		"'already_ok'":    "already_ok",
-		"'--Trim--'":      "trim",
+		"'ATC #1'":         "atc_1",
+		"'already_ok'":     "already_ok",
+		"'--Trim--'":       "trim",
 	}
 	for in, want := range cases {
 		if got := evalStr(t, vm, "T.labelToKey("+in+")"); got != want {

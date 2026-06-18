@@ -27,11 +27,11 @@ func (r *bmp280TestReader) ChannelAttr(ch, attr string) (string, error) {
 	}
 	return "", os.ErrNotExist
 }
-func (r *bmp280TestReader) Attr(string) (string, error)            { return "", os.ErrNotExist }
+func (r *bmp280TestReader) Attr(string) (string, error)                 { return "", os.ErrNotExist }
 func (r *bmp280TestReader) SetChannelAttr(string, string, string) error { return nil }
-func (r *bmp280TestReader) ReloadScale() error                     { return nil }
-func (r *bmp280TestReader) WritableAttr(string, string) bool       { return false }
-func (r *bmp280TestReader) Close() error                           { return nil }
+func (r *bmp280TestReader) ReloadScale() error                          { return nil }
+func (r *bmp280TestReader) WritableAttr(string, string) bool            { return false }
+func (r *bmp280TestReader) Close() error                                { return nil }
 
 func TestBmp280MaxBufferedHz(t *testing.T) {
 	r := &bmp280TestReader{press: 16, temp: 16}
@@ -50,17 +50,17 @@ func TestBmp280MaxBufferedHz(t *testing.T) {
 
 type icm20948TestReader struct{}
 
-func (r *icm20948TestReader) Name() string                            { return "icm20948" }
-func (r *icm20948TestReader) Channels() []string                      { return nil }
-func (r *icm20948TestReader) ReadFloat(string) (float64, error)       { return 0, nil }
+func (r *icm20948TestReader) Name() string                      { return "icm20948" }
+func (r *icm20948TestReader) Channels() []string                { return nil }
+func (r *icm20948TestReader) ReadFloat(string) (float64, error) { return 0, nil }
 func (r *icm20948TestReader) ChannelAttr(string, string) (string, error) {
 	return "", os.ErrNotExist
 }
-func (r *icm20948TestReader) Attr(string) (string, error)             { return "", os.ErrNotExist }
+func (r *icm20948TestReader) Attr(string) (string, error)                 { return "", os.ErrNotExist }
 func (r *icm20948TestReader) SetChannelAttr(string, string, string) error { return nil }
-func (r *icm20948TestReader) ReloadScale() error                      { return nil }
-func (r *icm20948TestReader) WritableAttr(string, string) bool        { return false }
-func (r *icm20948TestReader) Close() error                            { return nil }
+func (r *icm20948TestReader) ReloadScale() error                          { return nil }
+func (r *icm20948TestReader) WritableAttr(string, string) bool            { return false }
+func (r *icm20948TestReader) Close() error                                { return nil }
 
 func TestIcm20948MaxBufferedHz(t *testing.T) {
 	r := &icm20948TestReader{}

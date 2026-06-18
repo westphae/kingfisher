@@ -6,7 +6,7 @@ const (
 	lonLatResolution = 180.0 / 8388608.0
 	trackResolution  = 360.0 / 256.0
 	mpsPerKt         = 0.514444444
-	msToFpmFactor = 196.850394
+	msToFpmFactor    = 196.850394
 )
 
 const (

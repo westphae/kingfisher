@@ -16,20 +16,20 @@ const maxDataAge = 2 * time.Second
 
 // Stats is a snapshot of broadcaster health for /api/status.
 type Stats struct {
-	Enabled   bool      `json:"enabled"`
-	Clients   int       `json:"clients"`
-	LastSend  time.Time `json:"last_send,omitempty"`
-	MsgsSent  uint64    `json:"msgs_sent"`
+	Enabled  bool      `json:"enabled"`
+	Clients  int       `json:"clients"`
+	LastSend time.Time `json:"last_send,omitempty"`
+	MsgsSent uint64    `json:"msgs_sent"`
 }
 
 // Broadcaster emits GDL90 to connected EFB clients.
 type Broadcaster struct {
-	mu       sync.RWMutex
-	stats    Stats
-	pool     *ClientPool
-	holder   *config.Holder
-	hub      *live.Hub
-	gpsc     *gps.Client
+	mu     sync.RWMutex
+	stats  Stats
+	pool   *ClientPool
+	holder *config.Holder
+	hub    *live.Hub
+	gpsc   *gps.Client
 }
 
 // NewBroadcaster wires a broadcaster; caller must invoke Run.

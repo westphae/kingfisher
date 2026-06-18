@@ -19,17 +19,17 @@ const DeviceName = "pod"
 // channel names exposed on the pod device. They land as columns in the
 // flight DB (sanitised) and as keys in the WS feed.
 const (
-	ChAirspeedDP   = "airspeed_dp_pa"
-	ChAirspeedTemp = "airspeed_temp_c"
-	ChStaticP      = "static_pressure_pa"
-	ChStaticTemp   = "static_temp_c"
-	ChMagX         = "mag_x_ut"
-	ChMagY         = "mag_y_ut"
-	ChMagZ         = "mag_z_ut"
-	ChBatteryV     = "battery_voltage_v"
-	ChBatteryI     = "battery_current_a"
-	ChBatteryP     = "battery_power_w"
-	ChBatteryCapRm = "battery_capacity_remain_mah"
+	ChAirspeedDP     = "airspeed_dp_pa"
+	ChAirspeedTemp   = "airspeed_temp_c"
+	ChStaticP        = "static_pressure_pa"
+	ChStaticTemp     = "static_temp_c"
+	ChMagX           = "mag_x_ut"
+	ChMagY           = "mag_y_ut"
+	ChMagZ           = "mag_z_ut"
+	ChBatteryV       = "battery_voltage_v"
+	ChBatteryI       = "battery_current_a"
+	ChBatteryP       = "battery_power_w"
+	ChBatteryCapRm   = "battery_capacity_remain_mah"
 	ChBatteryCapFull = "battery_capacity_full_mah"
 	ChBatterySOC     = "battery_soc_pct"
 	ChBatteryTime    = "battery_time_remain_s"
@@ -157,11 +157,11 @@ func (r *reader) TelemetryDeviceNames() []string {
 
 // outboundCmd is queued for the send loop; PrevHz supports Ack rollback.
 type outboundCmd struct {
-	Cmd        wire.Cmd
-	Sensor     wire.SensorID
-	PrevHz     uint16
-	HasPrev    bool
-	HasDesign  bool // SetAttr design capacity awaiting Ack
+	Cmd       wire.Cmd
+	Sensor    wire.SensorID
+	PrevHz    uint16
+	HasPrev   bool
+	HasDesign bool // SetAttr design capacity awaiting Ack
 }
 
 // reader implements sensors.Reader for the pod virtual device. It is
@@ -173,16 +173,16 @@ type outboundCmd struct {
 // optimistically updates the local cache; the next Hello/Status frame
 // from the pod reconciles authoritative state.
 type reader struct {
-	mu                sync.RWMutex
-	values            map[string]float64       // channel -> latest sample value
-	rates             map[wire.SensorID]uint16 // sensor -> last known sampling Hz
-	caps              map[wire.SensorID]wire.SensorCap
-	designCapacityMah  uint16    // Settings display; synced from chip 0x3C when idle
-	designCapacityChip uint16    // last DesignCapacity from battery telemetry
-	pendingDesignMah   uint16    // user value awaiting chip program confirm
+	mu                 sync.RWMutex
+	values             map[string]float64       // channel -> latest sample value
+	rates              map[wire.SensorID]uint16 // sensor -> last known sampling Hz
+	caps               map[wire.SensorID]wire.SensorCap
+	designCapacityMah  uint16 // Settings display; synced from chip 0x3C when idle
+	designCapacityChip uint16 // last DesignCapacity from battery telemetry
+	pendingDesignMah   uint16 // user value awaiting chip program confirm
 	pendingDesignAt    time.Time
-	prevDesignMah      uint16    // value before pending user edit
-	outboundDesignMah  uint16    // last mAh sent to pod via SetAttr (0 = never)
+	prevDesignMah      uint16 // value before pending user edit
+	outboundDesignMah  uint16 // last mAh sent to pod via SetAttr (0 = never)
 	out                chan<- outboundCmd
 }
 
@@ -261,14 +261,14 @@ func (r *reader) sampleBatteryValues(v wire.BatteryReading, learned bool) (devic
 		learnedVal = 1
 	}
 	values = map[string]float64{
-		ChBatteryV:           float64(v.VoltageV),
-		ChBatteryI:           float64(v.CurrentA),
-		ChBatteryP:           float64(v.PowerW),
-		ChBatteryLearned:     learnedVal,
-		ChBatteryCapRm:       float64(v.CapacityRemainMah),
-		ChBatteryCapFull:     float64(v.CapacityFullMah),
-		ChBatterySOC:         float64(v.SocPct),
-		ChBatteryTime:        float64(v.TimeRemainS),
+		ChBatteryV:       float64(v.VoltageV),
+		ChBatteryI:       float64(v.CurrentA),
+		ChBatteryP:       float64(v.PowerW),
+		ChBatteryLearned: learnedVal,
+		ChBatteryCapRm:   float64(v.CapacityRemainMah),
+		ChBatteryCapFull: float64(v.CapacityFullMah),
+		ChBatterySOC:     float64(v.SocPct),
+		ChBatteryTime:    float64(v.TimeRemainS),
 	}
 	return r.deviceNameLocked(wire.SensorBattery), values, true
 }

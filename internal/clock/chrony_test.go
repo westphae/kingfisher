@@ -173,10 +173,10 @@ func TestStartupMetaChronyUnavailable(t *testing.T) {
 
 func TestClassifySourceLabel(t *testing.T) {
 	cases := map[string]string{
-		"PPS":            SourcePPS,
-		"GPS":            SourceGPS,
-		"pool.ntp.org":   SourceNTP,
-		"":               SourceLocal,
+		"PPS":          SourcePPS,
+		"GPS":          SourceGPS,
+		"pool.ntp.org": SourceNTP,
+		"":             SourceLocal,
 	}
 	for label, want := range cases {
 		if got := classifySourceLabel(label); got != want {

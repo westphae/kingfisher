@@ -19,13 +19,13 @@ const tablePrefix = "hgz_"
 
 // LogMeta describes one manual log instance in the flight DB.
 type LogMeta struct {
-	LogID       string                `json:"log_id"`
-	TemplateID  string                `json:"template_id"`
-	DisplayName string                `json:"display_name"`
-	TableName   string                `json:"table_name"`
-	SchemaJSON  string                `json:"schema_json"`
+	LogID       string                 `json:"log_id"`
+	TemplateID  string                 `json:"template_id"`
+	DisplayName string                 `json:"display_name"`
+	TableName   string                 `json:"table_name"`
+	SchemaJSON  string                 `json:"schema_json"`
 	Fields      []config.HowgozitField `json:"fields"`
-	CreatedTsNs int64                 `json:"created_ts_ns"`
+	CreatedTsNs int64                  `json:"created_ts_ns"`
 }
 
 // Row is one manual log entry.

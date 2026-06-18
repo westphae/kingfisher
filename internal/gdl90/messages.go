@@ -8,10 +8,10 @@ import (
 
 // Situation holds the latest values used to build outbound GDL90 messages.
 type Situation struct {
-	GPSValid    bool
-	AHRSValid   bool
-	BaroValid   bool
-	GPSNACp     uint8 // 0–15; default 9 when unknown
+	GPSValid  bool
+	AHRSValid bool
+	BaroValid bool
+	GPSNACp   uint8 // 0–15; default 9 when unknown
 
 	Lat, Lon       float64
 	AltMSLM        float64 // meters
@@ -27,10 +27,10 @@ type Situation struct {
 	GLoad                         float64
 	IASKt, TASKt                  float64
 
-	Callsign      string // up to 8 chars in ownship
-	OwnshipModeS  string // hex ICAO, e.g. F00000
-	DeviceShort   string
-	DeviceLong    string
+	Callsign     string // up to 8 chars in ownship
+	OwnshipModeS string // hex ICAO, e.g. F00000
+	DeviceShort  string
+	DeviceLong   string
 }
 
 // Heartbeat builds GDL90 message 0x00.

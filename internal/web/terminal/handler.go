@@ -110,9 +110,9 @@ func (h *Handler) handleAuth(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg := h.cfgFn()
 	writeJSON(w, map[string]any{
-		"pubkey_auth":    cfg.PubkeyAuth(),
-		"password_auth":  cfg.PasswordAuth(),
-		"user":           strings.TrimSpace(cfg.User),
+		"pubkey_auth":   cfg.PubkeyAuth(),
+		"password_auth": cfg.PasswordAuth(),
+		"user":          strings.TrimSpace(cfg.User),
 	})
 }
 

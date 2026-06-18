@@ -21,15 +21,15 @@ const (
 
 // NudgeState is the live auto-resync view exposed to the web UI.
 type NudgeState struct {
-	AutoEnabled       bool
-	LastAttempt       time.Time
-	LastResult        string
-	AttemptCount      int
-	MaxAttempts       int
-	Cooldown          time.Duration
-	NextEligibleAt    time.Time
-	FullAvailable     bool
-	ResyncHelper      string
+	AutoEnabled    bool
+	LastAttempt    time.Time
+	LastResult     string
+	AttemptCount   int
+	MaxAttempts    int
+	Cooldown       time.Duration
+	NextEligibleAt time.Time
+	FullAvailable  bool
+	ResyncHelper   string
 }
 
 // AutoNudger periodically runs chronyc reselect when chrony is unsynced but GPS

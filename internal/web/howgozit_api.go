@@ -248,7 +248,7 @@ func (s *Server) handleHowgozitLogs(w http.ResponseWriter, r *http.Request, path
 
 func (s *Server) handleHowgozitUpdateLog(w http.ResponseWriter, r *http.Request, hs *howgozit.Store, logID string) {
 	var body struct {
-		DisplayName string                  `json:"display_name"`
+		DisplayName string                 `json:"display_name"`
 		Fields      []config.HowgozitField `json:"fields"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
