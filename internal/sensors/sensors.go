@@ -321,6 +321,17 @@ func runOne(ctx context.Context, r Reader, name string, holder *config.Holder, h
 			}
 			if !dev.Enabled {
 				log.Printf("sensors: %s enabled by config reload — resuming", name)
+				// The pause branch advanced dev.SampleHz without touching
+				// interval, so recompute from the live rate — otherwise a
+				// disable-with-rate-change followed by re-enable resumes at the
+				// stale rate (the guard below sees newDev.SampleHz == dev.SampleHz
+				// and skips). Drain any tick buffered before the pause Stop so the
+				// first post-resume sample isn't emitted early.
+				interval = tickInterval(newDev.SampleHz)
+				select {
+				case <-t.C:
+				default:
+				}
 				t.Reset(interval)
 			}
 			if newDev.SampleHz != dev.SampleHz && newDev.SampleHz > 0 {

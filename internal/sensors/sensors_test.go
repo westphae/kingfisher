@@ -183,3 +183,61 @@ func TestReaderPauseResumeOnReload(t *testing.T) {
 		t.Errorf("reader not closed after Run returned")
 	}
 }
+
+// TestReaderResumeUsesNewRate guards against the stale-interval regression: if a
+// device is disabled AND its sample_hz changed in the same reload, then later
+// re-enabled at that new (higher) rate, the resumed reader must tick at the new
+// rate — not the pre-disable rate. Counts are compared relatively (high window
+// vs low window) so the assertion tolerates a loaded host.
+func TestReaderResumeUsesNewRate(t *testing.T) {
+	hub := live.NewHub()
+	f := &fakeReader{name: "bmp280", chs: []string{"pressure"}}
+	low := &config.Config{Devices: map[string]config.Device{"bmp280": {Enabled: true, SampleHz: 20}}}
+	disabledFast := &config.Config{Devices: map[string]config.Device{"bmp280": {Enabled: false, SampleHz: 200}}}
+	enabledFast := &config.Config{Devices: map[string]config.Device{"bmp280": {Enabled: true, SampleHz: 200}}}
+	holder := config.NewHolder("", low)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		Run(ctx, holder, []Reader{f}, hub, nil, nil, nil)
+		close(done)
+	}()
+
+	// Measure the read count over a fixed window at the low (20 Hz) rate.
+	if !waitFor(2*time.Second, func() bool { return f.callCount() > 0 }) {
+		t.Fatalf("low-rate reader never read")
+	}
+	lowStart := f.callCount()
+	time.Sleep(250 * time.Millisecond)
+	lowWindow := f.callCount() - lowStart
+
+	// Disable while changing the rate, then re-enable at the new rate.
+	holder.Set(disabledFast)
+	if !waitFor(2*time.Second, func() bool {
+		n := f.callCount()
+		time.Sleep(40 * time.Millisecond)
+		return f.callCount() == n
+	}) {
+		t.Fatalf("reader never paused")
+	}
+	holder.Set(enabledFast)
+	if !waitFor(2*time.Second, func() bool { return f.callCount() > lowStart+lowWindow }) {
+		t.Fatalf("reader never resumed")
+	}
+
+	// Measure over the same window at the resumed (200 Hz) rate.
+	highStart := f.callCount()
+	time.Sleep(250 * time.Millisecond)
+	highWindow := f.callCount() - highStart
+
+	cancel()
+	<-done
+
+	// 200 Hz should yield ~10x the reads of 20 Hz; the stale-interval bug would
+	// resume at 20 Hz and make the two windows comparable. 3x is a safe floor.
+	if highWindow <= 3*lowWindow {
+		t.Errorf("resumed rate not applied: low-window reads=%d high-window reads=%d (want high > 3x low)", lowWindow, highWindow)
+	}
+}
