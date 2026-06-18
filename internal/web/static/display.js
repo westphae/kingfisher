@@ -94,6 +94,26 @@ const KFDisplay = (function () {
     heading: 'Heading',
   };
 
+  /** Smoothing group templates for devices that have not published values
+   *  yet (so listSmoothGroups can find no channels). Keyed by device id. */
+  const STATIC_SMOOTH_GROUPS = {
+    gps: [
+      { id: 'pos', channels: ['lat', 'lon', 'alt_msl'] },
+      { id: 'acc', channels: ['h_acc', 'v_acc', 'gs_acc'] },
+      { id: 'fix', channels: ['fix_time_unix_s', 'fix', 'sats'] },
+      { id: 'vel', channels: ['gs', 'track', 'vs'] },
+    ],
+    ahrs: [{ id: 'default', channels: ['roll', 'pitch', 'yaw'] }],
+    compass: [{ id: 'default', channels: ['heading_mag_deg', 'align_active'] }],
+    airspeed: [{ id: 'default', channels: ['ias_kt', 'tas_kt'] }],
+    press_alt: [{ id: 'default', channels: ['indicated_alt_ft', 'pressure_alt_ft', 'density_alt_ft'] }],
+    geo: [{ id: 'default', channels: ['field_f_nt', 'declination', 'inclination'] }],
+    bmp581: [{ id: 'default', channels: ['static_pressure_pa', 'static_temp_c'] }],
+    ms4525: [{ id: 'default', channels: ['airspeed_dp_pa', 'airspeed_temp_c'] }],
+    bq27441: [{ id: 'default', channels: ['battery_voltage_v', 'battery_soc_pct', 'battery_time_remain_s'] }],
+    mmc5983: [{ id: 'default', channels: ['mag_x_ut', 'mag_y_ut', 'mag_z_ut'] }],
+  };
+
   /** Overview block title overrides (device id unchanged in routes/WS). */
   const OVERVIEW_DEVICE_NAMES = {
     press_alt: 'altitude',
@@ -934,24 +954,7 @@ const KFDisplay = (function () {
     if (device.endsWith('-gyro')) {
       return [{ id: 'gyro', label: smoothGroupLabel(device, 'gyro', IMU_GYRO), channels: [...IMU_GYRO] }];
     }
-    const known = {
-      gps: [
-        { id: 'pos', channels: ['lat', 'lon', 'alt_msl'] },
-        { id: 'acc', channels: ['h_acc', 'v_acc', 'gs_acc'] },
-        { id: 'fix', channels: ['fix_time_unix_s', 'fix', 'sats'] },
-        { id: 'vel', channels: ['gs', 'track', 'vs'] },
-      ],
-      ahrs: [{ id: 'default', channels: ['roll', 'pitch', 'yaw'] }],
-      compass: [{ id: 'default', channels: ['heading_mag_deg', 'align_active'] }],
-      airspeed: [{ id: 'default', channels: ['ias_kt', 'tas_kt'] }],
-      press_alt: [{ id: 'default', channels: ['indicated_alt_ft', 'pressure_alt_ft', 'density_alt_ft'] }],
-      geo: [{ id: 'default', channels: ['field_f_nt', 'declination', 'inclination'] }],
-      bmp581: [{ id: 'default', channels: ['static_pressure_pa', 'static_temp_c'] }],
-      ms4525: [{ id: 'default', channels: ['airspeed_dp_pa', 'airspeed_temp_c'] }],
-      bq27441: [{ id: 'default', channels: ['battery_voltage_v', 'battery_soc_pct', 'battery_time_remain_s'] }],
-      mmc5983: [{ id: 'default', channels: ['mag_x_ut', 'mag_y_ut', 'mag_z_ut'] }],
-    };
-    const tpl = known[device];
+    const tpl = STATIC_SMOOTH_GROUPS[device];
     if (!tpl) return [];
     return tpl.map((g) => ({
       id: g.id,
