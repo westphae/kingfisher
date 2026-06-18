@@ -429,10 +429,6 @@ func (d *decoder) decodeCmd() (Cmd, error) {
 			return nil, err
 		}
 		return CmdSetAttr{Sensor: SensorID(id), Key: AttrKey(key), Value: val}, nil
-	case cmdPing:
-		return CmdPing{}, nil
-	case cmdReboot:
-		return CmdReboot{}, nil
 	default:
 		return nil, fmt.Errorf("%w: cmd=%d", ErrUnknownVariant, disc)
 	}
@@ -770,10 +766,6 @@ func (e *encoder) encodeCmd(c Cmd) error {
 			return err
 		}
 		return e.f32(v.Value)
-	case CmdPing:
-		return e.uvarint(uint64(cmdPing))
-	case CmdReboot:
-		return e.uvarint(uint64(cmdReboot))
 	default:
 		return fmt.Errorf("wire: cannot encode cmd variant %T", c)
 	}

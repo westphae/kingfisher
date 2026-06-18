@@ -102,24 +102,10 @@ fn main() {
         &Frame::Cmd(CmdEnvelope {
             seq: 2,
             cmd: Cmd::SetAttr {
-                sensor: SensorId::Static,
-                key: AttrKey::Oversampling,
-                value: 16.0,
+                sensor: SensorId::Battery,
+                key: AttrKey::DesignCapacity,
+                value: 850.0,
             },
-        }),
-    );
-    dump(
-        "cmd_ping",
-        &Frame::Cmd(CmdEnvelope {
-            seq: 3,
-            cmd: Cmd::Ping,
-        }),
-    );
-    dump(
-        "cmd_reboot",
-        &Frame::Cmd(CmdEnvelope {
-            seq: 4,
-            cmd: Cmd::Reboot,
         }),
     );
 

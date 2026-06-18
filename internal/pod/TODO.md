@@ -23,8 +23,10 @@ rates from `config.json` + caps, not from an explicit attr snapshot on the wire.
 
 ## Later: configurable chip registers
 
-Wire already has `Cmd::SetAttr` with `AttrKey::Oversampling` and `IirFilter`;
-firmware `cmd.rs` does not handle them yet. End state:
+Wire has `Cmd::SetAttr`, but `AttrKey` currently carries only
+`DesignCapacity` (the speculative `Oversampling` / `IirFilter` variants were
+removed as unused — re-add them here when the firmware actually applies them).
+End state:
 
 - Pi UI / `config.json` `pod.attrs` keys beyond `*_sampling_frequency`.
 - Firmware applies via BMP581/MMC5983/MS4525 driver APIs; Ack + rollback like `SetRate`.

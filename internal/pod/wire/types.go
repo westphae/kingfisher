@@ -29,8 +29,6 @@ const (
 const (
 	cmdSetRate byte = 0
 	cmdSetAttr byte = 1
-	cmdPing    byte = 2
-	cmdReboot  byte = 3
 )
 
 // Reading discriminants (inside a SampleBatch.samples item).
@@ -213,21 +211,11 @@ type CmdSetAttr struct {
 
 func (CmdSetAttr) isCmd() {}
 
-type CmdPing struct{}
-
-func (CmdPing) isCmd() {}
-
-type CmdReboot struct{}
-
-func (CmdReboot) isCmd() {}
-
 // AttrKey enumerates per-sensor tunables. Values match the Rust enum.
 type AttrKey uint8
 
 const (
-	AttrOversampling   AttrKey = 0
-	AttrIirFilter      AttrKey = 1
-	AttrDesignCapacity AttrKey = 2
+	AttrDesignCapacity AttrKey = 0
 )
 
 // Ack acknowledges a Cmd by its outbound seq number.

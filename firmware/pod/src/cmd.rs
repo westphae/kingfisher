@@ -49,8 +49,6 @@ pub fn handle(envelope: CmdEnvelope) -> Ack {
             }
             _ => false,
         },
-        Cmd::Ping => true,
-        Cmd::Reboot => false,
     };
     Ack { for_seq: seq, ok }
 }

@@ -62,15 +62,6 @@ impl SensorDeviceName {
     pub fn new(s: &str) -> Self {
         s.parse().unwrap_or(Self([0; MAX_DEVICE_NAME]))
     }
-
-    pub fn as_str(&self) -> &str {
-        let n = self
-            .0
-            .iter()
-            .position(|&c| c == 0)
-            .unwrap_or(MAX_DEVICE_NAME);
-        core::str::from_utf8(&self.0[..n]).unwrap_or("unknown")
-    }
 }
 
 impl core::str::FromStr for SensorDeviceName {
@@ -158,14 +149,10 @@ pub enum Reading {
 pub enum Cmd {
     SetRate { sensor: SensorId, hz: u16 },
     SetAttr { sensor: SensorId, key: AttrKey, value: f32 },
-    Ping,
-    Reboot,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AttrKey {
-    Oversampling,
-    IirFilter,
     DesignCapacity,
 }
 
@@ -337,14 +324,10 @@ mod tests {
         rt(&Frame::Cmd(CmdEnvelope {
             seq: 2,
             cmd: Cmd::SetAttr {
-                sensor: SensorId::Static,
-                key: AttrKey::Oversampling,
-                value: 16.0,
+                sensor: SensorId::Battery,
+                key: AttrKey::DesignCapacity,
+                value: 850.0,
             },
-        }));
-        rt(&Frame::Cmd(CmdEnvelope {
-            seq: 3,
-            cmd: Cmd::Reboot,
         }));
     }
 
@@ -382,7 +365,10 @@ mod tests {
         let n = encode_to_slice(
             &Frame::Cmd(CmdEnvelope {
                 seq: 4,
-                cmd: Cmd::Ping,
+                cmd: Cmd::SetRate {
+                    sensor: SensorId::Mag,
+                    hz: 50,
+                },
             }),
             &mut buf,
         )
