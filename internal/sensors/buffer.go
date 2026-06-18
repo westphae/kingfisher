@@ -11,7 +11,6 @@ import (
 	"github.com/westphae/go-iio"
 	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/live"
-	"github.com/westphae/kingfisher/internal/location"
 	"github.com/westphae/kingfisher/internal/store"
 	"github.com/westphae/kingfisher/internal/units"
 )
@@ -332,47 +331,45 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		return false, false
 	}
 
+	// applyReload reacts to a config change: pause (close the buffer) when the
+	// device is disabled, otherwise (re)start capture and refresh attrs. It is
+	// shared by the paused and running states so both react identically.
+	applyReload := func() {
+		cfg = holder.Get()
+		newDev := cfg.DeviceOrDefault(r.Name(), 10)
+		if !newDev.Enabled {
+			if dev.Enabled {
+				log.Printf("sensors: %s disabled by config reload — pausing", name)
+			}
+			if iobuf != nil {
+				_ = iobuf.Close()
+				iobuf = nil
+			}
+			dev = newDev
+			return
+		}
+		if !dev.Enabled {
+			log.Printf("sensors: %s enabled by config reload — resuming buffered capture", name)
+		}
+		if !newDev.WantBuffer(len(chans)) {
+			log.Printf("sensors: %s: use_buffer off — restart kingfisher to switch to polled mode", name)
+		}
+		if !restartCapture(newDev) {
+			return
+		}
+		// restartCapture already refreshed `clock` on its successful reopen.
+		prevAttrs = logAttrDiff(r, st, reg, name, prevAttrs)
+		dev = newDev
+		colMap = buildColumnMap(filterDataChannels(chans), dev.Channels)
+	}
+
 	for {
 		if !dev.Enabled || iobuf == nil {
 			select {
 			case <-ctx.Done():
 				return
 			case <-reload:
-				cfg = holder.Get()
-				newDev := cfg.DeviceOrDefault(r.Name(), 10)
-				if !newDev.Enabled {
-					if iobuf != nil {
-						_ = iobuf.Close()
-						iobuf = nil
-					}
-					dev = newDev
-					continue
-				}
-				if !dev.Enabled {
-					log.Printf("sensors: %s enabled by config reload — resuming buffered capture", name)
-				}
-				if !newDev.WantBuffer(len(chans)) {
-					log.Printf("sensors: %s: use_buffer off — restart kingfisher to switch to polled mode", name)
-				}
-				if !restartCapture(newDev) {
-					continue
-				}
-				if iobuf != nil {
-					clock = iobuf.TimestampClock()
-				}
-				curr := SnapshotAttrs(r)
-				diff := DiffAttrs(prevAttrs, curr)
-				if len(diff) > 0 && st != nil {
-					if err := st.LogAttrs(r.Name(), location.Hub, diff); err != nil {
-						log.Printf("sensors: %s log attr diff: %v", name, err)
-					}
-				}
-				if reg != nil {
-					reg.Update(r.Name(), curr)
-				}
-				prevAttrs = curr
-				dev = newDev
-				colMap = buildColumnMap(filterDataChannels(chans), dev.Channels)
+				applyReload()
 			}
 			continue
 		}
@@ -380,37 +377,10 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		case <-ctx.Done():
 			return
 		case <-reload:
-			cfg = holder.Get()
-			newDev := cfg.DeviceOrDefault(r.Name(), 10)
-			if !newDev.Enabled {
-				log.Printf("sensors: %s disabled by config reload — pausing", name)
-				if iobuf != nil {
-					_ = iobuf.Close()
-					iobuf = nil
-				}
-				dev = newDev
+			applyReload()
+			if iobuf == nil {
 				continue
 			}
-			if !newDev.WantBuffer(len(chans)) {
-				log.Printf("sensors: %s: use_buffer off — restart kingfisher to switch to polled mode", name)
-			}
-			if !restartCapture(newDev) {
-				continue
-			}
-			clock = iobuf.TimestampClock()
-			curr := SnapshotAttrs(r)
-			diff := DiffAttrs(prevAttrs, curr)
-			if len(diff) > 0 && st != nil {
-				if err := st.LogAttrs(r.Name(), location.Hub, diff); err != nil {
-					log.Printf("sensors: %s log attr diff: %v", name, err)
-				}
-			}
-			if reg != nil {
-				reg.Update(r.Name(), curr)
-			}
-			prevAttrs = curr
-			dev = newDev
-			colMap = buildColumnMap(filterDataChannels(chans), dev.Channels)
 		default:
 		}
 

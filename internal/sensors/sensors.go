@@ -274,6 +274,23 @@ func JoinIIOAttr(channel, attr string) string {
 	return "in_" + channel + "_" + attr
 }
 
+// logAttrDiff snapshots r's current attrs, records any change versus prev to
+// the store, and refreshes the registry. It returns the fresh snapshot to
+// become the caller's new prev. Shared by the polled and buffered reload paths.
+func logAttrDiff(r Reader, st *store.Store, reg *Registry, name string, prev []store.AttrRecord) []store.AttrRecord {
+	curr := SnapshotAttrs(r)
+	diff := DiffAttrs(prev, curr)
+	if len(diff) > 0 && st != nil {
+		if err := st.LogAttrs(r.Name(), location.Hub, diff); err != nil {
+			log.Printf("sensors: %s log attr diff: %v", name, err)
+		}
+	}
+	if reg != nil {
+		reg.Update(r.Name(), curr)
+	}
+	return curr
+}
+
 func runOne(ctx context.Context, r Reader, name string, holder *config.Holder, hub *live.Hub, buf *store.Buffer, st *store.Store, reg *Registry) {
 	reload := holder.Subscribe()
 	cfg := holder.Get()
@@ -284,6 +301,9 @@ func runOne(ctx context.Context, r Reader, name string, holder *config.Holder, h
 	interval := tickInterval(dev.SampleHz)
 	t := time.NewTicker(interval)
 	defer t.Stop()
+	if !dev.Enabled {
+		t.Stop() // start idle when disabled; reload resumes via t.Reset
+	}
 	prevAttrs := SnapshotAttrs(r)
 
 	for {
@@ -295,11 +315,13 @@ func runOne(ctx context.Context, r Reader, name string, holder *config.Holder, h
 			newDev := cfg.DeviceOrDefault(r.Name(), 10)
 			if !newDev.Enabled {
 				log.Printf("sensors: %s disabled by config reload — pausing", name)
+				t.Stop() // go idle; the <-t.C guard swallows any stale tick
 				dev = newDev
 				continue
 			}
-			if !dev.Enabled && newDev.Enabled {
+			if !dev.Enabled {
 				log.Printf("sensors: %s enabled by config reload — resuming", name)
+				t.Reset(interval)
 			}
 			if newDev.SampleHz != dev.SampleHz && newDev.SampleHz > 0 {
 				interval = tickInterval(newDev.SampleHz)
@@ -309,17 +331,7 @@ func runOne(ctx context.Context, r Reader, name string, holder *config.Holder, h
 			if err := applyConfiguredAttrs(r, newDev); err != nil {
 				log.Printf("sensors: %s reapply attrs: %v", name, err)
 			}
-			curr := SnapshotAttrs(r)
-			diff := DiffAttrs(prevAttrs, curr)
-			if len(diff) > 0 && st != nil {
-				if err := st.LogAttrs(r.Name(), location.Hub, diff); err != nil {
-					log.Printf("sensors: %s log attr diff: %v", name, err)
-				}
-			}
-			if reg != nil {
-				reg.Update(r.Name(), curr)
-			}
-			prevAttrs = curr
+			prevAttrs = logAttrDiff(r, st, reg, name, prevAttrs)
 			dev = newDev
 			colMap = buildColumnMap(channels, dev.Channels)
 		case <-t.C:
