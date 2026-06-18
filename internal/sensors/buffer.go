@@ -138,8 +138,7 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		return
 	}
 
-	cfg := holder.Get()
-	dev := cfg.DeviceOrDefault(r.Name(), 10)
+	dev := holder.Get().DeviceOrDefault(r.Name(), 10)
 	if !dev.WantBuffer(len(chans)) {
 		runOne(ctx, r, name, holder, hub, buf, st, reg)
 		return
@@ -324,7 +323,7 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 	// device is disabled, otherwise (re)start capture and refresh attrs. It is
 	// shared by the paused and running states so both react identically.
 	applyReload := func() {
-		cfg = holder.Get()
+		cfg := holder.Get()
 		newDev := cfg.DeviceOrDefault(r.Name(), 10)
 		if !newDev.Enabled {
 			if dev.Enabled {
@@ -456,7 +455,7 @@ func filterDataChannels(chans []string) []string {
 // cooldownAndRetryBuffered handles the post-exhaustion recovery loop. We
 // close the current buffer, run polled mode for a bounded burst, then try
 // to reopen the buffer; on success the caller resumes buffered capture,
-// on failure the cooldown doubles up to maxFallbackCooldown. Returns true
+// on failure the cooldown doubles up to maxCooldown. Returns true
 // when buffered capture is back, false on ctx cancellation.
 func cooldownAndRetryBuffered(
 	ctx context.Context,
