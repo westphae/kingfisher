@@ -521,6 +521,9 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
                 match bq27441.read_when_due(bus) {
                     Ok(Some(s)) => {
                         store_latest_battery_v(s.voltage_v);
+                        // Feed the live DesignCapacity (0x3C) readback to the
+                        // config tracker; it confirms/clears any pending write.
+                        crate::battery_cfg::note_chip(s.design_capacity_mah);
                         let _ = power::note_battery_sample(
                             cap_us,
                             s.voltage_v,
@@ -558,7 +561,7 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
                 match bq27441.program_design_capacity(bus, mah) {
                     Ok(()) => {
                         println!("pod: bq27441 design capacity programmed {mah} mAh");
-                        crate::battery_cfg::note_program_ok();
+                        crate::battery_cfg::note_program_ok(mah);
                     }
                     Err(()) => {
                         crate::battery_cfg::note_program_fail(tick_us);

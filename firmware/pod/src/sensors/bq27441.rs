@@ -90,31 +90,20 @@ impl Bq27441 {
         let flags = read_word(bus, self.addr, CMD_FLAGS)?;
         let fcc = read_word(bus, self.addr, CMD_FULL_CAPACITY)?;
         let design_reg = read_design_capacity(bus, self.addr)?;
-        let design = crate::battery_cfg::design_mah();
         let itpor = flags & FLAG_ITPOR != 0;
-        if itpor {
+        // The gauge's data memory (0x3C) is the source of truth: report it and
+        // trust it. Only seed the build-time default when the gauge is blank.
+        crate::battery_cfg::note_chip(design_reg);
+        if design_reg == 0 {
+            let seed = crate::battery_cfg::baked_default();
             println!(
-                "pod: bq27441 configuring design capacity {} mAh (ITPOR design_reg={design_reg} fcc={fcc})",
-                design
+                "pod: bq27441 design_reg=0 (itpor={itpor} fcc={fcc}); seeding {seed} mAh"
             );
-            if set_design_capacity(bus, self.addr, design).is_ok() {
-                crate::battery_cfg::note_program_ok();
-            } else {
-                println!("pod: bq27441 ITPOR design capacity program failed (continuing)");
-                let _ = crate::battery_cfg::request_design_mah(design);
-            }
+            let _ = crate::battery_cfg::request_design_mah(seed);
         } else {
-            crate::battery_cfg::queue_design_if_mismatch(design_reg);
-            if design_reg == 0 {
-                println!(
-                    "pod: bq27441 design_reg=0; queued design {} mAh for poll thread",
-                    design
-                );
-            } else if design_reg != design {
-                println!(
-                    "pod: bq27441 design_reg={design_reg} mAh != target {design} mAh; queued reprogram"
-                );
-            }
+            println!(
+                "pod: bq27441 design capacity {design_reg} mAh (itpor={itpor} fcc={fcc}); trusting gauge NVM"
+            );
         }
         self.last_read_at = None;
         println!("pod: bq27441 init ok");
