@@ -107,8 +107,6 @@ type Client struct {
 	telemetryBatterySoc     atomic.Uint32
 	telemetryBatteryLearned atomic.Uint32
 
-	lastPushedBatteryMah uint16
-
 	mu sync.Mutex
 }
 
@@ -268,7 +266,6 @@ func (c *Client) dispatch(frame wire.Frame, peer string) {
 		c.reader.applyHello(f)
 		c.syncRegistryAliases()
 		c.applySavedSettings(true)
-		c.pushConfiguredBatteryCapacity()
 		c.refreshRegistryViews()
 		c.logPodSensorAttrs()
 	case wire.Status:
@@ -374,10 +371,6 @@ func (c *Client) onBatch(b wire.SampleBatch) {
 				}
 				designMah = raw.DesignCapacityMah
 			}
-			if raw.CapacityFullMah > 0 && designMah > 0 && !gaugeFullMatchesDesign(raw.CapacityFullMah, designMah) {
-				c.lastPushedBatteryMah = 0
-				c.pushConfiguredBatteryCapacity()
-			}
 			learned = BatteryGaugeLearned(raw, designMah)
 			br, _ := NormalizeBatteryReading(raw, designMah)
 			dev, values, ok = c.reader.sampleBatteryValues(br, learned)
@@ -439,10 +432,7 @@ func (c *Client) runConfigReload(ctx context.Context) {
 			return
 		case <-reload:
 			c.reader.SetDesignCapacityFromConfig(c.cfg.Get().PodBatteryCapacityMah())
-			c.reader.ClearOutboundDesignCapacity()
-			c.lastPushedBatteryMah = 0
 			c.applySavedSettings(true)
-			c.pushConfiguredBatteryCapacity()
 			c.refreshRegistryViews()
 			c.logPodSensorAttrDiff()
 		}
@@ -469,24 +459,6 @@ func (c *Client) enqueueOutbound(o outboundCmd) {
 	case c.cmdOut <- o:
 	default:
 		log.Printf("pod: outbound queue full; dropped %T", o.Cmd)
-	}
-}
-
-func (c *Client) pushConfiguredBatteryCapacity() {
-	if c.cfg == nil {
-		return
-	}
-	mah := c.cfg.Get().PodBatteryCapacityMah()
-	if mah == 0 {
-		return
-	}
-	if mah == c.lastPushedBatteryMah {
-		return
-	}
-	o := c.reader.DesignCapacityOutbound(mah)
-	if o != nil {
-		c.enqueueOutbound(*o)
-		c.lastPushedBatteryMah = mah
 	}
 }
 

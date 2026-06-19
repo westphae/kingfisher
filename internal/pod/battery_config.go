@@ -31,6 +31,4 @@ func (c *Client) revertPodBatteryCapacityConfig(mah uint16) {
 		return
 	}
 	c.reader.SetDesignCapacityFromConfig(mah)
-	c.reader.ClearOutboundDesignCapacity()
-	c.lastPushedBatteryMah = 0
 }

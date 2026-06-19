@@ -182,7 +182,6 @@ type reader struct {
 	pendingDesignMah   uint16 // user value awaiting chip program confirm
 	pendingDesignAt    time.Time
 	prevDesignMah      uint16 // value before pending user edit
-	outboundDesignMah  uint16 // last mAh sent to pod via SetAttr (0 = never)
 	out                chan<- outboundCmd
 }
 
@@ -571,21 +570,11 @@ func (r *reader) setDesignCapacity(ch, value string) error {
 		},
 		HasDesign: true,
 	}:
-		r.mu.Lock()
-		r.outboundDesignMah = mah
-		r.mu.Unlock()
 	default:
 		r.revertPendingDesign()
 		return fmt.Errorf("pod: outbound queue full; dropped SetAttr design capacity")
 	}
 	return nil
-}
-
-// ClearOutboundDesignCapacity allows pushConfiguredBatteryCapacity to resend SetAttr.
-func (r *reader) ClearOutboundDesignCapacity() {
-	r.mu.Lock()
-	r.outboundDesignMah = 0
-	r.mu.Unlock()
 }
 
 // SetDesignCapacityFromConfig updates the cached design capacity shown in the UI.
@@ -598,29 +587,6 @@ func (r *reader) SetDesignCapacityFromConfig(mah uint16) {
 	r.mu.Unlock()
 }
 
-// DesignCapacityOutbound returns a SetAttr cmd for the configured capacity, or nil if
-// that mAh was already sent on the wire this session.
-func (r *reader) DesignCapacityOutbound(mah uint16) *outboundCmd {
-	if mah == 0 {
-		mah = config.DefaultPodBatteryCapacityMah
-	}
-	r.mu.Lock()
-	if r.outboundDesignMah == mah {
-		r.mu.Unlock()
-		return nil
-	}
-	r.designCapacityMah = mah
-	r.outboundDesignMah = mah
-	r.mu.Unlock()
-	o := outboundCmd{
-		Cmd: wire.CmdSetAttr{
-			Sensor: wire.SensorBattery,
-			Key:    wire.AttrDesignCapacity,
-			Value:  float32(mah),
-		},
-	}
-	return &o
-}
 
 // ApplyDeviceConfig loads pod.attrs from config into the rate
 // cache and returns SetRate commands to push to the pod (when the link is up).
