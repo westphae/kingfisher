@@ -1096,9 +1096,47 @@ function compactPodChip() {
   return `<button type="button" class="statusChip statusChip-${linkCls}" data-open-status="pod">${escapeHtml(parts.join(' '))}</button>`;
 }
 
+// compactSystemChip surfaces Pi host health — chiefly undervoltage, the
+// root cause of the 2026-07-11 in-flight AP loss. Live throttle/undervolt
+// flags show as a red warning; sticky "since boot" flags show as a yellow
+// warning even after recovery; otherwise a compact supply/temp headline.
+// Clicking opens the `system` device tab with the full value list.
+function compactSystemChip() {
+  if (!state.serverConnected) return '';
+  const sm = state.devices.get('system');
+  const v = sm && sm.values;
+  if (!v) return '';
+
+  const nowFlags = [
+    ['undervolt_now', 'Undervoltage'],
+    ['throttled_now', 'Throttled'],
+    ['soft_temp_now', 'Overtemp'],
+  ];
+  const active = nowFlags.filter(([k]) => v[k] >= 1).map(([, l]) => l);
+  if (active.length) {
+    return `<button type="button" class="statusChip statusChip-off" data-goto-sensor="system">${escapeHtml('⚠ ' + active.join(' + '))}</button>`;
+  }
+
+  const parts = [];
+  if (Number.isFinite(v.supply_v)) parts.push(v.supply_v.toFixed(1) + 'V');
+  if (Number.isFinite(v.cpu_temp_c)) parts.push(Math.round(v.cpu_temp_c) + '°C');
+  let text = 'Sys ' + (parts.join(' ') || '?');
+
+  const sinceFlags = [
+    ['undervolt_since_boot', 'UV'],
+    ['throttled_since_boot', 'throttle'],
+    ['soft_temp_since_boot', 'overtemp'],
+  ];
+  const since = sinceFlags.filter(([k]) => v[k] >= 1).map(([, l]) => l);
+  const cls = since.length ? 'warn' : 'ok';
+  if (since.length) text += ' · ⚠ ' + since.join(',') + ' since boot';
+
+  return `<button type="button" class="statusChip statusChip-${cls}" data-goto-sensor="system">${escapeHtml(text)}</button>`;
+}
+
 function renderStatusChips() {
   if (!statusChipsEl) return;
-  const chips = [compactClockChip(), compactPodChip()].filter(Boolean);
+  const chips = [compactSystemChip(), compactClockChip(), compactPodChip()].filter(Boolean);
   statusChipsEl.innerHTML = chips.join('') || '<span class="dim">Status loading…</span>';
 }
 
@@ -1492,6 +1530,10 @@ function wireUiTaps() {
   );
 
   KFTap.bindPress(statusChipsEl, '[data-open-status]', () => openStatusDrawer());
+  KFTap.bindPress(statusChipsEl, '[data-goto-sensor]', (ev, el) => {
+    const dev = el.dataset.gotoSensor;
+    if (dev) setRoute(`#/sensor/${encodeURIComponent(dev)}`);
+  });
 
   KFTap.bindTap(detailBackEl, () => setRoute('#/'));
 
