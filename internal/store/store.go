@@ -79,6 +79,12 @@ func (s *Store) VolumeFreeBytes() (int64, error) {
 	return volumeFreeBytes(s.path)
 }
 
+// VolumeStats reports available and total bytes on the filesystem that
+// contains the flight DB.
+func (s *Store) VolumeStats() (free, total int64, err error) {
+	return volumeStats(s.path)
+}
+
 func (s *Store) Close() error {
 	if s.db == nil {
 		return nil
