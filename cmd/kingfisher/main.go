@@ -26,6 +26,7 @@ import (
 	"github.com/westphae/kingfisher/internal/pod"
 	"github.com/westphae/kingfisher/internal/sensors"
 	"github.com/westphae/kingfisher/internal/store"
+	"github.com/westphae/kingfisher/internal/system"
 	"github.com/westphae/kingfisher/internal/web"
 )
 
@@ -219,6 +220,7 @@ func main() {
 		safeGo(&wg, "derive_ahrs", false, st, func() { derive.AHRSFromHub(ctx, holder, cfg.AHRS.RateHz, hub, gpsClient, buf) })
 	}
 	safeGo(&wg, "sensors", false, st, func() { sensors.Run(ctx, holder, readers, hub, buf, st, registry) })
+	safeGo(&wg, "system", false, st, func() { system.Run(ctx, holder, hub, buf, st, stop) })
 	safeGo(&wg, "web", false, st, func() {
 		if err := srv.Run(cfg.HTTPAddr, stop); err != nil {
 			log.Printf("web: %v", err)

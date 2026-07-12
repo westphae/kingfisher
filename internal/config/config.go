@@ -590,6 +590,35 @@ type Config struct {
 	Terminal   Terminal          `json:"terminal,omitempty"`
 	Display    Display           `json:"display,omitempty"`
 	GDL90      GDL90             `json:"gdl90,omitempty"`
+	System     System            `json:"system,omitempty"`
+}
+
+// System configures the Pi host-telemetry virtual device (`system`): supply
+// voltage, throttle/undervoltage flags, CPU temp/load/freq, memory, disk,
+// and thermals. It is published to the hub and flight DB like any sensor.
+// Enabled defaults to true; RateHz defaults to 1 (host health changes slowly
+// and the sticky throttle bits capture sub-second transients regardless).
+type System struct {
+	Enabled *bool   `json:"enabled,omitempty"`
+	RateHz  float64 `json:"rate_hz,omitempty"`
+}
+
+const defaultSystemRateHz = 1.0
+
+// EnabledEffective reports whether the system telemetry device runs (default true).
+func (s System) EnabledEffective() bool {
+	if s.Enabled == nil {
+		return true
+	}
+	return *s.Enabled
+}
+
+// RateHzEffective returns the poll rate, defaulting to defaultSystemRateHz.
+func (s System) RateHzEffective() float64 {
+	if s.RateHz <= 0 {
+		return defaultSystemRateHz
+	}
+	return s.RateHz
 }
 
 // Terminal configures the optional browser shell (/terminal).
