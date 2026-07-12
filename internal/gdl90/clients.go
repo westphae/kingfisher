@@ -20,6 +20,7 @@ type ClientPool struct {
 	leasePath string
 	staticIPs []string
 	conns     map[string]*net.UDPConn
+	writeErr  map[string]bool // per-IP: currently in a write-error state
 }
 
 func NewClientPool(port int, leasePath string, staticIPs []string) *ClientPool {
@@ -31,6 +32,7 @@ func NewClientPool(port int, leasePath string, staticIPs []string) *ClientPool {
 		leasePath: leasePath,
 		staticIPs: append([]string(nil), staticIPs...),
 		conns:     make(map[string]*net.UDPConn),
+		writeErr:  make(map[string]bool),
 	}
 }
 
@@ -73,6 +75,7 @@ func (p *ClientPool) Refresh() {
 		if !valid[ip] {
 			_ = conn.Close()
 			delete(p.conns, ip)
+			delete(p.writeErr, ip)
 			log.Printf("gdl90: client disconnected %s", ip)
 		}
 	}
@@ -147,8 +150,18 @@ func (p *ClientPool) Send(msg []byte) int {
 	n := 0
 	for ip, conn := range p.conns {
 		if _, err := conn.Write(msg); err != nil {
-			log.Printf("gdl90: write %s: %v", ip, err)
+			// A dropped EFB surfaces an error on every packet (ICMP
+			// port-unreachable on the connected UDP socket). Log once on the
+			// transition into the error state, not per packet (~tens of Hz).
+			if !p.writeErr[ip] {
+				p.writeErr[ip] = true
+				log.Printf("gdl90: write %s: %v", ip, err)
+			}
 			continue
+		}
+		if p.writeErr[ip] {
+			delete(p.writeErr, ip)
+			log.Printf("gdl90: write %s recovered", ip)
 		}
 		n++
 	}
