@@ -52,6 +52,18 @@ const KFDisplay = (function () {
     'pressure_pa', 'pressure_source',
   ];
 
+  const SYSTEM_SORT = [
+    'supply_v', 'core_v', 'rtc_batt_v',
+    'undervolt_now', 'throttled_now', 'freq_capped_now', 'soft_temp_now',
+    'undervolt_since_boot', 'throttled_since_boot', 'freq_capped_since_boot', 'soft_temp_since_boot',
+    'throttled_bits',
+    'cpu_temp_c', 'nvme_temp_c', 'fan_rpm',
+    'cpu_pct', 'cpu_freq_mhz', 'load_1m', 'load_5m', 'load_15m',
+    'mem_used_pct', 'mem_avail_mb', 'swap_used_mb', 'swap_used_pct',
+    'disk_used_pct', 'disk_free_gb',
+    'uptime_s', 'proc_rss_mb', 'goroutines',
+  ];
+
   const POD_DEVICE_SORT = {
     bmp581: ['static_pressure_pa', 'static_temp_c'],
     bmp280: ['pressure_pa', 'temp_c'],
@@ -79,6 +91,10 @@ const KFDisplay = (function () {
     'filter_mode',
     'battery_gauge_learned',
     'pressure_source',
+    // system status/latch channels: discrete, must not be smoothed to fractions
+    'undervolt_now', 'throttled_now', 'freq_capped_now', 'soft_temp_now',
+    'undervolt_since_boot', 'throttled_since_boot', 'freq_capped_since_boot', 'soft_temp_since_boot',
+    'throttled_bits', 'goroutines', 'uptime_s',
   ]);
 
   const SMOOTH_GROUP_LABELS = {
@@ -601,7 +617,56 @@ const KFDisplay = (function () {
     // IMU device tabs use pattern rules; explicit entries for temp only
     icm20948: { temp_c: CHANNEL_SPECS.temp_c, temp: CHANNEL_SPECS.temp },
     icm45686: { temp_c: CHANNEL_SPECS.temp_c, temp: CHANNEL_SPECS.temp },
+    system: {
+      supply_v: { label: 'Supply (5V rail)', fmt(v) { return `${fmtNum(v, 2)} V`; } },
+      core_v: { label: 'Core voltage', fmt(v) { return `${fmtNum(v, 3)} V`; } },
+      rtc_batt_v: { label: 'RTC battery', fmt(v) { return `${fmtNum(v, 2)} V`; } },
+      undervolt_now: { label: 'Undervoltage (now)', fmt: fmtFlagNow },
+      throttled_now: { label: 'Throttled (now)', fmt: fmtFlagNow },
+      freq_capped_now: { label: 'Freq capped (now)', fmt: fmtFlagNow },
+      soft_temp_now: { label: 'Soft temp limit (now)', fmt: fmtFlagNow },
+      undervolt_since_boot: { label: 'Undervoltage (since boot)', fmt: fmtFlagSticky },
+      throttled_since_boot: { label: 'Throttled (since boot)', fmt: fmtFlagSticky },
+      freq_capped_since_boot: { label: 'Freq capped (since boot)', fmt: fmtFlagSticky },
+      soft_temp_since_boot: { label: 'Soft temp limit (since boot)', fmt: fmtFlagSticky },
+      throttled_bits: { label: 'Throttle bits', fmt(v) { return '0x' + Math.round(Number(v)).toString(16); } },
+      cpu_temp_c: { label: 'CPU temperature', fmt(v) { return `${fmtNum(v, 1)} °C`; } },
+      nvme_temp_c: { label: 'NVMe temperature', fmt(v) { return `${fmtNum(v, 1)} °C`; } },
+      fan_rpm: { label: 'Fan speed', fmt(v) { return `${fmtNum(v, 0)} rpm`; } },
+      cpu_pct: { label: 'CPU utilisation', fmt(v) { return `${fmtNum(v, 0)}%`; } },
+      cpu_freq_mhz: { label: 'CPU frequency', fmt(v) { return `${fmtNum(v / 1000, 2)} GHz`; } },
+      load_1m: { label: 'Load (1 min)', fmt(v) { return fmtNum(v, 2); } },
+      load_5m: { label: 'Load (5 min)', fmt(v) { return fmtNum(v, 2); } },
+      load_15m: { label: 'Load (15 min)', fmt(v) { return fmtNum(v, 2); } },
+      mem_used_pct: { label: 'Memory used', fmt(v) { return `${fmtNum(v, 0)}%`; } },
+      mem_avail_mb: { label: 'Memory available', fmt: fmtMB },
+      swap_used_mb: { label: 'Swap used', fmt: fmtMB },
+      swap_used_pct: { label: 'Swap used', fmt(v) { return `${fmtNum(v, 0)}%`; } },
+      disk_used_pct: { label: 'Disk used', fmt(v) { return `${fmtNum(v, 1)}%`; } },
+      disk_free_gb: { label: 'Disk free', fmt(v) { return `${fmtNum(v, 1)} GB`; } },
+      uptime_s: { label: 'Uptime', fmt(v) { return fmtUptime(v); } },
+      proc_rss_mb: { label: 'App memory (RSS)', fmt: fmtMB },
+      goroutines: { label: 'Goroutines', fmt(v) { return `${Math.round(Number(v))}`; } },
+    },
   };
+
+  function fmtFlagNow(v) { return Number(v) >= 1 ? '⚠ active' : 'OK'; }
+  function fmtFlagSticky(v) { return Number(v) >= 1 ? '⚠ occurred' : 'clear'; }
+  function fmtMB(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return String(v);
+    return n >= 1024 ? `${fmtNum(n / 1024, 2)} GB` : `${fmtNum(n, 0)} MB`;
+  }
+  function fmtUptime(sec) {
+    sec = Number(sec);
+    if (!Number.isFinite(sec)) return String(sec);
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    if (d > 0) return `${d}d ${h}h`;
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
+  }
 
   function imuPatternSpec(channel) {
     let m = channel.match(/^accel_([xyz])$/);
@@ -767,6 +832,7 @@ const KFDisplay = (function () {
     if (device === 'ahrs') return sortWithOrder(keys, AHRS_SORT);
     if (device === 'compass') return sortWithOrder(keys, COMPASS_SORT);
     if (device === 'press_alt') return sortWithOrder(keys, PRESS_ALT_SORT);
+    if (device === 'system') return sortWithOrder(keys, SYSTEM_SORT);
     const podOrder = POD_DEVICE_SORT[device];
     if (podOrder) return sortWithOrder(keys, podOrder);
     if (isIMUDevice(device) || hasIMUChannels(keys)) {
@@ -877,6 +943,22 @@ const KFDisplay = (function () {
         cell(keys, values, 'battery_voltage_v', 'V'),
         cell(keys, values, 'battery_soc_pct', 'SOC'),
         cell(keys, values, 'battery_time_remain_s', 'Rem'),
+      ]));
+    } else if (device === 'system') {
+      subRows.push(row('power', [
+        cell(keys, values, 'supply_v', 'Supply'),
+        cell(keys, values, 'cpu_temp_c', 'CPU°'),
+        cell(keys, values, 'undervolt_now', 'Power'),
+      ]));
+      subRows.push(row('load', [
+        cell(keys, values, 'cpu_pct', 'CPU'),
+        cell(keys, values, 'mem_used_pct', 'Mem'),
+        cell(keys, values, 'disk_used_pct', 'Disk'),
+      ]));
+      subRows.push(row('therm', [
+        cell(keys, values, 'fan_rpm', 'Fan'),
+        cell(keys, values, 'nvme_temp_c', 'NVMe°'),
+        cell(keys, values, 'uptime_s', 'Up'),
       ]));
     } else if (device.endsWith('-accel')) {
       subRows.push(row('accel', [
@@ -1023,10 +1105,36 @@ const KFDisplay = (function () {
     return groups;
   }
 
+  function formatSystemOverviewCell(channel, value) {
+    const n = Number(value);
+    switch (channel) {
+      case 'supply_v': case 'core_v': case 'rtc_batt_v': return fmtOverviewNum(n, 2) + ' V';
+      case 'cpu_temp_c': case 'nvme_temp_c': return fmtOverviewNum(n, 0) + '°C';
+      case 'fan_rpm': return fmtOverviewNum(n, 0);
+      case 'cpu_freq_mhz': return fmtOverviewNum(n / 1000, 1) + ' GHz';
+      case 'cpu_pct': case 'mem_used_pct': case 'disk_used_pct': case 'swap_used_pct':
+        return fmtOverviewNum(n, 0) + '%';
+      case 'disk_free_gb': return fmtOverviewNum(n, 0) + ' GB';
+      case 'mem_avail_mb': case 'swap_used_mb': case 'proc_rss_mb': return fmtOverviewNum(n, 0) + ' MB';
+      case 'uptime_s': return fmtUptime(n);
+      case 'goroutines': return String(Math.round(n));
+      case 'throttled_bits': return '0x' + Math.round(n).toString(16);
+      case 'undervolt_now': case 'throttled_now': case 'freq_capped_now': case 'soft_temp_now':
+      case 'undervolt_since_boot': case 'throttled_since_boot':
+      case 'freq_capped_since_boot': case 'soft_temp_since_boot':
+        return n >= 1 ? '⚠' : '✓';
+    }
+    return null;
+  }
+
   function formatOverviewCell(device, channel, value, allValues) {
     if (value == null || (typeof value === 'number' && !Number.isFinite(value))) {
       if (device === 'bq27441' && bq27441UnlearnedField(channel, allValues)) return '—';
       return '—';
+    }
+    if (device === 'system') {
+      const s = formatSystemOverviewCell(channel, value);
+      if (s !== null) return s;
     }
     if (device === 'compass' && channel === 'align_active') {
       return Number(value) ? '✓' : '—';

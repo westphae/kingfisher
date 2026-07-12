@@ -1,7 +1,7 @@
 // Overview grid: multi-row device blocks, hub → pod → calc ordering.
 const KFOverview = (function () {
-  const GROUP_ORDER = { hub: 0, pod: 1, calc: 2 };
-  const SECTION_LABELS = { hub: 'Hub', pod: 'Pod', calc: 'Calc' };
+  const GROUP_ORDER = { hub: 0, pod: 1, system: 2, calc: 3 };
+  const SECTION_LABELS = { hub: 'Hub', pod: 'Pod', system: 'System', calc: 'Calc' };
 
   function compareOverviewDevices(a, b) {
     const ga = GROUP_ORDER[deviceTabGroup(a)] ?? 9;

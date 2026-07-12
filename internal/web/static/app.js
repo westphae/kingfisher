@@ -65,6 +65,7 @@ function isPodTelemetry(name) {
 
 function inferDeviceLocation(name) {
   if (CALC_DEVICES.has(name)) return 'calc';
+  if (name === 'system') return 'system';
   if (name === 'gps') return 'hub';
   if (POD_TELEMETRY_DEVICES.has(name)) return 'pod';
   if (state.iioDevices.has(name)) return 'hub';
