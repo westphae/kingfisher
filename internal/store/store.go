@@ -12,7 +12,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -23,7 +25,16 @@ import (
 type Store struct {
 	db   *sql.DB
 	path string
+
+	mu        sync.Mutex
+	fallback  bool      // named unsynced_NNNN_* because the clock was insane at Open
+	trueStart time.Time // real session start, learned once the clock syncs (zero until then)
 }
+
+// saneClockYear is the earliest wall-clock year considered plausible at Open.
+// Below it the RTC is assumed dead/unset (e.g. 1970) and the DB gets a
+// clock-independent fallback name instead of a garbage timestamp.
+const saneClockYear = 2025
 
 // Open creates the flight DB at <dir>/<rfc3339>_<tail>.db and initialises the
 // metadata + _session tables. The filename timestamp is taken from the host
@@ -33,12 +44,21 @@ func Open(dir, tail string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	stamp := time.Now().UTC().Format("20060102T150405Z")
 	safeTail := sanitize(tail)
 	if safeTail == "" {
 		safeTail = "unknown"
 	}
-	path := filepath.Join(dir, fmt.Sprintf("%s_%s.db", stamp, safeTail))
+	var path string
+	fallback := time.Now().Year() < saneClockYear
+	if fallback {
+		// RTC dead/unset: a timestamp name would be garbage (and could collide
+		// across boots). Use a scan-and-increment sequence instead; Close renames
+		// to the corrected timestamp once the true start time is learned.
+		path = nextUnsyncedPath(dir, safeTail)
+	} else {
+		stamp := time.Now().UTC().Format("20060102T150405Z")
+		path = filepath.Join(dir, fmt.Sprintf("%s_%s.db", stamp, safeTail))
+	}
 	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
@@ -47,7 +67,7 @@ func Open(dir, tail string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	s := &Store{db: db, path: path}
+	s := &Store{db: db, path: path, fallback: fallback}
 	if err := s.bootstrap(); err != nil {
 		db.Close()
 		return nil, err
@@ -56,6 +76,37 @@ func Open(dir, tail string) (*Store, error) {
 }
 
 func (s *Store) Path() string { return s.path }
+
+// FallbackNamed reports whether the DB was opened with a clock-independent
+// unsynced_NNNN name because the wall clock was implausible at Open.
+func (s *Store) FallbackNamed() bool { return s.fallback }
+
+// SetTrueStart records the real session start time, learned after the clock
+// synced (true start = now − monotonic elapsed since open). Close uses it to
+// rename a fallback-named DB to its corrected timestamp name.
+func (s *Store) SetTrueStart(t time.Time) {
+	s.mu.Lock()
+	s.trueStart = t
+	s.mu.Unlock()
+}
+
+// nextUnsyncedPath returns dir/unsynced_NNNN_<tail>.db with NNNN one greater
+// than the highest existing sequence in dir — unique across boots without
+// consulting the (untrusted) wall clock.
+func nextUnsyncedPath(dir, tail string) string {
+	max := 0
+	if matches, err := filepath.Glob(filepath.Join(dir, "unsynced_*_*.db")); err == nil {
+		re := regexp.MustCompile(`^unsynced_(\d+)_`)
+		for _, m := range matches {
+			if sm := re.FindStringSubmatch(filepath.Base(m)); sm != nil {
+				if n, err := strconv.Atoi(sm[1]); err == nil && n > max {
+					max = n
+				}
+			}
+		}
+	}
+	return filepath.Join(dir, fmt.Sprintf("unsynced_%04d_%s.db", max+1, tail))
+}
 
 func (s *Store) DB() *sql.DB { return s.db }
 
@@ -101,8 +152,42 @@ func (s *Store) Close() error {
 		// -wal is non-empty (checkpoint failed) it is kept; SweepSidecars will
 		// finalize it on a later startup.
 		removeEmptySidecars(s.path)
+		s.renameFallback()
 	}
 	return err
+}
+
+// renameFallback renames a fallback-named DB to its corrected timestamp name
+// once the handle is closed and the true start time is known. Renaming while
+// open would be unsafe: the -wal/-shm sidecar paths are derived from the main
+// path at open time. Crashed sessions keep the unsynced_ name for manual
+// handling.
+func (s *Store) renameFallback() {
+	s.mu.Lock()
+	trueStart := s.trueStart
+	s.mu.Unlock()
+	if !s.fallback || trueStart.IsZero() {
+		return
+	}
+	base := filepath.Base(s.path)
+	i := strings.Index(base, "_")
+	j := strings.Index(base[i+1:], "_")
+	if i < 0 || j < 0 {
+		return
+	}
+	tail := base[i+1+j+1:] // "<tail>.db"
+	stamp := trueStart.UTC().Format("20060102T150405Z")
+	dest := filepath.Join(filepath.Dir(s.path), fmt.Sprintf("%s_%s", stamp, tail))
+	if _, err := os.Stat(dest); err == nil {
+		log.Printf("store: fallback rename target %s already exists; keeping %s", filepath.Base(dest), base)
+		return
+	}
+	if err := os.Rename(s.path, dest); err != nil {
+		log.Printf("store: fallback rename: %v", err)
+		return
+	}
+	log.Printf("store: renamed %s -> %s (clock synced during session)", base, filepath.Base(dest))
+	s.path = dest
 }
 
 // removeEmptySidecars deletes the -wal/-shm sidecars for a flight DB, but only
@@ -150,6 +235,12 @@ CREATE TABLE IF NOT EXISTS sensor_attrs (
   value     TEXT
 );
 CREATE INDEX IF NOT EXISTS sensor_attrs_dev_attr ON sensor_attrs(device, channel, attr);
+CREATE TABLE IF NOT EXISTS clock_offsets (
+  ts_ns        INTEGER NOT NULL,
+  monotonic_ns INTEGER NOT NULL,
+  delta_ns     INTEGER NOT NULL,
+  note         TEXT    NOT NULL
+);
 CREATE TABLE IF NOT EXISTS howgozit_log (
   log_id        TEXT PRIMARY KEY,
   template_id   TEXT NOT NULL,
@@ -229,6 +320,18 @@ func (s *Store) LogAttrs(device, location string, recs []AttrRecord) error {
 	}
 	stmt.Close()
 	return tx.Commit()
+}
+
+// LogClockOffset appends one row to the clock_offsets table: a snapshot of the
+// CLOCK_REALTIME↔CLOCK_MONOTONIC mapping. One anchor row is written at startup
+// (delta 0), then a row whenever the offset shifts significantly (a chrony
+// step, or accumulated slew). The rows form a piecewise mapping that lets
+// post-flight analysis reconstruct a continuous timeline from wall-clock ts_ns
+// stamps. See docs/timestamps.md.
+func (s *Store) LogClockOffset(tsNs, monotonicNs, deltaNs int64, note string) error {
+	_, err := s.db.Exec(`INSERT INTO clock_offsets(ts_ns,monotonic_ns,delta_ns,note) VALUES(?,?,?,?)`,
+		tsNs, monotonicNs, deltaNs, note)
+	return err
 }
 
 // SetMeta inserts/updates one row in the metadata key/value table.

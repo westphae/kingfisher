@@ -215,6 +215,7 @@ func main() {
 	safeGo(&wg, "store_buffer", true, st, func() { buf.Run(stop) })
 	safeGo(&wg, "gps", false, st, func() { gpsClient.Run(stop) })
 	safeGo(&wg, "clock_auto_nudge", false, st, func() { autoNudger.Run(ctx, stop) })
+	safeGo(&wg, "clock_watcher", false, st, func() { clock.NewWatcher(st).Run(ctx, stop) })
 	if podClient != nil {
 		safeGo(&wg, "pod", false, st, func() { podClient.Run(stop) })
 	}

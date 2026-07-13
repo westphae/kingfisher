@@ -43,7 +43,12 @@ func (s StartupClockCheck) Summary() string {
 		return s.State
 	}
 	if s.HasFix {
-		return fmt.Sprintf("%s (%s, offset=%s)", s.State, s.Reason, roundMillis(s.Offset))
+		// Offset is recv wall minus fix epoch: it includes the ~0.6–0.7 s
+		// gpsd/M9N pipeline lag plus up to 1 s of fix age, so ~1 s here is
+		// normal for a perfectly disciplined clock — say so, or the startup
+		// log reads like a whole-second clock error.
+		return fmt.Sprintf("%s (%s, gps_lag+offset=%s; ~1s is normal pipeline lag, not clock error)",
+			s.State, s.Reason, roundMillis(s.Offset))
 	}
 	return fmt.Sprintf("%s (%s)", s.State, s.Reason)
 }
