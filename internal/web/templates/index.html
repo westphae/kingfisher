@@ -65,6 +65,19 @@
     </form>
   </dialog>
 
+  <dialog id="accessDlg">
+    <form method="dialog">
+      <h2>Trusted devices</h2>
+      <p class="dim">Devices on the kingfisher access point that may use the web
+        terminal and power controls. Your home network and this Pi are always
+        allowed.</p>
+      <div id="accessBody" class="accessBody">Loading…</div>
+      <div class="dlgRow">
+        <button type="button" value="cancel">Close</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="settingsDlg">
     <form method="dialog">
       <h2>Settings</h2>
@@ -86,6 +99,7 @@
       <div class="moreActions">
         <button type="button" id="moreStatusBtn">System status</button>
         <button type="button" id="moreTerminalBtn">Terminal</button>
+        <button type="button" id="moreAccessBtn">Trusted devices</button>
         <button type="button" id="moreSettingsBtn">Settings</button>
       </div>
       <div class="dlgRow">

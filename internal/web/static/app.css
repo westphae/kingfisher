@@ -261,6 +261,51 @@ body.shutting-down::after {
   cursor: default;
 }
 
+/* Trusted devices (AP allowlist) dialog */
+.accessBody { min-width: min(90vw, 22rem); margin: 0.5rem 0; }
+.accessH { font-size: var(--ov-label); margin: 0.75rem 0 0.25rem; color: var(--dim); }
+.accessRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+  border-top: 1px solid var(--border);
+}
+.accessId { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+.accessName {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.2rem 0.4rem;
+  font-size: 0.95em;
+  max-width: 12rem;
+}
+.accessSub { display: flex; gap: 0.5rem; align-items: baseline; }
+.accessIp { font-variant-numeric: tabular-nums; }
+.accessMac { font-size: 0.8em; }
+.accessAct { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
+.accessBadge {
+  font-size: 0.75em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--dim);
+}
+.accessBadge-ok { border-color: var(--good); color: var(--good); }
+.accessBadge-block { border-color: var(--warn); color: var(--warn); }
+.accessBtn {
+  min-height: 32px;
+  padding: 0.25rem 0.7rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+.accessBtn-add { border-color: var(--good); }
+
 /* Status drawer (full detail) */
 .clockStatus,
 .podStatus {

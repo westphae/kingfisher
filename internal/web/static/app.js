@@ -42,6 +42,8 @@ const statusDrawer = document.getElementById('statusDrawer');
 const statusDrawerClock = document.getElementById('statusDrawerClock');
 const statusDrawerPod = document.getElementById('statusDrawerPod');
 const settingsDlg = document.getElementById('settingsDlg');
+const accessDlg = document.getElementById('accessDlg');
+const accessBodyEl = document.getElementById('accessBody');
 
 let powerOffPending = false;
 
@@ -1473,6 +1475,114 @@ function openSettingsDialog() {
   });
 }
 
+// --- Trusted devices (AP allowlist) ---
+function openAccessDialog() {
+  if (!accessDlg) return;
+  accessBodyEl.innerHTML = '<p class="dim">Loading…</p>';
+  accessDlg.showModal();
+  refreshAccess();
+}
+
+async function refreshAccess() {
+  try {
+    const r = await fetch('/api/access');
+    if (r.status === 403) {
+      accessBodyEl.innerHTML =
+        '<p class="dim">This device isn’t trusted to manage the allowlist. ' +
+        'Use a device on your home network, this Pi, or an already-trusted EFB.</p>';
+      return;
+    }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    renderAccessBody(await r.json());
+  } catch (e) {
+    accessBodyEl.innerHTML = `<p class="dim">Couldn’t load: ${escapeHtml(String(e.message || e))}</p>`;
+  }
+}
+
+function accessRow(ip, mac, name, selfHtml, trusted) {
+  const badge = trusted
+    ? '<span class="accessBadge accessBadge-ok">trusted</span>'
+    : '<span class="accessBadge accessBadge-block">blocked</span>';
+  const btn = trusted
+    ? `<button type="button" class="accessBtn" data-access-remove="${escapeHtml(ip)}">Untrust</button>`
+    : `<button type="button" class="accessBtn accessBtn-add" data-access-add="${escapeHtml(ip)}">Trust</button>`;
+  const macHtml = mac ? `<span class="dim accessMac">${escapeHtml(mac)}</span>` : '';
+  const nameInput =
+    `<input class="accessName" type="text" maxlength="64" placeholder="name…" ` +
+    `data-access-name="${escapeHtml(ip)}" value="${escapeHtml(name || '')}" />`;
+  return (
+    `<div class="accessRow"><div class="accessId">` +
+    nameInput +
+    `<span class="accessSub"><span class="accessIp">${escapeHtml(ip)}</span>${macHtml}${selfHtml || ''}</span>` +
+    `</div><div class="accessAct">${badge}${btn}</div></div>`
+  );
+}
+
+function renderAccessBody(data) {
+  const clients = data.clients || [];
+  const trusted = new Set(data.trusted_ips || []);
+  const names = data.names || {};
+  const seen = new Set();
+  let html = '<h3 class="accessH">On the access point</h3>';
+  if (clients.length === 0) {
+    html += '<p class="dim">No devices currently on the access point.</p>';
+  } else {
+    for (const c of clients) {
+      seen.add(c.ip);
+      const self = c.self ? ' <span class="dim">· this device</span>' : '';
+      html += accessRow(c.ip, c.mac, c.name || '', self, !!c.trusted);
+    }
+  }
+  const offline = [...trusted].filter((ip) => !seen.has(ip));
+  if (offline.length) {
+    html += '<h3 class="accessH">Trusted but not connected</h3>';
+    for (const ip of offline) html += accessRow(ip, '', names[ip] || '', '', true);
+  }
+  accessBodyEl.innerHTML = html;
+}
+
+async function accessMutate(path, ip) {
+  try {
+    const r = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip }),
+    });
+    if (r.ok) {
+      renderAccessBody(await r.json());
+      return;
+    }
+  } catch {}
+  refreshAccess();
+}
+
+// accessSetName saves a label without re-rendering (the input already shows the
+// typed value); it only reloads on failure to restore the truth.
+async function accessSetName(ip, name) {
+  try {
+    const r = await fetch('/api/access/name', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip, name }),
+    });
+    if (r.ok) return;
+  } catch {}
+  refreshAccess();
+}
+
+if (accessBodyEl) {
+  accessBodyEl.addEventListener('click', (ev) => {
+    const add = ev.target.closest('[data-access-add]');
+    if (add) return accessMutate('/api/access/add', add.dataset.accessAdd);
+    const rm = ev.target.closest('[data-access-remove]');
+    if (rm) return accessMutate('/api/access/remove', rm.dataset.accessRemove);
+  });
+  accessBodyEl.addEventListener('change', (ev) => {
+    const inp = ev.target.closest('input[data-access-name]');
+    if (inp) accessSetName(inp.dataset.accessName, inp.value);
+  });
+}
+
 const BIGTEXT_KEY = 'kf.bigtext';
 function bigTextEnabled() {
   try { return localStorage.getItem(BIGTEXT_KEY) === '1'; } catch { return false; }
@@ -1589,6 +1699,11 @@ function wireUiTaps() {
   KFTap.bindTap(document.getElementById('moreTerminalBtn'), () => {
     moreSheet.close();
     location.href = '/terminal';
+  });
+
+  KFTap.bindTap(document.getElementById('moreAccessBtn'), () => {
+    moreSheet.close();
+    openAccessDialog();
   });
 
   KFTap.bindTap(document.getElementById('moreSettingsBtn'), () => {
