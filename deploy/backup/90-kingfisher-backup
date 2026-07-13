@@ -1,0 +1,20 @@
+#!/bin/sh
+# NetworkManager dispatcher: kick a flight-data backup when the home-LAN dongle
+# (wlan1) comes up. The AP (wlan0) never triggers it. The backup script re-checks
+# reachability and holds a flock, so a spurious event is harmless.
+#
+# Install (root-owned, executable):
+#   sudo install -m 755 deploy/backup/90-kingfisher-backup /etc/NetworkManager/dispatcher.d/
+
+IFACE="$1"
+ACTION="$2"
+
+[ "$IFACE" = "wlan1" ] || exit 0
+
+case "$ACTION" in
+	up|dhcp4-change)
+		systemctl start --no-block kingfisher-flight-backup.service
+		;;
+esac
+
+exit 0

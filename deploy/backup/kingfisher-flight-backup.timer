@@ -1,0 +1,16 @@
+# Hourly fallback for the flight-data backup. The primary trigger is the wlan1-up
+# NM dispatcher (deploy/backup/90-kingfisher-backup); this timer catches the case
+# where wlan1 was already up before the dispatcher was installed, or a run that
+# no-op'd earlier because the NAS was briefly unreachable. The script itself is a
+# no-op when not home, so a frequent tick is cheap.
+
+[Unit]
+Description=Hourly fallback trigger for kingfisher flight-data backup
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

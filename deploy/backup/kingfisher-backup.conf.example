@@ -1,0 +1,43 @@
+# Kingfisher flight-data backup config — install to /etc/kingfisher-backup.conf
+#
+#   sudo install -m 640 deploy/backup/kingfisher-backup.conf.example /etc/kingfisher-backup.conf
+#   sudo chown root:eric /etc/kingfisher-backup.conf
+#   sudoedit /etc/kingfisher-backup.conf          # pick TRANSPORT + fill its block
+#
+# Sourced as /bin/sh by kingfisher-flight-backup.sh. Shell syntax; no spaces
+# around '='. See deploy/backup/verify.md for the NAS-side + Pi-side setup.
+
+# Source: the flight-DB directory (kingfisher cfg.db_dir; default below).
+SRC_DIR="/home/eric/kingfisher/flights"
+
+# The NAS on the home LAN (an Asustor AS5304T / ADM). Reachable only over wlan1.
+DEST_HOST="192.168.86.40"
+
+# Only attempt a backup when this interface has a global (home-LAN) address. In
+# the aircraft wlan1 is down, so the backup silently no-ops. Empty = always try.
+REQUIRE_IFACE="wlan1"
+
+# Which transport to use: "rsyncd" (ADM Rsync Server, the "rsync" you enabled) or
+# "ssh" (rsync over SSH). rsyncd is Asustor's supported path and needs no shell
+# account; ssh is encrypted + key-based but ADM restricts admin SSH.
+TRANSPORT="rsyncd"
+
+# --- rsyncd: rsync daemon module (TRANSPORT=rsyncd) --------------------------
+# In ADM → Settings → Services → Rsync Server: enable it, add a module + an
+# authorized user. The target is rsync://$RSYNC_USER@$DEST_HOST/$RSYNC_MODULE/
+# $RSYNC_MODULE_PATH. Here the module "kingfisher" maps to /Public/data/kingfisher,
+# so the flight DBs land in its "flights" subdir.
+RSYNC_USER="kingfisher"
+RSYNC_MODULE="kingfisher"
+RSYNC_MODULE_PATH="flights"
+# File containing ONLY the rsync user's password (chmod 600). NOT the ADM login
+# unless the Rsync Server is configured to use it.
+RSYNC_SECRET="/home/eric/.config/kingfisher/backup.secret"
+
+# --- ssh: rsync over SSH (TRANSPORT=ssh) -------------------------------------
+# Needs SSH enabled on the NAS and the key authorized (ssh-copy-id). DEST_PATH is
+# the on-disk path: the ADM share "Public" lives at /volume1/Public.
+SSH_USER="admin"
+SSH_PORT="22"
+SSH_KEY="/home/eric/.ssh/kingfisher_backup"
+SSH_PATH="/volume1/Public/data/kingfisher/flights"

@@ -1,0 +1,31 @@
+# Kingfisher flight-data backup — system oneshot, runs as the login user so it
+# can read ~/kingfisher/flights and use eric's dedicated backup SSH key.
+#
+# It is a *system* unit (not a --user unit) on purpose: the NM dispatcher and the
+# timer both run in the system manager, so they can start it directly without
+# per-user linger/bus plumbing. User=eric gives it the right filesystem + key.
+#
+# Install:
+#   sudo install -m 755 deploy/backup/kingfisher-flight-backup.sh /usr/local/bin/
+#   sudo install -m 644 deploy/backup/kingfisher-flight-backup.service /etc/systemd/system/
+#   sudo install -m 644 deploy/backup/kingfisher-flight-backup.timer   /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now kingfisher-flight-backup.timer
+# Trigger a run by hand:  sudo systemctl start kingfisher-flight-backup.service
+
+[Unit]
+Description=Kingfisher flight-data backup to NAS (rsync over SSH)
+Documentation=file:///usr/local/bin/kingfisher-flight-backup.sh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=eric
+Group=eric
+# Backups are background housekeeping; never contend with the recorder.
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/usr/local/bin/kingfisher-flight-backup.sh
+# Big first sync over wifi can take a while; the flock guards against overlap.
+TimeoutStartSec=3600
