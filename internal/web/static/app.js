@@ -1141,6 +1141,30 @@ function renderStatusChips() {
   if (!statusChipsEl) return;
   const chips = [compactSystemChip(), compactClockChip(), compactPodChip()].filter(Boolean);
   statusChipsEl.innerHTML = chips.join('') || '<span class="dim">Status loading…</span>';
+  updateClockBanner();
+}
+
+// clockBannerText returns the prominent-warning text for an unsynced clock, or
+// null when the banner should be hidden. Kingfisher now starts (UI + recording)
+// before chrony syncs; this banner is the pilot's cue that timestamps are
+// provisional until the clock locks (corrections land in clock_offsets).
+function clockBannerText(clock) {
+  if (!clock) return null; // no clock state yet — stale banner covers outages
+  const d = clock.discipline;
+  if (d?.available && d.synced) return null;
+  return '⚠ CLOCK NOT SYNCED — timestamps provisional';
+}
+
+function updateClockBanner() {
+  const el = document.getElementById('clockBanner');
+  if (!el) return;
+  const text = state.serverConnected ? clockBannerText(state.clock) : null;
+  if (!text) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.textContent = text;
 }
 
 function openStatusDrawer() {

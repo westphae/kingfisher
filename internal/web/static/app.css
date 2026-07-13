@@ -64,6 +64,19 @@ html, body {
   font-size: var(--ov-label);
 }
 
+/* Prominent warning while chrony is unsynced: kingfisher starts (UI +
+   recording) immediately now, so this is the pilot's cue that timestamps
+   are provisional until the clock locks. */
+.clockBanner {
+  background: #d32f2f;
+  color: #fff;
+  font-weight: 700;
+  text-align: center;
+  padding: 0.4rem 0.5rem;
+  font-size: var(--ov-label);
+  letter-spacing: 0.03em;
+}
+
 .cfgCheckbox {
   display: flex;
   align-items: center;
