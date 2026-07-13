@@ -93,6 +93,11 @@ func main() {
 	// (via the WAL checkpoint in Close) before the DB handle is released.
 	// Do not reorder these.
 	defer st.Close()
+	// Finalize any WAL/SHM sidecars left by an earlier ungraceful stop, skipping
+	// the DB we just opened. Non-fatal: a stray sidecar must never block startup.
+	if err := store.SweepSidecars(cfg.DBDir, st.Path()); err != nil {
+		log.Printf("store: sweep sidecars: %v", err)
+	}
 	log.Printf("kingfisher v%s flight DB: %s", version, st.Path())
 	if err := st.SetMeta("clock_startup_state", startupClock.State); err != nil {
 		log.Printf("store: clock_startup_state: %v", err)

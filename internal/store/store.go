@@ -94,7 +94,27 @@ func (s *Store) Close() error {
 	}
 	err := s.db.Close()
 	s.db = nil
+	if err == nil {
+		// The modernc driver leaves the -wal/-shm sidecars on disk after close.
+		// A successful TRUNCATE checkpoint just above leaves the -wal at 0 bytes,
+		// so the sidecars carry no unmerged data and are safe to delete. If the
+		// -wal is non-empty (checkpoint failed) it is kept; SweepSidecars will
+		// finalize it on a later startup.
+		removeEmptySidecars(s.path)
+	}
 	return err
+}
+
+// removeEmptySidecars deletes the -wal/-shm sidecars for a flight DB, but only
+// when the -wal is absent or 0 bytes — i.e. fully checkpointed, so removal loses
+// no data. A non-empty -wal is left untouched.
+func removeEmptySidecars(path string) {
+	wal := path + "-wal"
+	if fi, err := os.Stat(wal); err == nil && fi.Size() > 0 {
+		return
+	}
+	os.Remove(wal)
+	os.Remove(path + "-shm")
 }
 
 // CheckpointWAL copies all WAL frames into the main DB file and truncates
