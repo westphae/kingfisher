@@ -115,3 +115,18 @@ else
 	rc=$?
 	die "rsync failed (exit $rc)"
 fi
+
+# Record what the NAS now holds so the cockpit Flights page can show per-flight
+# backup state even when the NAS is unreachable (i.e. in the aircraft). Format:
+# "<name>\t<bytes>" per .db. Written atomically; file mtime = manifest age.
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/kingfisher"
+mkdir -p "$STATE_DIR"
+if listing=$(rsync "$XPORT" "$XVAL" "$DEST" 2>/dev/null); then
+	printf '%s\n' "$listing" \
+		| awk '$NF ~ /\.db$/ { size=$2; gsub(",","",size); print $NF "\t" size }' \
+		> "$STATE_DIR/backup-manifest.tsv.tmp" \
+		&& mv "$STATE_DIR/backup-manifest.tsv.tmp" "$STATE_DIR/backup-manifest.tsv"
+	log "manifest updated ($(wc -l < "$STATE_DIR/backup-manifest.tsv") entries)"
+else
+	log "manifest listing failed (backup itself succeeded)"
+fi
