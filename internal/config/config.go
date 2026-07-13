@@ -591,6 +591,28 @@ type Config struct {
 	Display    Display           `json:"display,omitempty"`
 	GDL90      GDL90             `json:"gdl90,omitempty"`
 	System     System            `json:"system,omitempty"`
+	Access     Access            `json:"access,omitempty"`
+}
+
+// Access gates the root-equivalent endpoints (web terminal, power API) to
+// trusted devices. The only untrusted network is the open AP, so the gate
+// restricts *only* clients in APSubnet: an AP client is allowed through only
+// if its IP is in TrustedIPs; everything off the AP (loopback, home LAN over
+// wlan1, Tailscale) is always allowed. Managed from the Settings UI.
+type Access struct {
+	APSubnet   string            `json:"ap_subnet,omitempty"`   // untrusted AP network (CIDR)
+	TrustedIPs []string          `json:"trusted_ips,omitempty"` // AP client IPs/CIDRs allowed through
+	Names      map[string]string `json:"names,omitempty"`       // IP → user-supplied device label (ARP has no hostname)
+}
+
+const defaultAPSubnet = "192.168.10.0/24"
+
+// APSubnetEffective returns the AP CIDR, defaulting to defaultAPSubnet.
+func (a Access) APSubnetEffective() string {
+	if strings.TrimSpace(a.APSubnet) == "" {
+		return defaultAPSubnet
+	}
+	return a.APSubnet
 }
 
 // System configures the Pi host-telemetry virtual device (`system`): supply
@@ -676,7 +698,11 @@ func Defaults() *Config {
 		FlushSeconds: 5,
 		DBDir:        DefaultDBDir(),
 		GPSDAddr:     "localhost:2947",
-		HTTPAddr:     ":8080",
+		HTTPAddr:     "127.0.0.1:8080", // loopback only; Caddy fronts it on :443 (allowlist would be bypassable on a public bind)
+		Access: Access{
+			APSubnet:   defaultAPSubnet,
+			TrustedIPs: []string{"192.168.10.158", "192.168.10.230"}, // reserved EFBs
+		},
 		Pod: Pod{
 			WiFiSSID:           "kingfisher",
 			WiFiPassword:       "",

@@ -142,6 +142,10 @@ func (s *Server) Run(addr string, stop <-chan struct{}) error {
 	mux.HandleFunc("/api/airspeed/zero", s.handleAirspeedZero)
 	mux.HandleFunc("/api/howgozit/", s.handleHowgozit)
 	mux.HandleFunc("/api/howgozit", s.handleHowgozit)
+	mux.HandleFunc("/api/access", s.handleAccess)
+	mux.HandleFunc("/api/access/add", s.handleAccessMutate)
+	mux.HandleFunc("/api/access/remove", s.handleAccessMutate)
+	mux.HandleFunc("/api/access/name", s.handleAccessName)
 	s.term.Register(mux)
 
 	staticFS, err := fs.Sub(assets, "static")
@@ -157,7 +161,10 @@ func (s *Server) Run(addr string, stop <-chan struct{}) error {
 	}
 	mux.Handle("/static/", staticHandler)
 
-	s.httpSrv = &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	// gateSensitive fronts the whole mux, blocking the root-equivalent paths
+	// for untrusted AP clients (the app is the sole enforcer now that Caddy
+	// binds loopback and no longer gates).
+	s.httpSrv = &http.Server{Addr: addr, Handler: s.gateSensitive(mux), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-stop
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
