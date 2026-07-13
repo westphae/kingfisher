@@ -352,6 +352,14 @@ func (s *Store) WriteSession(aircraft, aircraftName, notes, version string) erro
 	return err
 }
 
+// UpdateNotes rewrites the session notes (single _session row). Used by the
+// Flights page for the currently-recording DB; closed DBs go through
+// flights.Manager.UpdateNotes instead.
+func (s *Store) UpdateNotes(notes string) error {
+	_, err := s.db.Exec(`UPDATE _session SET notes=?`, notes)
+	return err
+}
+
 // EnsureTable creates the per-device table with ts_ns + the named columns if
 // it does not yet exist, or ALTERs it to add columns that arrived later.
 // Columns are REAL; ts_ns is INTEGER NOT NULL. Table and column names are
