@@ -36,6 +36,15 @@ Restart=on-failure
 RestartSec=30
 TimeoutStopSec=45
 
+# Journal rate-limit backstop. The app logs on state changes only (GPS loss,
+# gdl90 client errors, throttle/undervolt), so it stays far below this — the
+# limit exists so a future runaway per-cycle logger can't rotate the journal
+# and erase flight evidence, as happened 2026-07-11. journald's global rate
+# limit still applies on top. 300/30 s leaves headroom for startup/panic bursts;
+# don't tighten much further or you risk clipping those.
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=300
+
 # Flight DBs default to ~/kingfisher/flights; config to ~/.config/kingfisher/config.json
 # WorkingDirectory=%h
 
