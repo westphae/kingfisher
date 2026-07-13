@@ -14,7 +14,7 @@
 # Trigger a run by hand:  sudo systemctl start kingfisher-flight-backup.service
 
 [Unit]
-Description=Kingfisher flight-data backup to NAS (rsync over SSH)
+Description=Kingfisher flight-data backup to NAS (rsync)
 Documentation=file:///usr/local/bin/kingfisher-flight-backup.sh
 After=network-online.target
 Wants=network-online.target
