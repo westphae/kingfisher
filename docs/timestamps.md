@@ -129,8 +129,43 @@ a substitute for input-sample time alignment.
 
 - **`sensor_attrs.ts_ns`** — when attributes were snapshotted (startup, reload,
   or attr change), not sensor physics time.
-- **`_session.start_time`** and the **DB filename** — Pi wall clock at open;
-  start kingfisher after chrony is healthy if cold-boot naming accuracy matters.
+- **`_session.start_time`** and the **DB filename** — Pi wall clock at open.
+  Kingfisher starts *before* chrony syncs (RTC keeps the clock within ~1 s), so
+  the filename is normally accurate to ~1 s. If the RTC is dead (clock reads
+  1970) the DB is named `unsynced_NNNN_<tail>.db` instead and renamed to the
+  corrected timestamp at graceful close once true time is learned
+  (`clock_true_start_utc` records it either way).
+
+## Clock corrections (`clock_offsets` table)
+
+All `ts_ns` stamps are `CLOCK_REALTIME`, which chrony may adjust after startup.
+The `clock_offsets` table is a piecewise log of the realtime↔monotonic mapping
+that makes those adjustments exactly correctable:
+
+| Column | Meaning |
+|--------|---------|
+| `ts_ns` | `CLOCK_REALTIME` at the event (nanoseconds) |
+| `monotonic_ns` | `CLOCK_MONOTONIC` at the same instant |
+| `delta_ns` | Change in (realtime − monotonic) since the previous row |
+| `note` | `anchor` (one row at open), `step`, or `slew` |
+
+Detection is hybrid: a kernel `timerfd` (`TFD_TIMER_CANCEL_ON_SET`) fires the
+instant the clock is **stepped** from any source (µs latency), and a 1 Hz
+sampler records accumulated **slew** ≥ 20 ms (one 50 Hz sample period). chrony
+is configured `makestep 0.2 -1` + `maxslewrate 1000`, so corrections > 0.2 s
+arrive as discrete logged steps and residual slew distorts intervals ≤ 0.1 %.
+
+**Reconstructing a continuous timeline:** for a row at monotonic time *m* with
+cumulative offset *o(m)* (anchor offset + sum of `delta_ns` up to *m*), any
+stored `ts_ns` maps to the monotonic axis as `mono = ts_ns − o` using the *o*
+in effect when that row was written (rows are bracketed by the `clock_offsets`
+timestamps). Equivalently: to place all samples on the *final* (synced) wall
+clock, add `(o_final − o_at_sample)` to each pre-step `ts_ns`. With zero step
+rows (the normal case) no correction is needed.
+
+Worked example (2026-07-13 live test): injected `date -s` `+0.868 s`, chrony
+counter-stepped `−1.204 s` then `+0.346 s`, residual +10 ms slewed silently —
+net wall-clock error ≈ 0 and every discontinuity captured with exact magnitude.
 
 ## Flight DB metadata (`metadata` table)
 
@@ -151,9 +186,16 @@ plus chrony/PPS discipline snapshot):
 | `clock_startup_chrony_source_label` | Raw chrony ref id label (e.g. `PPS`, `GPS`) |
 | `clock_startup_chrony_stratum` | Stratum when available |
 
-These are **session snapshots**, not time series. PPS/chrony state during the
-flight is not logged row-by-row; use post-flight `chronyc` logs or the cockpit
-header for live discipline.
+Once chrony first syncs after startup, two more keys are written:
+
+| Key | Meaning |
+|-----|---------|
+| `clock_synced_at_utc` | Wall time of first chrony PPS/GPS lock after open |
+| `clock_true_start_utc` | True session start (sync time minus monotonic elapsed) |
+
+These are **session snapshots**, not time series. Clock *adjustments* during
+the flight are logged row-by-row in `clock_offsets` (above); for PPS/chrony
+discipline detail use post-flight `chronyc` logs or the cockpit header.
 
 ## Practical fusion checklist
 

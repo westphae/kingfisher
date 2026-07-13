@@ -383,7 +383,6 @@ git clone https://github.com/westphae/geomag
 git clone https://github.com/westphae/magkal
 
 cd kingfisher && go install ./cmd/kingfisher
-sudo install -m 755 deploy/systemd/kingfisher-prestart.sh /usr/local/bin/
 sudo install -m 755 deploy/poweroff/kingfisher-poweroff.sh /usr/local/bin/   # (path per repo)
 
 # sudoers drop-in /etc/sudoers.d/kingfisher-poweroff (0440):

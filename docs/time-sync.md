@@ -376,28 +376,27 @@ For what each flight DB **`ts_ns`** column means (including GPS row time vs
 
 ## 10. Kingfisher startup ordering
 
-Kingfisher performs a short startup assessment of Pi-vs-GPS time before opening
-the flight DB (`/api/status` and cockpit header). It waits for discipline when
-possible but **does not block forever** if chrony never locks (Pi RTC battery
-keeps DB filenames sane):
+Kingfisher does **not** wait for chrony — it starts (UI + recording) immediately
+on the RTC clock. The old `kingfisher-prestart.sh` `waitsync` gate is retired: it
+cost up to ~120 s of unreachable UI at engine start for no data benefit. Instead:
 
-```ini
-[Service]
-TimeoutStartSec=180
-ExecStartPre=/usr/local/bin/kingfisher-prestart.sh
-```
+- A short Pi-vs-GPS assessment still runs at startup (`/api/status`, cockpit
+  header) and is recorded in flight-DB metadata. Its logged `gps_lag+offset`
+  *includes* the ~0.6–0.7 s gpsd pipeline lag — ~1 s is normal, not clock error.
+- A red cockpit banner shows **CLOCK NOT SYNCED** until chrony locks.
+- A hybrid clock watcher (kernel `timerfd` `TFD_TIMER_CANCEL_ON_SET` step
+  listener + 1 Hz slew sampler) appends any realtime↔monotonic mapping shift
+  ≥ 20 ms to the flight DB's `clock_offsets` table, so all earlier timestamps
+  are exactly correctable post-flight (see `docs/timestamps.md`).
+- chrony is configured `makestep 0.2 -1` + `maxslewrate 1000`: corrections
+  > 0.2 s are applied as one discrete logged **step** (analysis-friendly)
+  rather than a long fast slew; residual slews distort intervals ≤ 0.1 %.
+- A dead RTC (clock reads 1970) only changes the DB *filename* to a fallback
+  `unsynced_NNNN_<tail>.db`, renamed at close once true time is learned.
 
 Kingfisher runs as a **user** unit, which cannot order against system units, so
-`After=chronyd.service gpsd.service` would be a no-op and is omitted — the prestart
-script handles readiness by polling `chronyc` directly.
-
-Install the script once: `sudo install -m 755 deploy/systemd/kingfisher-prestart.sh /usr/local/bin/`
-
-- **Restart while synced** — prestart returns in ~5 ms.
-- **Cold boot** — `chronyc waitsync` returns as soon as chrony PPS-locks, bounded
-  to ~120 s; then starts anyway and chrony keeps disciplining once GNSS is up.
-- **Restart while unsynced** — up to ~30 s `waitsync`, then start anyway.
-- Script always exits 0; RTC keeps DB filenames sane when chrony never locks.
+`After=chronyd.service gpsd.service` would be a no-op and is omitted — and no
+longer needed.
 
 See **`deploy/systemd/kingfisher.service.example`** for the full user unit.
 Kingfisher's status model still reports if the clock later drifts or goes stale.

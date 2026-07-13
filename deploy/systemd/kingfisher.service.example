@@ -3,7 +3,6 @@
 # Install (binary via go install → GOBIN or $(go env GOPATH)/bin):
 #
 #   go install ./cmd/kingfisher
-#   sudo install -m 755 deploy/systemd/kingfisher-prestart.sh /usr/local/bin/
 #   mkdir -p ~/.config/systemd/user
 #   bin="$(go env GOBIN)"; [ -z "$bin" ] && bin="$(go env GOPATH)/bin"
 #   sed "s|__KINGFISHER_BIN__|$bin/kingfisher|g" \
@@ -21,16 +20,15 @@ Description=Kingfisher flight data recorder
 Documentation=file://%h/go/src/github.com/westphae/kingfisher/README.md
 # NOTE: this is a *user* unit. After=/Wants= on system units (chronyd/gpsd/
 # network-online) are NO-OPs here — a user-session unit cannot order against
-# system units. Readiness for chrony/gpsd is handled by kingfisher-prestart.sh,
-# which polls chronyc and returns as soon as the clock is disciplined.
+# system units. Kingfisher deliberately does NOT wait for chrony: it starts
+# (UI + recording) immediately on the RTC clock, shows a cockpit banner until
+# chrony syncs, and logs any clock step/slew to the flight DB's clock_offsets
+# table so timestamps are correctable post-flight (docs/timestamps.md). An
+# implausible clock (dead RTC → 1970) only changes the DB *filename* to a
+# fallback unsynced_NNNN name, renamed at close once true time is known.
 
 [Service]
 Type=simple
-# Boot path: prestart waitsync, returns as soon as chrony PPS-locks (cap ~120 s in
-# the script); restart while synced: immediate. Prestart always exits 0, so a slow
-# GNSS lock never blocks startup. Timeout is the hard ceiling over the prestart cap.
-TimeoutStartSec=180
-ExecStartPre=/usr/local/bin/kingfisher-prestart.sh
 ExecStart=__KINGFISHER_BIN__
 Restart=on-failure
 RestartSec=30

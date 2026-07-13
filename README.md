@@ -249,7 +249,6 @@ kingfisher first so the reverse proxy has a backend on `:8080`.
 2. **Install the user unit** from the repo example (path must match step 1):
 
    ```bash
-   sudo install -m 755 deploy/systemd/kingfisher-prestart.sh /usr/local/bin/
    mkdir -p ~/.config/systemd/user
    bin="$(go env GOBIN)"
    [ -z "$bin" ] && bin="$(go env GOPATH)/bin"
@@ -285,21 +284,19 @@ kingfisher first so the reverse proxy has a backend on `:8080`.
    file under `/run/user/$UID/journal`, so `journalctl --user` shows nothing even
    though `systemctl --user status` does.
 
-The unit runs **`/usr/local/bin/kingfisher-prestart.sh`** before opening today's
-flight DB:
+The unit starts kingfisher **immediately** — there is no chrony pre-wait (the
+old `kingfisher-prestart.sh` gate is retired). The UI and recording come up in
+seconds on the RTC clock:
 
 | Situation | Behavior |
 |-----------|----------|
-| **Restart while `#* PPS` or `#* GPS`** | `waitsync` returns immediately (~5 ms) |
-| **Cold boot, chrony not locked yet** | `waitsync` returns as soon as PPS locks, bounded ~120 s |
-| **Restart while chrony unsynced** | Up to ~30 s `waitsync`, then start anyway |
-| **Chrony never locks** | Start anyway (RTC keeps DB filenames sane) |
+| **RTC sane (normal)** | Timestamp-named flight DB; red cockpit banner until chrony locks |
+| **Any chrony step/slew ≥ 20 ms** | Row in the DB's `clock_offsets` table (see `docs/timestamps.md`) |
+| **RTC dead (clock reads 1970)** | DB named `unsynced_NNNN_<tail>.db`; renamed at close once true time is known |
 
-The script always exits 0 — kingfisher is not blocked forever. Startup metadata
-and the cockpit clock badge record unsynced discipline.
-
-`TimeoutStartSec=180` covers the cold-boot path. `RestartSec=30` retries a failed
-main process (not prestart).
+Startup metadata, the `clock_offsets` mapping table, and the cockpit clock
+badge/banner record discipline state. `RestartSec=30` retries a failed main
+process.
 
 **After upgrading:** `go install ./cmd/kingfisher`, then
 `systemctl --user restart kingfisher.service`.

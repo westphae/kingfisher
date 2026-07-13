@@ -2,11 +2,16 @@
 # Merge into /etc/chrony/chrony.conf (Debian / Raspberry Pi OS).
 #
 # Boot policy: allow the clock to be *stepped* (not just slewed) for the first few
-# updates, then slew only. The step lets PPS snap the clock to true time at boot
-# even if the RTC drifted; limiting it to the first 3 updates avoids backward
-# clock jumps mid-flight (which would corrupt logged flight timing). The 0.5 s
-# threshold keeps boot recovery fast.
-makestep 0.5 3
+# Step whenever the error exceeds 0.2 s, at ANY time (-1) — not just the first
+# few updates. For a flight recorder a rare discrete step is *better* than a
+# fast slew: kingfisher's clock watcher logs every step to the flight DB's
+# clock_offsets table (exact, correctable discontinuity), whereas a slew at
+# chrony's default max rate (8.3%!) smears sample intervals for seconds and
+# cannot be corrected post-hoc. maxslewrate 1000 (0.1%) keeps the residual
+# sub-0.2 s corrections gentle: a 20 ms sample period distorts ≤ 20 µs.
+# Backward steps are acceptable — they are logged; unlogged distortion is not.
+makestep 0.2 -1
+maxslewrate 1000
 rtcsync
 
 # Offline-first flight recording: leave pool commented out.
