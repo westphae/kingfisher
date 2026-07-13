@@ -1,16 +1,31 @@
 # Kingfisher reverse proxy (install to /etc/caddy/Caddyfile).
-# Terminates TLS with Caddy's internal CA; kingfisher stays on :8080.
+# Terminates TLS with Caddy's internal CA; kingfisher stays on 127.0.0.1:8080.
 #
 # Edit the host/IP list for your LAN, then:
 #   sudo caddy validate --config /etc/caddy/Caddyfile
 #   sudo systemctl reload caddy
 #   sudo caddy trust
 #
-# Other devices: install root.crt (see README).
+# Other devices: install root.crt (see README.md).
+#
+# 192.168.86.151 is the Pi's wlan1 (home-LAN) address, DHCP-reserved on the home
+# router. It is only a site address here (for TLS on the home LAN); if it
+# changes, update it in the two site-address lists.
+#
+# Access control for /terminal, /api/terminal/*, and /api/power/* is enforced by
+# kingfisher itself (Settings → Trusted devices), not here — see internal/web/
+# access.go and deploy/caddy/README.md. kingfisher binds loopback, so this proxy
+# is the sole ingress; it just needs to pass the real client IP (below).
 
 https://kingfisher.lan, https://kingfisher, https://192.168.10.1, https://192.168.86.151, https://127.0.0.1 {
 	tls internal
-	reverse_proxy localhost:8080
+
+	# Pass the real client IP so kingfisher can apply its AP allowlist.
+	# {remote_host} is the TCP peer; header_up overwrites any client-sent value,
+	# so X-Real-Client-IP cannot be spoofed.
+	reverse_proxy 127.0.0.1:8080 {
+		header_up X-Real-Client-IP {remote_host}
+	}
 }
 
 http://kingfisher.lan, http://kingfisher, http://192.168.10.1, http://192.168.86.151, http://127.0.0.1 {
