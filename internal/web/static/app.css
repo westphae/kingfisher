@@ -2030,3 +2030,41 @@ body.bigtext .hgz-iconBtn {
   width: 100%;
 }
 
+
+
+/* Flights summary dialog */
+.flightsDlg { width: min(44rem, 96vw); }
+.flightsBody { max-height: 62vh; overflow-y: auto; margin: 0.5rem 0; }
+.flightRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.15rem 0.6rem;
+  padding: 0.45rem 0.2rem;
+  border-bottom: 1px solid rgba(128,128,128,0.25);
+}
+.flightRoute { font-weight: 700; }
+.flightRoute .ground { opacity: 0.65; font-weight: 600; }
+.flightWhen { font-variant-numeric: tabular-nums; }
+.flightStats { grid-column: 1 / -1; font-size: 0.85em; opacity: 0.85; }
+.flightNotes {
+  grid-column: 1 / -1;
+  font-size: 0.85em;
+  font-style: italic;
+  opacity: 0.75;
+  cursor: pointer;
+}
+.flightNotes:empty::before,
+.flightNotes.placeholder { opacity: 0.4; }
+.flightBadge {
+  align-self: start;
+  font-size: 0.78em;
+  font-weight: 700;
+  padding: 0.1rem 0.45rem;
+  border-radius: 0.6rem;
+  white-space: nowrap;
+}
+.flightBadge-yes   { background: rgba(46,160,67,0.25);  color: #4ecb71; }
+.flightBadge-no    { background: rgba(248,81,73,0.22);  color: #ff7b72; }
+.flightBadge-stale { background: rgba(210,153,34,0.25); color: #e3b341; }
+.flightBadge-rec   { background: rgba(248,81,73,0.22);  color: #ff7b72; animation: pulse 1.6s infinite; }
+#flightNotesDlg textarea { width: 100%; box-sizing: border-box; }

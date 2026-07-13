@@ -40,6 +40,7 @@ import (
 	"github.com/westphae/kingfisher/internal/clock"
 	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/derive"
+	"github.com/westphae/kingfisher/internal/flights"
 	"github.com/westphae/kingfisher/internal/gdl90"
 	"github.com/westphae/kingfisher/internal/gps"
 	"github.com/westphae/kingfisher/internal/live"
@@ -90,6 +91,7 @@ type Server struct {
 	httpSrv    *http.Server
 	up         websocket.Upgrader
 	term       *terminal.Handler
+	flightsMgr *flights.Manager
 }
 
 // New builds the web server. devWebRoot, when non-empty, points at internal/web
@@ -123,6 +125,7 @@ func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, 
 		devWebRoot:      devWebRoot,
 		up:              websocket.Upgrader{CheckOrigin: sameOriginCheck},
 		term:            terminal.New(func() config.Terminal { return cfg.Get().Terminal }, tpl),
+		flightsMgr:      flights.NewManager(cfg.Get().DBDir),
 	}, nil
 }
 
@@ -142,6 +145,8 @@ func (s *Server) Run(addr string, stop <-chan struct{}) error {
 	mux.HandleFunc("/api/airspeed/zero", s.handleAirspeedZero)
 	mux.HandleFunc("/api/howgozit/", s.handleHowgozit)
 	mux.HandleFunc("/api/howgozit", s.handleHowgozit)
+	mux.HandleFunc("/api/flights", s.handleFlights)
+	mux.HandleFunc("/api/flights/notes", s.handleFlightsNotes)
 	mux.HandleFunc("/api/access", s.handleAccess)
 	mux.HandleFunc("/api/access/add", s.handleAccessMutate)
 	mux.HandleFunc("/api/access/remove", s.handleAccessMutate)

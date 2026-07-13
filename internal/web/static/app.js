@@ -44,6 +44,10 @@ const statusDrawerPod = document.getElementById('statusDrawerPod');
 const settingsDlg = document.getElementById('settingsDlg');
 const accessDlg = document.getElementById('accessDlg');
 const accessBodyEl = document.getElementById('accessBody');
+const flightsDlg = document.getElementById('flightsDlg');
+const flightsBodyEl = document.getElementById('flightsBody');
+const flightsMetaEl = document.getElementById('flightsMeta');
+const flightNotesDlg = document.getElementById('flightNotesDlg');
 
 let powerOffPending = false;
 
@@ -1500,6 +1504,122 @@ function openSettingsDialog() {
 }
 
 // --- Trusted devices (AP allowlist) ---
+// ---- Flights summary dialog ----
+
+let flightsPollTimer = null;
+
+function fmtFlightDuration(sec) {
+  if (!Number.isFinite(sec) || sec <= 0) return '—';
+  const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+  return h > 0 ? `${h} h ${String(m).padStart(2, '0')} m` : `${m} m`;
+}
+
+function fmtFlightWhen(startUtc) {
+  if (!startUtc) return '—';
+  const d = new Date(startUtc);
+  if (Number.isNaN(d.getTime())) return startUtc;
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` +
+    `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}Z`;
+}
+
+function flightRouteHTML(f) {
+  if (f.ground) return '<span class="ground">XXXX — ground session</span>';
+  // "···" = data boundary (fix acquired after takeoff / recording stopped
+  // before landing); "????" = genuinely no airport within range.
+  const t = f.takeoff?.ident
+    ? escapeHtml(f.takeoff.ident)
+    : (f.starts_airborne ? '<span class="dim" title="data begins airborne">···</span>' : '????');
+  const l = f.landing?.ident
+    ? escapeHtml(f.landing.ident)
+    : (f.ends_airborne ? '<span class="dim" title="data ends airborne">···</span>' : '????');
+  const legs = f.legs > 1 ? ` <span class="dim">(${f.legs} legs)</span>` : '';
+  return `${t} → ${l}${legs}`;
+}
+
+function flightBadgeHTML(f) {
+  const map = {
+    recording: ['rec', '● REC'],
+    yes: ['yes', '✓ NAS'],
+    stale: ['stale', '⟳ stale'],
+    no: ['no', '✗ not backed up'],
+  };
+  const [cls, label] = map[f.backup] || ['no', f.backup || '—'];
+  return `<span class="flightBadge flightBadge-${cls}">${label}</span>`;
+}
+
+function renderFlights(data) {
+  const rows = [];
+  for (const f of data.flights || []) {
+    const alt = f.max_alt_msl_m > 0
+      ? `${Math.round(f.max_alt_msl_m * 3.28084).toLocaleString()} ft`
+      : '—';
+    const stats = f.scan_error === 'pending'
+      ? '<span class="dim">scanning…</span>'
+      : f.scan_error
+        ? `<span class="dim">scan failed: ${escapeHtml(f.scan_error)}</span>`
+        : `${fmtFlightDuration(f.duration_s)} block` +
+          (f.ground ? '' : ` · ${fmtFlightDuration(f.airborne_s)} air · max ${alt}`);
+    const warn = f.unsynced ? ' <span title="clock was unsynced at start">⚠</span>' : '';
+    const notes = f.notes
+      ? escapeHtml(f.notes)
+      : '<span class="placeholder">add notes…</span>';
+    rows.push(
+      `<div class="flightRow" data-file="${escapeAttr(f.file)}">` +
+        `<span class="flightRoute">${flightRouteHTML(f)}${warn}</span>` +
+        flightBadgeHTML(f) +
+        `<span class="flightWhen dim">${escapeHtml(fmtFlightWhen(f.start_utc))}` +
+          ` · ${(f.size_bytes / 1048576).toFixed(0)} MB</span>` +
+        `<span class="flightStats">${stats}</span>` +
+        `<span class="flightNotes" data-notes-file="${escapeAttr(f.file)}"` +
+          ` data-notes="${escapeAttr(f.notes || '')}">${notes}</span>` +
+      `</div>`);
+  }
+  flightsBodyEl.innerHTML = rows.join('') || '<p class="dim">No flight databases found.</p>';
+  const meta = [];
+  if (data.scanning) meta.push('scanning flight databases…');
+  if (Number.isFinite(data.manifest_age_s) && data.manifest_age_s >= 0) {
+    const h = data.manifest_age_s / 3600;
+    meta.push(`backup state as of ${h < 1 ? Math.round(data.manifest_age_s / 60) + ' min' : h.toFixed(1) + ' h'} ago`);
+  } else {
+    meta.push('no backup manifest yet (runs after next NAS sync)');
+  }
+  flightsMetaEl.textContent = meta.join(' · ');
+}
+
+async function refreshFlights() {
+  try {
+    const r = await fetch('/api/flights');
+    if (!r.ok) throw new Error(r.statusText);
+    const data = await r.json();
+    renderFlights(data);
+    if (data.scanning && flightsDlg.open) {
+      clearTimeout(flightsPollTimer);
+      flightsPollTimer = setTimeout(refreshFlights, 2000);
+    }
+  } catch (e) {
+    flightsBodyEl.innerHTML = `<p class="dim">Failed to load flights: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+function openFlightsDialog() {
+  if (!flightsDlg) return;
+  flightsBodyEl.innerHTML = '<p class="dim">Loading…</p>';
+  flightsMetaEl.textContent = '';
+  flightsDlg.showModal();
+  refreshFlights();
+}
+
+function openFlightNotes(file, current) {
+  const title = document.getElementById('flightNotesTitle');
+  const text = document.getElementById('flightNotesText');
+  title.textContent = `Notes — ${file.replace(/\.db$/, '')}`;
+  text.value = current;
+  flightNotesDlg._file = file;
+  flightNotesDlg.showModal();
+  text.focus();
+}
+
 function openAccessDialog() {
   if (!accessDlg) return;
   accessBodyEl.innerHTML = '<p class="dim">Loading…</p>';
@@ -1728,6 +1848,36 @@ function wireUiTaps() {
   KFTap.bindTap(document.getElementById('moreAccessBtn'), () => {
     moreSheet.close();
     openAccessDialog();
+  });
+
+  KFTap.bindTap(document.getElementById('moreFlightsBtn'), () => {
+    moreSheet.close();
+    openFlightsDialog();
+  });
+
+  if (flightsBodyEl) {
+    flightsBodyEl.addEventListener('click', (e) => {
+      const el = e.target.closest('[data-notes-file]');
+      if (!el) return;
+      openFlightNotes(el.dataset.notesFile, el.dataset.notes || '');
+    });
+  }
+
+  KFTap.bindTap(document.getElementById('flightNotesSave'), async () => {
+    const file = flightNotesDlg._file;
+    const notes = document.getElementById('flightNotesText').value;
+    try {
+      const r = await fetch('/api/flights/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file, notes }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      flightNotesDlg.close();
+      refreshFlights();
+    } catch (err) {
+      alert(`Saving notes failed: ${err.message}`);
+    }
   });
 
   KFTap.bindTap(document.getElementById('moreSettingsBtn'), () => {
