@@ -599,64 +599,10 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
         }
 
         rates::begin_tick();
+        // Wall time intentionally spent awaiting between spread mag polls;
+        // excluded from the tick-overrun measurement below.
+        let mut slept_us: u64 = 0;
 
-        // Cheap sensors first so mag/airspeed keep updating under BMP load.
-        if let Some(ref mut mmc5983) = board.mmc5983 {
-            let hz = rates::get(SensorId::Mag);
-            if hz > 0 {
-                if mmc5983.ensure_cm_freq(bus, hz).is_err() {
-                    tick_failures = tick_failures.saturating_add(1);
-                    if rates::note_read_fail(SensorId::Mag) {
-                        need_recovery = true;
-                    }
-                } else {
-                    let budget = rates::poll_budget(SensorId::Mag, hz);
-                    let mut pushed = 0u32;
-                    for _ in 0..budget {
-                        let cap_us = Instant::now().as_micros();
-                        match mmc5983.read_when_ready(bus) {
-                            Ok(Some(s)) => {
-                                rates::note_read_ok(SensorId::Mag);
-                                pushed += 1;
-                                push_mag(
-                                    Reading::Mag {
-                                        x_ut: s.x_ut,
-                                        y_ut: s.y_ut,
-                                        z_ut: s.z_ut,
-                                        age_us: 0,
-                                    },
-                                    cap_us,
-                                );
-                            }
-                            Ok(None) => {}
-                            Err(()) => {
-                                tick_failures = tick_failures.saturating_add(1);
-                                if rates::note_read_fail(SensorId::Mag) {
-                                    need_recovery = true;
-                                }
-                            }
-                        }
-                    }
-                    // If status never flagged ready (e.g. first tick after ODR change),
-                    // still take one direct read so mag does not go dark.
-                    if pushed == 0 && budget > 0 {
-                        let cap_us = Instant::now().as_micros();
-                        if let Ok(s) = mmc5983.read_sample(bus) {
-                            rates::note_read_ok(SensorId::Mag);
-                            push_mag(
-                                Reading::Mag {
-                                    x_ut: s.x_ut,
-                                    y_ut: s.y_ut,
-                                    z_ut: s.z_ut,
-                                    age_us: 0,
-                                },
-                                cap_us,
-                            );
-                        }
-                    }
-                }
-            }
-        }
         if board.ms4525.is_some() {
             let hz = rates::get(SensorId::Airspeed);
             for _ in 0..rates::poll_budget(SensorId::Airspeed, hz) {
@@ -693,7 +639,9 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
                         need_recovery = true;
                     }
                 } else {
-                    let drain_us = tick_start.as_micros();
+                    // Stamp with the actual drain moment, not tick start: the
+                    // mag spread loop can shift this call within the tick.
+                    let drain_us = Instant::now().as_micros();
                     match bmp581.drain_fifo(bus, drain_us) {
                         Ok(frames) => {
                             if !frames.is_empty() {
@@ -721,8 +669,97 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
             }
         }
 
-        let elapsed_ms = tick_start.elapsed().as_millis();
-        if elapsed_ms > 80 {
+        // Mag last: the MMC5983 has no FIFO, so its status bit only ever holds
+        // one sample. Harvesting `budget` samples per tick means polling once
+        // per sample period, awaiting in between — the bus is idle while we
+        // sleep, but the tick's other sensors have already run.
+        if let Some(ref mut mmc5983) = board.mmc5983 {
+            let hz = rates::get(SensorId::Mag);
+            if hz > 0 {
+                if mmc5983.ensure_cm_freq(bus, hz).is_err() {
+                    tick_failures = tick_failures.saturating_add(1);
+                    if rates::note_read_fail(SensorId::Mag) {
+                        need_recovery = true;
+                    }
+                } else {
+                    let budget = rates::poll_budget(SensorId::Mag, hz);
+                    let spread_us = (1_000_000u64 / hz as u64).min(20_000);
+                    // A poll can land just before the sample completes; one
+                    // short nudge-and-retry recovers it and re-phases the loop.
+                    const MISS_NUDGE_US: u64 = 4_000;
+                    let mut pushed = 0u32;
+                    for i in 0..budget {
+                        if i > 0 {
+                            embassy_time::Timer::after(
+                                embassy_time::Duration::from_micros(spread_us),
+                            )
+                            .await;
+                            slept_us += spread_us;
+                        }
+                        let mut retried = false;
+                        loop {
+                            let cap_us = Instant::now().as_micros();
+                            match mmc5983.read_when_ready(bus) {
+                                Ok(Some(s)) => {
+                                    rates::note_read_ok(SensorId::Mag);
+                                    pushed += 1;
+                                    push_mag(
+                                        Reading::Mag {
+                                            x_ut: s.x_ut,
+                                            y_ut: s.y_ut,
+                                            z_ut: s.z_ut,
+                                            age_us: 0,
+                                        },
+                                        cap_us,
+                                    );
+                                }
+                                Ok(None) if !retried => {
+                                    retried = true;
+                                    embassy_time::Timer::after(
+                                        embassy_time::Duration::from_micros(MISS_NUDGE_US),
+                                    )
+                                    .await;
+                                    slept_us += MISS_NUDGE_US;
+                                    continue;
+                                }
+                                Ok(None) => {}
+                                Err(()) => {
+                                    tick_failures = tick_failures.saturating_add(1);
+                                    if rates::note_read_fail(SensorId::Mag) {
+                                        need_recovery = true;
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    // If status never flagged ready (e.g. first tick after ODR change),
+                    // still take one direct read so mag does not go dark.
+                    if pushed == 0 && budget > 0 {
+                        let cap_us = Instant::now().as_micros();
+                        if let Ok(s) = mmc5983.read_sample(bus) {
+                            rates::note_read_ok(SensorId::Mag);
+                            push_mag(
+                                Reading::Mag {
+                                    x_ut: s.x_ut,
+                                    y_ut: s.y_ut,
+                                    z_ut: s.z_ut,
+                                    age_us: 0,
+                                },
+                                cap_us,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // Overrun accounting excludes the intentional mag-spread sleeps.
+        let busy_ms = tick_start
+            .elapsed()
+            .as_millis()
+            .saturating_sub(slept_us / 1000);
+        if busy_ms > 80 {
             if rates::note_tick_overrun() {
                 need_recovery = true;
             }

@@ -20,8 +20,16 @@ const DEFAULT_BATTERY_HZ: u16 = 1;
 const SAFE_HZ: u16 = 10;
 const SAFE_BATTERY_HZ: u16 = 1;
 
-/// Per-sensor max reads when scheduled alone.
-const MAX_READS_PER_SENSOR: u32 = 3;
+/// Per-sensor max reads when scheduled alone. The MMC5983 has no FIFO: one
+/// sample per poll, so harvesting N samples per tick needs N polls spread a
+/// sample period apart (see sensors/mod.rs) — allow up to 100 Hz worth.
+/// The others are FIFO-backed (BMP581) or convert on demand (MS4525, gauge).
+fn max_reads(sensor: SensorId) -> u32 {
+    match sensor {
+        SensorId::Mag => 10,
+        _ => 3,
+    }
+}
 
 /// BMP581 FIFO drain once per tick (count read + burst), excluding frame bytes.
 const US_PER_STATIC_DRAIN: u32 = 3_000;
@@ -143,8 +151,8 @@ fn desired_reads(sensor: SensorId, hz: u16) -> u32 {
     let rem = rem_atom(sensor);
     let new_rem = rem.load(Ordering::Relaxed) + hz as u32;
     let mut take = new_rem / tick_hz;
-    if take > MAX_READS_PER_SENSOR {
-        take = MAX_READS_PER_SENSOR;
+    if take > max_reads(sensor) {
+        take = max_reads(sensor);
     }
     rem.store(new_rem - take * tick_hz, Ordering::Relaxed);
     take
@@ -158,9 +166,9 @@ fn reads_per_tick(hz: u16) -> u64 {
     (hz as u64).div_ceil(base)
 }
 
-fn reads_per_tick_capped(hz: u16) -> u64 {
+fn reads_per_tick_capped(sensor: SensorId, hz: u16) -> u64 {
     let r = reads_per_tick(hz);
-    r.min(MAX_READS_PER_SENSOR as u64)
+    r.min(max_reads(sensor) as u64)
 }
 
 fn static_tick_work_us(hz: u16) -> u64 {
@@ -174,9 +182,9 @@ fn static_tick_work_us(hz: u16) -> u64 {
 /// Estimated blocking time for one tick (BMP FIFO drain; others capped).
 fn tick_work_us(static_hz: u16, mag_hz: u16, air_hz: u16, battery_hz: u16) -> u64 {
     static_tick_work_us(static_hz)
-        + reads_per_tick_capped(mag_hz) * US_PER_MAG_READ as u64
-        + reads_per_tick_capped(air_hz) * US_PER_AIR_READ as u64
-        + reads_per_tick_capped(battery_hz) * US_PER_BATTERY_READ as u64
+        + reads_per_tick_capped(SensorId::Mag, mag_hz) * US_PER_MAG_READ as u64
+        + reads_per_tick_capped(SensorId::Airspeed, air_hz) * US_PER_AIR_READ as u64
+        + reads_per_tick_capped(SensorId::Battery, battery_hz) * US_PER_BATTERY_READ as u64
 }
 
 /// Whether these rates fit the shared bus time budget (before accepting SetRate).
@@ -308,7 +316,7 @@ pub fn poll_budget(sensor: SensorId, hz: u16) -> u32 {
         return 0;
     }
     let max_by_time = left / unit;
-    let take = want.min(max_by_time).min(MAX_READS_PER_SENSOR);
+    let take = want.min(max_by_time).min(max_reads(sensor));
     if take > 0 {
         TICK_US_LEFT.store(left - take * unit, Ordering::Relaxed);
     }

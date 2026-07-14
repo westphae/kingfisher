@@ -19,7 +19,9 @@ pub const PI_IP: [u8; 4] = PI_EP.0;
 /// Parsed UDP port from [`PI_ADDR`].
 pub const PI_PORT: u16 = PI_EP.1;
 
-pub const FW_VERSION: u32 = 0x0004_0005;
+// 0x0004_0006: three-stage power protocol (burst/protect), Ping keepalive
+// fix, MMC5983 spread-poll harvesting at configured rate.
+pub const FW_VERSION: u32 = 0x0004_0006;
 
 /// Sensor poll / uplink cadence (Hz). Mag 50 Hz is a later stretch goal.
 pub const TICK_MS: u64 = 100;
