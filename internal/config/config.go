@@ -429,16 +429,26 @@ func boolPtr(v bool) *bool {
 // config.json. Firmware build.rs reads wifi_ssid/password/udp_addr.
 // Attrs are written on each UI change (config.Save) and survive power-off.
 type Pod struct {
-	WiFiSSID           string            `json:"wifi_ssid,omitempty"`
-	WiFiPassword       string            `json:"wifi_password,omitempty"`
-	UDPAddr            string            `json:"udp_addr,omitempty"` // Pi host:port pod sends to; kingfisher binds :port on all ifaces
-	BatteryCapacityMah uint16            `json:"battery_capacity_mah,omitempty"`
-	Attrs              map[string]string `json:"attrs,omitempty"` // e.g. in_mag_sampling_frequency
+	WiFiSSID           string `json:"wifi_ssid,omitempty"`
+	WiFiPassword       string `json:"wifi_password,omitempty"`
+	UDPAddr            string `json:"udp_addr,omitempty"` // Pi host:port pod sends to; kingfisher binds :port on all ifaces
+	BatteryCapacityMah uint16 `json:"battery_capacity_mah,omitempty"`
+	// Three-stage power protocol thresholds; consumed by firmware build.rs
+	// (compile-time) and by the Pi for burst-quiet link expectations.
+	BurstSocPct       uint8             `json:"burst_soc_pct,omitempty"`
+	BurstWindowS      uint16            `json:"burst_window_s,omitempty"`
+	BurstVoltageUncal float64           `json:"burst_voltage_v_uncalibrated,omitempty"`
+	ProtectVoltageV   float64           `json:"protect_voltage_v,omitempty"`
+	ProtectSocPct     uint8             `json:"protect_soc_pct,omitempty"`
+	LowDebounceS      uint16            `json:"low_debounce_s,omitempty"`
+	ModemPowerSave    bool              `json:"modem_power_save,omitempty"` // off: brcmfmac AP drops unicast to dozing STA
+	Attrs             map[string]string `json:"attrs,omitempty"` // e.g. in_mag_sampling_frequency
 }
 
 const (
 	defaultPodUDPAddr            = "192.168.10.1:47808"
 	DefaultPodBatteryCapacityMah = 850
+	DefaultPodBurstWindowS       = 60
 )
 
 // PodDeviceName is the registry / UI device id for the wing pod.
@@ -790,6 +800,15 @@ func (c *Config) PodBatteryCapacityMah() uint16 {
 		return DefaultPodBatteryCapacityMah
 	}
 	return c.Pod.BatteryCapacityMah
+}
+
+// PodBurstWindowS returns the pod's burst-mode collect window (seconds); the
+// Pi uses it to size the "quiet between bursts is healthy" link allowance.
+func (c *Config) PodBurstWindowS() int {
+	if c == nil || c.Pod.BurstWindowS == 0 {
+		return DefaultPodBurstWindowS
+	}
+	return int(c.Pod.BurstWindowS)
 }
 
 // podUDPConfigAddr returns the configured pod.udp_addr (or legacy/default).

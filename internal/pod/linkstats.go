@@ -4,6 +4,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/live"
 	"github.com/westphae/kingfisher/internal/pod/wire"
 )
@@ -38,6 +39,14 @@ type LinkStats struct {
 	RssiDBm     int8    `json:"rssi_dbm"`    // pod WiFi STA RSSI toward the Pi AP
 	HasBattery  bool    `json:"has_battery"` // true when Status reports a non-zero voltage
 	BatteryV    float32 `json:"battery_v"`
+	// BurstQuiet: the pod said it is in burst mode and the current silence is
+	// still within the expected collect window — radio off by design, not a
+	// link problem. ProtectSleep: the pod announced deep-sleep battery
+	// protection; silence is indefinite until charged.
+	BurstQuiet   bool `json:"burst_quiet"`
+	ProtectSleep bool `json:"protect_sleep"`
+	// StatusAgeS is seconds since the last Status frame (-1 before the first).
+	StatusAgeS int64 `json:"status_age_s"`
 
 	HasBatteryTelemetry bool    `json:"has_battery_telemetry"`
 	BatteryCurrentA     float32 `json:"battery_current_a"`
@@ -83,10 +92,24 @@ func (c *Client) LinkStats() LinkStats {
 			st.HasBattery = true
 			st.BatteryV = batt
 		}
-		st.PowerMode = statusPowerModeText(uint8(c.statusPowerMode.Load()))
-		st.SleepReason = statusSleepReasonText(uint8(c.statusSleepReason.Load()))
 		st.BufferDepth = uint32(c.statusBufferDepth.Load())
 		st.DroppedReadings = c.statusDroppedReadings.Load()
+	}
+	// Power mode is deliberately not staleness-gated: burst and protect are
+	// exactly the modes whose point is a long silence after the last Status.
+	st.StatusAgeS = -1
+	if lastStatus > 0 {
+		mode := uint8(c.statusPowerMode.Load())
+		st.PowerMode = statusPowerModeText(mode)
+		st.SleepReason = statusSleepReasonText(uint8(c.statusSleepReason.Load()))
+		quiet := time.Duration(time.Now().UnixNano() - lastStatus)
+		st.StatusAgeS = int64(quiet / time.Second)
+		switch mode {
+		case powerModeBurstCollect, powerModeBurstUplink:
+			st.BurstQuiet = quiet < c.burstQuietAllowance()
+		case powerModeProtectPending, powerModeProtect:
+			st.ProtectSleep = true
+		}
 	}
 	lastBatt := c.lastBatteryTelemetryNs.Load()
 	if lastBatt > 0 && time.Now().UnixNano()-lastBatt < int64(batteryTelemetryStaleTimeout) {
@@ -105,15 +128,32 @@ func (c *Client) LinkStats() LinkStats {
 	return st
 }
 
-func (c *Client) noteRx() {
-	now := time.Now().UnixNano()
-	// After any dead period the pod's cumulative DroppedReadings counter must
-	// be re-baselined: whatever it lost while we weren't listening was not
-	// receivable by the hub and must not warn.
-	if prev := c.lastRxNs.Load(); prev > 0 && now-prev > int64(linkStaleTimeout) {
-		c.podDropBaselined.Store(false)
+// Pod power_mode values (firmware power.rs PowerMode). 1/2 are the retired
+// Phase-4 quiesce-sleep, still labeled for old firmware.
+const (
+	powerModeBurstCollect   = 3
+	powerModeBurstUplink    = 4
+	powerModeProtectPending = 5
+	powerModeProtect        = 6
+)
+
+// burstQuietAllowance is how long after the last Status a burst-mode pod may
+// stay silent before it counts as a real link problem: one collect window
+// plus the firmware's 45 s uplink timeout and reconnect slack.
+func (c *Client) burstQuietAllowance() time.Duration {
+	windowS := config.DefaultPodBurstWindowS
+	if c.cfg != nil {
+		windowS = c.cfg.Get().PodBurstWindowS()
 	}
-	c.lastRxNs.Store(now)
+	return time.Duration(windowS)*time.Second + 90*time.Second
+}
+
+func (c *Client) noteRx() {
+	// The pod's cumulative DroppedReadings counter is NOT re-baselined after
+	// quiet periods: since the burst protocol, anything the pod drops is
+	// stored-data loss (the product), receivable or not, and must warn. Only
+	// a pod reboot (counter decrease, handled in noteStatus) re-baselines.
+	c.lastRxNs.Store(time.Now().UnixNano())
 }
 
 func (c *Client) noteStatus(s wire.Status) {
@@ -164,9 +204,15 @@ func (c *Client) maybePublishBatteryFromStatus(v float32) {
 func statusPowerModeText(v uint8) string {
 	switch v {
 	case 1:
-		return "sleep_pending"
+		return "sleep_pending" // legacy firmware only
 	case 2:
-		return "sleeping"
+		return "sleeping" // legacy firmware only
+	case powerModeBurstCollect, powerModeBurstUplink:
+		return "burst"
+	case powerModeProtectPending:
+		return "protect_pending"
+	case powerModeProtect:
+		return "protect"
 	default:
 		return "active"
 	}

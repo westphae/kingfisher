@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/pod/wire"
 )
 
@@ -36,24 +37,45 @@ func TestRecentDropsBaseline(t *testing.T) {
 	}
 }
 
-// A dead link period must re-baseline: whatever the pod lost while we were
-// away was not receivable.
-func TestRecentDropsRebaselineAfterGap(t *testing.T) {
+// Since the burst protocol, a quiet period must NOT re-baseline: anything the
+// pod dropped while silent was stored-data loss and must warn on reconnect.
+// Only a counter reset (pod reboot) re-baselines.
+func TestRecentDropsWarnAcrossGap(t *testing.T) {
 	c := &Client{}
 	c.noteStatus(statusWithDrops(100))
 	c.noteRx()
 
-	// Simulate a stale gap by backdating lastRxNs beyond linkStaleTimeout.
+	// Simulate a long quiet period (e.g. burst collect or AP outage).
 	c.lastRxNs.Store(time.Now().Add(-2 * linkStaleTimeout).UnixNano())
-	c.noteRx() // reconnect → unbaselined
+	c.noteRx()
 
-	c.noteStatus(statusWithDrops(900)) // backlog from the outage: baseline only
-	if c.lastDropNs.Load() != 0 {
-		t.Fatalf("post-outage backlog marked a recent drop")
-	}
-	c.noteStatus(statusWithDrops(901)) // now genuine growth
+	c.noteStatus(statusWithDrops(900)) // grew while quiet: real loss, warn
 	if c.lastDropNs.Load() == 0 {
-		t.Fatalf("post-rebaseline growth did not mark a recent drop")
+		t.Fatalf("overrun growth across a quiet period did not warn")
+	}
+}
+
+// A burst-mode pod that is silent within its collect window reports
+// BurstQuiet; once the allowance passes, the silence is a real problem.
+func TestBurstQuietAllowance(t *testing.T) {
+	c := &Client{}
+	c.noteStatus(wire.Status{PowerMode: powerModeBurstCollect})
+	st := c.LinkStats()
+	if st.PowerMode != "burst" {
+		t.Fatalf("PowerMode = %q, want burst", st.PowerMode)
+	}
+	if !st.BurstQuiet {
+		t.Errorf("fresh burst status should be BurstQuiet")
+	}
+
+	c.lastStatusNs.Store(time.Now().Add(-time.Duration(config.DefaultPodBurstWindowS)*time.Second - 2*time.Minute).UnixNano())
+	if st := c.LinkStats(); st.BurstQuiet {
+		t.Errorf("silence beyond the burst allowance should not be BurstQuiet")
+	}
+
+	c.noteStatus(wire.Status{PowerMode: powerModeProtect})
+	if st := c.LinkStats(); !st.ProtectSleep || st.PowerMode != "protect" {
+		t.Errorf("protect status: got PowerMode=%q ProtectSleep=%v", st.PowerMode, st.ProtectSleep)
 	}
 }
 

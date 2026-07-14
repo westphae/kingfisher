@@ -71,13 +71,13 @@ func TestOnBatchClampsOutOfWindowTs(t *testing.T) {
 	})
 
 	before := c.tsClamped.Load()
-	// AgeUs beyond the 5-min corruption ceiling (a wedged buffer or bogus
-	// age) — well past any legitimate deep-buffer backlog, so it must be
+	// AgeUs beyond the 10-min corruption ceiling (a wedged buffer or bogus
+	// age) — well past any legitimate burst-store backlog, so it must be
 	// clamped to recvNs rather than written as a stale/garbage timestamp.
-	const huge = uint32(360_000_000) // 6 min
+	const huge = uint32(660_000_000) // 11 min
 	tBefore := time.Now().UnixNano()
 	c.onBatch(wire.SampleBatch{
-		PodUptimeUs: 400_000_000, // 400 s uptime, no underflow
+		PodUptimeUs: 700_000_000, // 700 s uptime, no underflow
 		Seq:         1,
 		Samples: []wire.Reading{
 			wire.StaticReading{PPa: 98_000, TempC: 17, AgeUs: huge},

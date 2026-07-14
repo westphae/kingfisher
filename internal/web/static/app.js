@@ -719,11 +719,33 @@ function nearlyEqual(opt, val) {
 
 function podLinkLabel(pod) {
   if (!pod || !pod.enabled) return 'Pod ingest off';
+  if (pod.protect_sleep) return `Battery protect — pod sleeping (${pod.sleep_reason || 'low battery'})`;
+  if (pod.power_mode === 'burst') {
+    const age = Number.isFinite(pod.status_age_s) && pod.status_age_s >= 0 ? ` ${formatAgeShort(pod.status_age_s)}` : '';
+    if (pod.connected) return 'Burst mode — uplinking';
+    if (pod.burst_quiet) return `Burst mode — collecting, radio off (last sync${age})`;
+    return `Burst mode — sync overdue (last sync${age})`;
+  }
   if (pod.power_mode === 'sleeping') return `Sleeping (${pod.sleep_reason || 'battery'})`;
   if (pod.power_mode === 'sleep_pending') return `Sleep pending (${pod.sleep_reason || 'battery'})`;
   if (!pod.connected) return 'No recent pod traffic';
   if (pod.recent_drops) return 'Link up (recent drops)';
   return 'Link OK';
+}
+
+function formatAgeShort(s) {
+  if (!Number.isFinite(s) || s < 0) return '';
+  if (s < 90) return `${Math.round(s)}s ago`;
+  return `${Math.round(s / 60)}m ago`;
+}
+
+// Chip/drawer severity for the pod link. Burst-quiet silence is healthy;
+// protect is dispatch-relevant; an overdue burst sync is a real problem.
+function podLinkClass(p) {
+  if (p.protect_sleep) return 'warn';
+  if (!p.connected && p.power_mode === 'burst') return p.burst_quiet ? 'ok' : 'warn';
+  if (!p.connected) return 'off';
+  return p.recent_drops ? 'warn' : 'ok';
 }
 
 function formatRssi(dbm) {
@@ -1039,7 +1061,7 @@ function renderPodStatusFull(el) {
     el.innerHTML = '<span class="dim">Pod ingest disabled</span>';
     return;
   }
-  const linkCls = !p.connected ? 'off' : (p.recent_drops ? 'warn' : 'ok');
+  const linkCls = podLinkClass(p);
   let rssiText = '—';
   let rssiCls = '';
   if (p.has_rssi) {
@@ -1088,9 +1110,13 @@ function compactPodChip() {
   if (!state.serverConnected) {
     return '<button type="button" class="statusChip statusChip-offline" data-open-status="pod">Pod offline</button>';
   }
-  const linkCls = !p.connected ? 'off' : (p.recent_drops ? 'warn' : 'ok');
+  const linkCls = podLinkClass(p);
   let parts = ['Pod'];
-  if (p.has_rssi && Number.isFinite(p.rssi_dbm)) {
+  if (p.protect_sleep) {
+    parts.push('protect');
+  } else if (p.power_mode === 'burst' && !p.connected) {
+    parts.push(p.burst_quiet ? 'burst' : 'burst overdue');
+  } else if (p.has_rssi && Number.isFinite(p.rssi_dbm)) {
     parts.push(`${p.rssi_dbm} dBm`);
   } else if (!p.connected) {
     parts.push('off');

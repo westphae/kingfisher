@@ -37,11 +37,13 @@ const (
 	// bogus pod uptime), NOT a legitimate-age limit: the pod's per-sensor
 	// ring buffers up to BUFFER_MAX_READINGS (128) samples, so during a
 	// link outage the oldest legitimately-buffered reading can be
-	// 128 / min_rate ≈ 128/10 Hz ≈ 13 s old. tsClampPast must stay well
+	// 128 / min_rate ≈ 128/10 Hz ≈ 13 s old, and in burst mode the burst
+	// store legitimately holds a full collect window (default 60 s, longer
+	// when uplinks fail and the rings wrap). tsClampPast must stay well
 	// above that so a real buffered backlog is preserved, not collapsed
-	// onto recvNs. 5 min leaves huge margin while still catching insane
+	// onto recvNs. 10 min leaves huge margin while still catching insane
 	// values. 1 s future covers minor offset overshoot / clock skew.
-	tsClampPast   = int64(5 * time.Minute)
+	tsClampPast   = int64(10 * time.Minute)
 	tsClampFuture = int64(1 * time.Second)
 )
 
