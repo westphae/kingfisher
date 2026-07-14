@@ -60,16 +60,18 @@ The pod's `dropped_readings` counter is **no longer re-baselined after quiet
 gaps** — since burst mode, anything the pod drops is stored-data loss and must
 warn; only a counter reset (pod reboot) re-baselines.
 
-## Modem power-save: found broken on the Pi AP — default OFF
+## Modem power-save: verified working — ON in the aircraft config
 
 esp-radio 0.18 has `Controller::set_power_saving(PowerSaveMode::Minimum)`
-(unstable feature). Bench test 2026-07-14: with Minimum enabled the pod
-associates and uplinks normally, but **never receives AP→pod unicast** — it
-re-Hellos every 30 s (no-inbound rediscovery) and SetRate/Ping never arrive.
-The Pi's brcmfmac AP apparently fails to deliver TIM-buffered frames to a
-dozing STA. Gated behind `pod.modem_power_save` (default false) until that is
-solved (external AP hardware, or hostapd tuning); expected value if it ever
-works here: ~100 → ~55-65 mA while staying live.
+(unstable feature), set once on first association when
+`pod.modem_power_save` is true. An initial bench run looked like the Pi's
+brcmfmac AP dropped unicast to the dozing STA (re-Hello every 30 s, SetRate
+never applied) — that was actually a pre-existing firmware bug:
+`cmd::handle_datagram` did not `touch_inbound` for Ping frames, so the 5 s
+keepalive never suppressed the 30 s Hello rediscovery. With that fixed,
+power-save ran clean on the real AP (2 min, zero re-Hellos, cmds acked).
+The build default stays false (conservative for fresh setups); the aircraft
+config sets it true. Expected: ~100 → ~55-65 mA while staying fully live.
 
 ## Config (`~/.config/kingfisher/config.json`, `pod` section)
 

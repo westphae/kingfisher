@@ -142,10 +142,13 @@ See [`config.example.json`](../../config.example.json) for the `pod` block shape
   "wifi_password": "",
   "udp_addr": "192.168.10.1:47808",
   "battery_capacity_mah": 850,
-  "sleep_soc_pct": 20,
-  "sleep_voltage_v_uncalibrated": 3.60,
-  "sleep_debounce_s": 45,
-  "sleep_emergency_voltage_v": 3.50,
+  "burst_soc_pct": 30,
+  "burst_window_s": 60,
+  "burst_voltage_v_uncalibrated": 3.60,
+  "protect_voltage_v": 3.50,
+  "protect_soc_pct": 5,
+  "low_debounce_s": 45,
+  "modem_power_save": false,
   "buffer_max_readings": 128,
   "flush_interval_s": 3,
   "flush_high_watermark": 24
@@ -184,21 +187,27 @@ Pre-condition: Pi WiFi AP running; `~/.config/kingfisher/config.json`
 3. **MS4525 bench** (5 V applied): `airspeed_dp_pa` near 0 at rest; suction/blow on
    the `+` port moves ΔP. Without 5 V, `ms4525 not present` is expected.
 
-### Deep-sleep and burst validation
+### Power protocol validation (see docs/pod-power.md)
 
-1. **Fallback trigger (uncalibrated):** force gauge-unlearned conditions and hold
-   loaded voltage below `sleep_voltage_v_uncalibrated` for `sleep_debounce_s`;
-   status should move `power_mode: active -> sleep_pending -> sleeping` with
-   `sleep_reason: voltage_fallback`. Positive charge current (≥50 mA) inhibits
-   sleep and wakes a sleeping pod.
-2. **SOC trigger (learned):** after design capacity is programmed successfully,
-   drain below `sleep_soc_pct` and verify the same transition with
-   `sleep_reason: soc` (not while charging).
-3. **Emergency floor:** drop below `sleep_emergency_voltage_v` and verify immediate
-   `sleep_pending/sleeping` without waiting for debounce (`sleep_reason: emergency`).
-4. **Buffering checks:** introduce link delay/loss and verify status `buffer_depth`
-   grows, then bursts flush on `flush_high_watermark` or `flush_interval_s`;
-   `dropped_readings` should remain zero in nominal operation.
+Bench-verified 2026-07-14 with forced thresholds (temp `KINGFISHER_CONFIG`
+with `burst_soc_pct: 100` / `protect_soc_pct: 100`, short `low_debounce_s`,
+plus a temporary `CHARGE_CURRENT_A` bump so USB charge current doesn't force
+Active):
+
+1. **Burst cycling:** `power_mode` 3/4 in Status; radio drops between
+   windows (Pi shows `burst_quiet`); each window drains the full backlog
+   (tx counter jumps by ~backlog/8) and DB rows stay continuous across
+   radio-off periods (max inter-row gap ≈ sample period, not window
+   length). At 50 Hz static the 90% ring-fill trigger fires at ~27 s —
+   expected.
+2. **Protect:** `power_mode` 5 → 6 in Status, then USB/WiFi drop (deep
+   sleep). Timer wake every `PROTECT_WAKE_CHECK_S`: gauge read pre-WiFi;
+   recovered/charging resumes a normal boot (fresh uptime + Hello),
+   still-low goes straight back to sleep.
+3. **Keepalive:** exactly one Hello per association — the Pi's 5 s Ping
+   refreshes `last_inbound` (a Ping that doesn't would re-Hello every
+   30 s and re-trigger SetRate churn; that bug shipped in Phase 4 and was
+   fixed here).
 
 ### BQ27441 gauge learning
 

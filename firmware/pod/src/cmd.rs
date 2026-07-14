@@ -73,8 +73,11 @@ pub fn handle_datagram(bytes: &[u8], now_us: u64, uptime_us: u64) -> heapless::V
 
     match frame {
         Frame::Ping(p) => {
-            // Pong only: do not treat the 5 s pinger as app traffic (avoids Hello
-            // every ping) and do not re-queue gauge programming via SetAttr.
+            // Pings are the Pi's 5 s keepalive: they must refresh last_inbound
+            // so the 30 s Hello rediscovery stays suppressed (touch_inbound
+            // SUPPRESSES Hellos — a pod seeing only pings would otherwise
+            // re-Hello forever, and each Hello re-triggers SetRate churn).
+            link::touch_inbound(now_us);
             let _ = out.push(Frame::Pong(pod_wire::Pong {
                 seq: p.seq,
                 sender_uptime_us: uptime_us,
