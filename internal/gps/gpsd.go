@@ -20,6 +20,7 @@ import (
 
 	"github.com/westphae/kingfisher/internal/live"
 	"github.com/westphae/kingfisher/internal/store"
+	"github.com/westphae/kingfisher/internal/units"
 )
 
 // Fix is the latest known position from gpsd. Other packages (AHRS,
@@ -204,6 +205,10 @@ func (c *Client) skipForRate() bool {
 	return false
 }
 
+// minTrackSpeedMS gates track emission: below ~1 kt the GPS course is noise
+// and gpsd usually omits it entirely (decoding as a bogus 0.0).
+const minTrackSpeedMS = 0.5
+
 func (c *Client) onTPV(r *gpsd.TPVReport) {
 	if c.skipForRate() {
 		return
@@ -242,7 +247,6 @@ func (c *Client) onTPV(r *gpsd.TPVReport) {
 		"lon":       r.Lon,
 		"alt_msl":   r.Alt,
 		"gs":        r.Speed,
-		"track":     r.Track,
 		"vs":        r.Climb,
 		"h_acc":     r.Eph,
 		"v_acc":     r.Epv,
@@ -251,6 +255,12 @@ func (c *Client) onTPV(r *gpsd.TPVReport) {
 		"track_acc": r.Epd,
 		"fix":       float64(r.Mode),
 		"sats":      float64(c.sats.Load()),
+	}
+	// gpsd omits TPV track when stationary, which decodes as 0.0 — publishing
+	// that would masquerade as a valid (0,360] north track. Track is only
+	// meaningful in motion: emit it normalized when moving, NULL otherwise.
+	if hasFix && r.Speed > minTrackSpeedMS {
+		values["track"] = units.Heading360(r.Track)
 	}
 	if !r.Time.IsZero() {
 		// GNSS fix epoch for display/logging; sample TsNs stays on host wall clock.

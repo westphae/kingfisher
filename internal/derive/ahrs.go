@@ -13,6 +13,7 @@ import (
 	"github.com/westphae/kingfisher/internal/gps"
 	"github.com/westphae/kingfisher/internal/live"
 	"github.com/westphae/kingfisher/internal/store"
+	"github.com/westphae/kingfisher/internal/units"
 )
 
 // ahrsMagMaxAgeNs is how stale a magnetometer sample may be before AHRS
@@ -71,7 +72,7 @@ func AHRSFromHub(ctx context.Context, holder *config.Holder, rateHz float64, hub
 				Values: map[string]float64{
 					"roll":            radToDeg(roll),
 					"pitch":           radToDeg(pitch),
-					"yaw":             radToDeg(heading),
+					"yaw":             units.Heading360(radToDeg(heading)),
 					"slip_skid":       provider.SlipSkid(),
 					"turn_rate_deg_s": provider.RateOfTurn(),
 					"g_load":          provider.GLoad(),

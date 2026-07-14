@@ -15,6 +15,17 @@ import "math"
 // GaussToMicroTesla converts kernel IIO magnetometer readings (Gauss) to µT.
 const GaussToMicroTesla = 100.0
 
+// Heading360 normalizes a heading/track angle to the aviation (0, 360] range:
+// north is 360, never 0. NaN passes through. Use for every published heading
+// or track channel (gps track, ahrs yaw, compass heading_*).
+func Heading360(deg float64) float64 {
+	m := math.Mod(deg, 360)
+	if m <= 0 {
+		m += 360
+	}
+	return m
+}
+
 // NormalizeIIO converts a raw IIO channel reading to canonical units.
 // Channel names are the Linux IIO channel ids (e.g. "pressure", "temp").
 func NormalizeIIO(channel string, v float64) float64 {

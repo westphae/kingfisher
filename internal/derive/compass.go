@@ -16,6 +16,7 @@ import (
 	"github.com/westphae/kingfisher/internal/gps"
 	"github.com/westphae/kingfisher/internal/live"
 	"github.com/westphae/kingfisher/internal/store"
+	"github.com/westphae/kingfisher/internal/units"
 )
 
 const compassDevice = "compass"
@@ -276,16 +277,18 @@ func (e *Engine) tick(hub *live.Hub, gpsc *gps.Client, buf *store.Buffer, dt flo
 	measFull := inTaxi && headingVehOK && fix.HasFix && !math.IsNaN(trackTrue)
 
 	vals := map[string]float64{
-		"heading_sensor_deg": field.HeadingSensorDeg(magCal),
+		// units.Heading360 maps magkal's [0,360) onto the aviation (0,360]
+		// convention (north = 360, never 0).
+		"heading_sensor_deg": units.Heading360(field.HeadingSensorDeg(magCal)),
 		"filter_mode":        float64(mode),
 		"nis":                nis,
 		"converged":          converged,
 	}
 	if headingVehOK {
-		vals["heading_mag_deg"] = headingVehDeg
+		vals["heading_mag_deg"] = units.Heading360(headingVehDeg)
 		if decl, ok := snap.Devices["geo"]; ok {
 			if d, ok := decl.Values["declination"]; ok {
-				vals["heading_true_deg"] = field.HeadingDeg360(headingVehDeg + d)
+				vals["heading_true_deg"] = units.Heading360(headingVehDeg + d)
 			}
 		}
 	}

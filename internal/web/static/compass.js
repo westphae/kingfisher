@@ -25,10 +25,13 @@ const KFCompass = (function () {
     return KFSmooth.values(device, sample?.values ?? {});
   }
 
+  // Aviation (0,360] convention: north displays as 360, never 0. (The SVG
+  // needle rotation at line ~226 is angle-periodic, so 360 vs 0 is identical.)
   function heading360(deg) {
     const n = Number(deg);
     if (!Number.isFinite(n)) return null;
-    return ((n % 360) + 360) % 360;
+    const m = ((n % 360) + 360) % 360;
+    return m === 0 ? 360 : m;
   }
 
   function effectiveHMeasNt(hMeasNt, hModelNt) {

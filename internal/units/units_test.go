@@ -1,6 +1,9 @@
 package units
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestNormalizeIIO_pressure(t *testing.T) {
 	got := NormalizeIIO("pressure", 101.325)
@@ -40,5 +43,25 @@ func TestColumnForIIO(t *testing.T) {
 	}
 	if ColumnForIIO("accel_x") != "" {
 		t.Fatal("accel unchanged")
+	}
+}
+
+func TestHeading360(t *testing.T) {
+	cases := []struct{ in, want float64 }{
+		{0, 360}, // north is 360, never 0
+		{360, 360},
+		{-90, 270},
+		{725, 5},
+		{180, 180},
+		{-360, 360},
+		{359.9, 359.9},
+	}
+	for _, c := range cases {
+		if got := Heading360(c.in); got != c.want {
+			t.Errorf("Heading360(%v) = %v, want %v", c.in, got, c.want)
+		}
+	}
+	if !math.IsNaN(Heading360(math.NaN())) {
+		t.Errorf("Heading360(NaN) should stay NaN")
 	}
 }
