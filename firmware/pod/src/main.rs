@@ -5,11 +5,13 @@
 #![no_main]
 
 mod battery_cfg;
+mod burst;
 mod cfg;
 mod cmd;
 mod hello;
 mod link;
 mod power;
+mod radio;
 mod rates;
 mod sensors;
 
@@ -27,14 +29,21 @@ use esp_hal::{
     i2c::master::{Config as I2cConfig, I2c},
     interrupt::software::SoftwareInterruptControl,
     rng::Rng,
+    rtc_cntl::{sleep::TimerWakeupSource, wakeup_cause, Rtc},
+    system::SleepSource,
     time::Rate,
     timer::timg::TimerGroup,
 };
 use esp_println::println;
 use esp_radio::wifi::{
-    sta::StationConfig, AuthenticationMethod, Config, ControllerConfig, Interface, WifiController,
+    sta::StationConfig, AuthenticationMethod, Config, ControllerConfig, Interface, PowerSaveMode,
+    WifiController,
 };
 use pod_wire::{Frame, Status};
+
+/// Deep-sleep wake cadence in Protect: long enough to be negligible power,
+/// short enough that plugging in a charger is noticed within minutes.
+const PROTECT_WAKE_CHECK_S: u64 = 600;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -69,11 +78,43 @@ async fn main(spawner: Spawner) -> ! {
             i2c,
         )
     });
-    spawner.spawn(sensor_bringup_task(i2c).unwrap());
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
+
+    let mut rtc = Rtc::new(peripherals.LPWR);
+
+    // Protect-mode wake check: after a deep-sleep timer wake, look at the
+    // gauge BEFORE bringing up WiFi (the whole point is not to spend the
+    // power). Resume boot only when charging or genuinely recovered; if the
+    // gauge doesn't answer, fail open and boot normally. No .await happens
+    // before this point, so the sensor task cannot race us for the bus.
+    if matches!(wakeup_cause(), SleepSource::Timer) {
+        match sensors::bq27441::quick_check(i2c) {
+            Some((v, i)) if i < 0.05 && v < cfg::BURST_VOLTAGE_UNCALIBRATED => {
+                println!(
+                    "pod: protect wake check: {:.2} V {:.0} mA, still low; sleeping {} s",
+                    v,
+                    i * 1000.0,
+                    PROTECT_WAKE_CHECK_S
+                );
+                let timer =
+                    TimerWakeupSource::new(core::time::Duration::from_secs(PROTECT_WAKE_CHECK_S));
+                rtc.sleep_deep(&[&timer]);
+            }
+            Some((v, i)) => {
+                println!(
+                    "pod: protect wake check: {:.2} V {:.0} mA; resuming normal boot",
+                    v,
+                    i * 1000.0
+                );
+            }
+            None => println!("pod: protect wake check: gauge unreadable; booting normally"),
+        }
+    }
+
+    spawner.spawn(sensor_bringup_task(i2c).unwrap());
 
     let station_cfg = if cfg::PASSWORD.is_empty() {
         StationConfig::default()
@@ -117,13 +158,21 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(uplink_task(stack).unwrap());
 
     loop {
-        if power::sleep_requested() {
-            power::mark_sleeping();
-            println!("pod: sleep mode entered reason={:?}", power::sleep_reason());
-            Timer::after(Duration::from_secs(30)).await;
-            continue;
+        Timer::after(Duration::from_secs(1)).await;
+        if power::mode() == power::PowerMode::Protect {
+            // connection_task saw radio_wanted() drop and is stopping the
+            // radio; give it a moment for a clean deauth before the lights
+            // go out. Deep sleep powers down everything except the RTC.
+            Timer::after(Duration::from_secs(2)).await;
+            println!(
+                "pod: protect: deep sleep, wake check every {} s (reason={:?})",
+                PROTECT_WAKE_CHECK_S,
+                power::reason()
+            );
+            let timer =
+                TimerWakeupSource::new(core::time::Duration::from_secs(PROTECT_WAKE_CHECK_S));
+            rtc.sleep_deep(&[&timer]);
         }
-        Timer::after(Duration::from_secs(5)).await;
     }
 }
 
@@ -140,25 +189,56 @@ fn clamp_rssi_dbm(rssi: i32) -> i8 {
 
 #[embassy_executor::task]
 async fn connection_task(mut controller: WifiController<'static>) {
-    let mut rssi_tick = Ticker::every(Duration::from_secs(1));
+    // Modem power-save is a driver-global setting; esp_wifi_set_ps persists
+    // across stop/start cycles, so set it once on the first association.
+    let mut power_save_set = false;
     loop {
-        if power::sleep_requested() {
+        if !power::radio_wanted() {
+            if controller.is_connected() {
+                let _ = controller.disconnect_async().await;
+            }
+            radio::stop();
             link::clear_wifi_rssi();
-            Timer::after(Duration::from_secs(1)).await;
-            continue;
+            println!("pod: radio off ({:?})", power::mode());
+            while !power::radio_wanted() {
+                Timer::after(Duration::from_millis(250)).await;
+            }
+            radio::start();
+            println!("pod: radio on ({:?})", power::mode());
+            // Let the StationStart event land before connect.
+            Timer::after(Duration::from_millis(100)).await;
         }
         match controller.connect_async().await {
             Ok(info) => {
                 println!("pod: wifi connected: {:?}", info);
+                if cfg::MODEM_POWER_SAVE && !power_save_set {
+                    match controller.set_power_saving(PowerSaveMode::Minimum) {
+                        Ok(()) => {
+                            power_save_set = true;
+                            println!("pod: modem power-save Minimum");
+                        }
+                        Err(e) => println!("pod: set_power_saving: {:?}", e),
+                    }
+                }
                 if let Ok(rssi) = controller.rssi() {
                     link::set_wifi_rssi(clamp_rssi_dbm(rssi));
                 }
+                let mut poll_tick = Ticker::every(Duration::from_millis(250));
+                let mut ticks: u32 = 0;
                 loop {
-                    match select(rssi_tick.next(), controller.wait_for_disconnect_async()).await {
-                        Either::First(()) => match controller.rssi() {
-                            Ok(rssi) => link::set_wifi_rssi(clamp_rssi_dbm(rssi)),
-                            Err(_) => link::clear_wifi_rssi(),
-                        },
+                    match select(poll_tick.next(), controller.wait_for_disconnect_async()).await {
+                        Either::First(()) => {
+                            if !power::radio_wanted() {
+                                break;
+                            }
+                            ticks = ticks.wrapping_add(1);
+                            if ticks % 4 == 0 {
+                                match controller.rssi() {
+                                    Ok(rssi) => link::set_wifi_rssi(clamp_rssi_dbm(rssi)),
+                                    Err(_) => link::clear_wifi_rssi(),
+                                }
+                            }
+                        }
                         Either::Second(Ok(_)) | Either::Second(Err(_)) => {
                             link::clear_wifi_rssi();
                             println!("pod: wifi disconnected");
@@ -169,10 +249,14 @@ async fn connection_task(mut controller: WifiController<'static>) {
             }
             Err(e) => {
                 link::clear_wifi_rssi();
-                println!("pod: wifi connect error: {:?}", e);
+                if power::radio_wanted() {
+                    println!("pod: wifi connect error: {:?}", e);
+                }
             }
         }
-        Timer::after(Duration::from_secs(5)).await;
+        if power::radio_wanted() {
+            Timer::after(Duration::from_secs(5)).await;
+        }
     }
 }
 
@@ -213,9 +297,10 @@ async fn uplink_task(stack: Stack<'static>) {
             Either::First(()) => {
                 let now = Instant::now();
                 let uptime_us = now.as_micros();
-                let sleeping = power::sleep_requested();
+                power::tick(uptime_us);
+                let radio_up = power::radio_wanted() && stack.is_config_up();
 
-                if !sleeping && link::should_send_hello(uptime_us) {
+                if radio_up && link::should_send_hello(uptime_us) {
                     let mask = sensors::attached_mask();
                     let hello = hello::build(mask);
                     match pod_wire::encode_to_slice(&hello, &mut frame_buf) {
@@ -229,11 +314,39 @@ async fn uplink_task(stack: Stack<'static>) {
                     }
                 }
 
-                let depth = sensors::buffer_depth();
+                // Burst-store backlog drains first (oldest data), whenever the
+                // link is up: hard in a drain window, opportunistically after
+                // a recovery back to Active left leftovers behind.
+                let mut drain_clean = true;
+                if radio_up && burst::depth() > 0 {
+                    const MAX_DRAIN_BATCHES_PER_TICK: u32 = 32;
+                    for _ in 0..MAX_DRAIN_BATCHES_PER_TICK {
+                        seq = seq.wrapping_add(1);
+                        let batch = burst::build_batch(uptime_us, seq);
+                        if batch.samples.is_empty() {
+                            break;
+                        }
+                        let frame = Frame::Sample(batch);
+                        let mut sent = false;
+                        if let Ok(bytes) = pod_wire::encode_to_slice(&frame, &mut frame_buf) {
+                            let peer = pi_peer.unwrap_or(dest);
+                            sent = socket.send_to(bytes, peer).await.is_ok();
+                        }
+                        if sent {
+                            sent_since_log += 1;
+                        } else {
+                            drain_clean = false;
+                            break;
+                        }
+                    }
+                }
+
+                let depth = sensors::pending_depth();
                 let flush_due = last_flush_us == 0
                     || uptime_us.saturating_sub(last_flush_us) >= cfg::FLUSH_INTERVAL_US
-                    || depth >= cfg::FLUSH_HIGH_WATERMARK;
-                if flush_due && (!sleeping || depth > 0) {
+                    || depth >= cfg::FLUSH_HIGH_WATERMARK
+                    || power::drain_requested();
+                if radio_up && flush_due && depth > 0 {
                     // Wire batches cap at MAX_READINGS; drain backlog with short bursts.
                     const MAX_BATCHES_PER_FLUSH: u32 = 12;
                     let mut flushed = false;
@@ -251,7 +364,7 @@ async fn uplink_task(stack: Stack<'static>) {
                                 flushed = true;
                             }
                         }
-                        if sensors::buffer_depth() == 0 {
+                        if sensors::pending_depth() == 0 {
                             break;
                         }
                     }
@@ -260,7 +373,28 @@ async fn uplink_task(stack: Stack<'static>) {
                     }
                 }
 
-                if now >= next_status {
+                // A drain window ends when everything reached the wire; send
+                // a fresh Status alongside so the Pi sees the mode + depth 0.
+                if power::drain_requested()
+                    && radio_up
+                    && drain_clean
+                    && sensors::buffer_depth() == 0
+                {
+                    next_status = now; // force immediate Status below
+                    match power::mode() {
+                        power::PowerMode::BurstUplink => {
+                            println!("pod: burst uplink complete");
+                            power::note_uplink_complete(uptime_us);
+                        }
+                        power::PowerMode::ProtectPending => {
+                            println!("pod: protect flush complete");
+                            power::note_protect_flushed(uptime_us);
+                        }
+                        _ => {}
+                    }
+                }
+
+                if radio_up && now >= next_status {
                     next_status = now + Duration::from_secs(5);
                     let status = Frame::Status(Status {
                         pod_uptime_us: uptime_us,
@@ -269,9 +403,10 @@ async fn uplink_task(stack: Stack<'static>) {
                         tx_seq: seq,
                         rx_seq_last: cmd::last_rx_cmd_seq(),
                         power_mode: power::mode() as u8,
-                        sleep_reason: power::sleep_reason() as u8,
+                        sleep_reason: power::reason() as u8,
                         buffer_depth: sensors::buffer_depth(),
-                        dropped_readings: sensors::dropped_readings(),
+                        dropped_readings: sensors::dropped_readings()
+                            .saturating_add(burst::overwritten()),
                     });
                     if let Ok(bytes) = pod_wire::encode_to_slice(&status, &mut frame_buf) {
                         let peer = pi_peer.unwrap_or(dest);
@@ -280,7 +415,9 @@ async fn uplink_task(stack: Stack<'static>) {
                 }
 
                 if now >= next_log {
-                    println!("pod: uplink ok, {} pkts in last 5s", sent_since_log);
+                    if sent_since_log > 0 || power::radio_wanted() {
+                        println!("pod: uplink ok, {} pkts in last 5s", sent_since_log);
+                    }
                     sent_since_log = 0;
                     next_log = now + Duration::from_secs(5);
                 }

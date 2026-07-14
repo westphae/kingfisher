@@ -29,10 +29,20 @@ pub const BASE_HZ: u16 = (1000 / TICK_MS) as u16;
 
 /// LiPo design capacity (mAh) for BQ27441 gauge configuration at build time.
 pub const BATTERY_CAPACITY_MAH: u16 = parse_env_u16(env!("BATTERY_CAPACITY_MAH"));
-pub const SLEEP_SOC_PCT: u8 = parse_env_u8(env!("SLEEP_SOC_PCT"));
-pub const SLEEP_VOLTAGE_UNCALIBRATED: f32 = parse_env_millivolts(env!("SLEEP_VOLTAGE_UNCAL"));
-pub const SLEEP_DEBOUNCE_US: u64 = parse_env_u16(env!("SLEEP_DEBOUNCE_S")) as u64 * 1_000_000;
-pub const SLEEP_EMERGENCY_VOLTAGE: f32 = parse_env_millivolts(env!("SLEEP_EMERGENCY_V"));
+
+// Three-stage power protocol thresholds (see power.rs).
+pub const BURST_SOC_PCT: u8 = parse_env_u8(env!("BURST_SOC_PCT"));
+pub const BURST_WINDOW_S: usize = parse_env_u16(env!("BURST_WINDOW_S")) as usize;
+pub const BURST_WINDOW_US: u64 = BURST_WINDOW_S as u64 * 1_000_000;
+pub const BURST_VOLTAGE_UNCALIBRATED: f32 = parse_env_millivolts(env!("BURST_VOLTAGE_UNCAL"));
+pub const PROTECT_VOLTAGE: f32 = parse_env_millivolts(env!("PROTECT_VOLTAGE"));
+pub const PROTECT_SOC_PCT: u8 = parse_env_u8(env!("PROTECT_SOC_PCT"));
+pub const LOW_DEBOUNCE_US: u64 = parse_env_u16(env!("LOW_DEBOUNCE_S")) as u64 * 1_000_000;
+
+/// Modem power-save (DTIM doze) while associated. Default off: the Pi's
+/// brcmfmac AP fails to deliver buffered unicast to a dozing STA (verified
+/// 2026-07-14), which silently kills the Cmd/Ping inbound path.
+pub const MODEM_POWER_SAVE: bool = matches!(env!("MODEM_POWER_SAVE").as_bytes(), b"1");
 pub const FLUSH_INTERVAL_US: u64 = parse_env_u16(env!("FLUSH_INTERVAL_S")) as u64 * 1_000_000;
 pub const FLUSH_HIGH_WATERMARK: u16 = parse_env_u16(env!("FLUSH_HIGH_WATERMARK"));
 pub const BUFFER_MAX_READINGS: u16 = parse_env_u16(env!("BUFFER_MAX_READINGS"));

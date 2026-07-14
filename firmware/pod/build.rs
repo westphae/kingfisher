@@ -27,20 +27,26 @@ struct PodSection {
     udp_addr: String,
     #[serde(default = "default_battery_capacity", rename = "battery_capacity_mah")]
     battery_capacity_mah: u16,
-    #[serde(default = "default_sleep_soc_pct", rename = "sleep_soc_pct")]
-    sleep_soc_pct: u8,
+    #[serde(default = "default_burst_soc_pct", rename = "burst_soc_pct")]
+    burst_soc_pct: u8,
+    #[serde(default = "default_burst_window_s", rename = "burst_window_s")]
+    burst_window_s: u16,
     #[serde(
-        default = "default_sleep_voltage_uncal",
-        rename = "sleep_voltage_v_uncalibrated"
+        default = "default_burst_voltage_uncal",
+        rename = "burst_voltage_v_uncalibrated"
     )]
-    sleep_voltage_v_uncalibrated: f32,
-    #[serde(default = "default_sleep_debounce_s", rename = "sleep_debounce_s")]
-    sleep_debounce_s: u16,
-    #[serde(
-        default = "default_sleep_emergency_v",
-        rename = "sleep_emergency_voltage_v"
-    )]
-    sleep_emergency_voltage_v: f32,
+    burst_voltage_v_uncalibrated: f32,
+    #[serde(default = "default_protect_voltage", rename = "protect_voltage_v")]
+    protect_voltage_v: f32,
+    #[serde(default = "default_protect_soc_pct", rename = "protect_soc_pct")]
+    protect_soc_pct: u8,
+    #[serde(default = "default_low_debounce_s", rename = "low_debounce_s")]
+    low_debounce_s: u16,
+    // Default OFF: bench test 2026-07-14 showed PowerSaveMode::Minimum breaks
+    // AP→pod unicast delivery on the Pi's brcmfmac AP (pod misses all Cmd/Ping
+    // frames; re-Hellos every 30 s; SetRate never applies).
+    #[serde(default, rename = "modem_power_save")]
+    modem_power_save: bool,
     #[serde(default = "default_flush_interval_s", rename = "flush_interval_s")]
     flush_interval_s: u16,
     #[serde(default = "default_flush_watermark", rename = "flush_high_watermark")]
@@ -53,17 +59,23 @@ fn default_battery_capacity() -> u16 {
     850
 }
 
-fn default_sleep_soc_pct() -> u8 {
-    20
+fn default_burst_soc_pct() -> u8 {
+    30
 }
-fn default_sleep_voltage_uncal() -> f32 {
+fn default_burst_window_s() -> u16 {
+    60
+}
+fn default_burst_voltage_uncal() -> f32 {
     3.60
 }
-fn default_sleep_debounce_s() -> u16 {
-    45
-}
-fn default_sleep_emergency_v() -> f32 {
+fn default_protect_voltage() -> f32 {
     3.50
+}
+fn default_protect_soc_pct() -> u8 {
+    5
+}
+fn default_low_debounce_s() -> u16 {
+    45
 }
 fn default_flush_interval_s() -> u16 {
     3
@@ -122,18 +134,24 @@ fn main() {
         "cargo:rustc-env=BATTERY_CAPACITY_MAH={}",
         cfg.pod.battery_capacity_mah
     );
-    println!("cargo:rustc-env=SLEEP_SOC_PCT={}", cfg.pod.sleep_soc_pct);
+    println!("cargo:rustc-env=BURST_SOC_PCT={}", cfg.pod.burst_soc_pct);
+    println!("cargo:rustc-env=BURST_WINDOW_S={}", cfg.pod.burst_window_s);
     println!(
-        "cargo:rustc-env=SLEEP_VOLTAGE_UNCAL={:.3}",
-        cfg.pod.sleep_voltage_v_uncalibrated
+        "cargo:rustc-env=BURST_VOLTAGE_UNCAL={:.3}",
+        cfg.pod.burst_voltage_v_uncalibrated
     );
     println!(
-        "cargo:rustc-env=SLEEP_DEBOUNCE_S={}",
-        cfg.pod.sleep_debounce_s
+        "cargo:rustc-env=PROTECT_VOLTAGE={:.3}",
+        cfg.pod.protect_voltage_v
     );
     println!(
-        "cargo:rustc-env=SLEEP_EMERGENCY_V={:.3}",
-        cfg.pod.sleep_emergency_voltage_v
+        "cargo:rustc-env=PROTECT_SOC_PCT={}",
+        cfg.pod.protect_soc_pct
+    );
+    println!("cargo:rustc-env=LOW_DEBOUNCE_S={}", cfg.pod.low_debounce_s);
+    println!(
+        "cargo:rustc-env=MODEM_POWER_SAVE={}",
+        if cfg.pod.modem_power_save { "1" } else { "0" }
     );
     println!(
         "cargo:rustc-env=FLUSH_INTERVAL_S={}",

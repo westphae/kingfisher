@@ -45,7 +45,8 @@ pub fn latest_battery_v() -> f32 {
     f32::from_bits(bits)
 }
 
-pub fn buffer_depth() -> u16 {
+/// Depth of the live pending queues only (excludes the burst store).
+pub fn pending_depth() -> u16 {
     with_samples_mut(|s| {
         let n = s.pending_static.len()
             + s.pending_mag.len()
@@ -53,6 +54,11 @@ pub fn buffer_depth() -> u16 {
             + s.pending_battery.len();
         n.min(u16::MAX as usize) as u16
     })
+}
+
+/// Total buffered readings (pending queues + burst store) for Status frames.
+pub fn buffer_depth() -> u16 {
+    pending_depth().saturating_add(crate::burst::depth())
 }
 
 pub fn dropped_readings() -> u32 {
@@ -346,7 +352,14 @@ pub fn with_samples_mut<R>(f: impl FnOnce(&mut LatestSamples) -> R) -> R {
     critical_section::with(|cs| f(&mut SAMPLES.borrow(cs).borrow_mut()))
 }
 
+// In burst-collect the radio is off: readings divert to the burst store and
+// come back out as normal wire batches during the next uplink window.
+
 pub fn push_static(reading: Reading, captured_us: u64) {
+    if crate::power::defer_readings() {
+        crate::burst::push(&reading, captured_us);
+        return;
+    }
     critical_section::with(|cs| {
         SAMPLES
             .borrow(cs)
@@ -359,6 +372,10 @@ pub fn push_static(reading: Reading, captured_us: u64) {
 }
 
 pub fn push_mag(reading: Reading, captured_us: u64) {
+    if crate::power::defer_readings() {
+        crate::burst::push(&reading, captured_us);
+        return;
+    }
     critical_section::with(|cs| {
         SAMPLES.borrow(cs).borrow_mut().enqueue_mag(StampedReading {
             reading,
@@ -368,6 +385,10 @@ pub fn push_mag(reading: Reading, captured_us: u64) {
 }
 
 pub fn push_airspeed(reading: Reading, captured_us: u64) {
+    if crate::power::defer_readings() {
+        crate::burst::push(&reading, captured_us);
+        return;
+    }
     critical_section::with(|cs| {
         SAMPLES
             .borrow(cs)
@@ -380,6 +401,10 @@ pub fn push_airspeed(reading: Reading, captured_us: u64) {
 }
 
 pub fn push_battery(reading: Reading, captured_us: u64) {
+    if crate::power::defer_readings() {
+        crate::burst::push(&reading, captured_us);
+        return;
+    }
     critical_section::with(|cs| {
         SAMPLES
             .borrow(cs)
@@ -524,7 +549,7 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
                         // Feed the live DesignCapacity (0x3C) readback to the
                         // config tracker; it confirms/clears any pending write.
                         crate::battery_cfg::note_chip(s.design_capacity_mah);
-                        let _ = power::note_battery_sample(
+                        power::note_battery_sample(
                             cap_us,
                             s.voltage_v,
                             s.current_a,
@@ -571,11 +596,6 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
                     }
                 }
             }
-        }
-
-        if power::sleep_requested() {
-            power::mark_sleeping();
-            continue;
         }
 
         rates::begin_tick();

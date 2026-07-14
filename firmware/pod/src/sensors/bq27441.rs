@@ -164,6 +164,14 @@ impl Bq27441 {
     }
 }
 
+/// Minimal voltage/current read for the deep-sleep wake check: no init, no
+/// rate limiting, no Sample plumbing. None when the gauge doesn't answer.
+pub fn quick_check(bus: &mut I2cBus) -> Option<(f32, f32)> {
+    let v = read_word(bus, ADDR, CMD_VOLTAGE).ok()?;
+    let i = read_word_signed(bus, ADDR, CMD_AVG_CURRENT).ok()?;
+    Some((v as f32 / 1000.0, i as f32 / 1000.0))
+}
+
 fn i2c_gap() {
     block_for(Duration::from_micros(I2C_GAP_US));
 }
