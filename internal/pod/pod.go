@@ -90,6 +90,13 @@ type Client struct {
 	rxDropped atomic.Uint64
 	txPackets atomic.Uint64
 
+	// Drop recency: the cockpit chip warns only on drops the hub could have
+	// received (not the pod's backlog from before we were listening) and only
+	// for recentDropWindow after the last one.
+	lastDropNs       atomic.Int64
+	podDropBase      atomic.Uint64 // baseline of the pod's cumulative DroppedReadings
+	podDropBaselined atomic.Bool
+
 	lastStatusNs          atomic.Int64
 	statusRssi            atomic.Int32
 	statusBattery         atomic.Uint32
@@ -343,6 +350,7 @@ func (c *Client) onBatch(b wire.SampleBatch) {
 	if b.Seq > c.linkSeq+1 && c.linkSeq != 0 {
 		gap := uint64(b.Seq - c.linkSeq - 1)
 		c.rxDropped.Add(gap)
+		c.lastDropNs.Store(time.Now().UnixNano())
 		log.Printf("pod: seq gap %d -> %d (%d dropped)", c.linkSeq, b.Seq, gap)
 	}
 	c.linkSeq = b.Seq
@@ -398,6 +406,7 @@ func (c *Client) onBatch(b wire.SampleBatch) {
 		if readingNs < recvNs-tsClampPast || readingNs > recvNs+tsClampFuture {
 			readingNs = recvNs
 			c.tsClamped.Add(1)
+			c.lastDropNs.Store(time.Now().UnixNano())
 		}
 		sm := live.Sample{
 			Device: dev,

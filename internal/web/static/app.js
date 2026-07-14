@@ -722,7 +722,7 @@ function podLinkLabel(pod) {
   if (pod.power_mode === 'sleeping') return `Sleeping (${pod.sleep_reason || 'battery'})`;
   if (pod.power_mode === 'sleep_pending') return `Sleep pending (${pod.sleep_reason || 'battery'})`;
   if (!pod.connected) return 'No recent pod traffic';
-  if ((pod.rx_dropped || 0) > 0) return 'Link up (batch gaps)';
+  if (pod.recent_drops) return 'Link up (recent drops)';
   return 'Link OK';
 }
 
@@ -1039,8 +1039,7 @@ function renderPodStatusFull(el) {
     el.innerHTML = '<span class="dim">Pod ingest disabled</span>';
     return;
   }
-  const dropped = (p.rx_dropped || 0) + (p.dropped_readings || 0) + (p.ts_clamped || 0);
-  const linkCls = !p.connected ? 'off' : (dropped > 0 ? 'warn' : 'ok');
+  const linkCls = !p.connected ? 'off' : (p.recent_drops ? 'warn' : 'ok');
   let rssiText = '—';
   let rssiCls = '';
   if (p.has_rssi) {
@@ -1052,7 +1051,7 @@ function renderPodStatusFull(el) {
     ? battSocClass(p.battery_soc_pct)
     : '';
   el.className = `podStatus podStatus-${linkCls}`;
-  const droppedReadCls = (p.dropped_readings || 0) > 0 ? 'warn' : '';
+  const droppedReadCls = p.recent_drops && (p.dropped_readings || 0) > 0 ? 'warn' : '';
   const tsClampCls = (p.ts_clamped || 0) > 0 ? 'warn' : '';
   el.innerHTML =
     `<span class="podStatusItem"><span class="lbl">Pod</span> ${escapeHtml(podLinkLabel(p))}</span>` +
@@ -1089,8 +1088,7 @@ function compactPodChip() {
   if (!state.serverConnected) {
     return '<button type="button" class="statusChip statusChip-offline" data-open-status="pod">Pod offline</button>';
   }
-  const dropped = (p.rx_dropped || 0) + (p.dropped_readings || 0) + (p.ts_clamped || 0);
-  const linkCls = !p.connected ? 'off' : (dropped > 0 ? 'warn' : 'ok');
+  const linkCls = !p.connected ? 'off' : (p.recent_drops ? 'warn' : 'ok');
   let parts = ['Pod'];
   if (p.has_rssi && Number.isFinite(p.rssi_dbm)) {
     parts.push(`${p.rssi_dbm} dBm`);

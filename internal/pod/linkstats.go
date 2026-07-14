@@ -17,18 +17,27 @@ const statusStaleTimeout = 15 * time.Second
 // batteryTelemetryStaleTimeout is how long before the last bq27441 sample is stale.
 const batteryTelemetryStaleTimeout = 15 * time.Second
 
+// recentDropWindow is how long after the last observed drop the cockpit chip
+// stays yellow. Older drops remain in the counters but stop warning.
+const recentDropWindow = time.Minute
+
 // LinkStats is a snapshot of wing-pod UDP link health for the cockpit UI.
 type LinkStats struct {
-	Enabled    bool    `json:"enabled"`
-	Connected  bool    `json:"connected"`
-	RxPackets  uint64  `json:"rx_packets"` // SampleBatch frames received
-	RxDropped  uint64  `json:"rx_dropped"` // batches inferred lost from seq gaps
-	TxPackets  uint64  `json:"tx_packets"` // Ping/Cmd/Pong frames sent to the pod
-	TsClamped  uint64  `json:"ts_clamped"` // readings whose reconstructed TsNs was clamped to recvNs
-	HasRssi    bool    `json:"has_rssi"`
-	RssiDBm    int8    `json:"rssi_dbm"`    // pod WiFi STA RSSI toward the Pi AP
-	HasBattery bool    `json:"has_battery"` // true when Status reports a non-zero voltage
-	BatteryV   float32 `json:"battery_v"`
+	Enabled   bool   `json:"enabled"`
+	Connected bool   `json:"connected"`
+	RxPackets uint64 `json:"rx_packets"` // SampleBatch frames received
+	RxDropped uint64 `json:"rx_dropped"` // batches inferred lost from seq gaps
+	TxPackets uint64 `json:"tx_packets"` // Ping/Cmd/Pong frames sent to the pod
+	TsClamped uint64 `json:"ts_clamped"` // readings whose reconstructed TsNs was clamped to recvNs
+	// RecentDrops is true when a drop the hub could have received (seq gap,
+	// timestamp clamp, or pod buffer overrun growth while connected) happened
+	// within recentDropWindow. Drives the cockpit warn state; the cumulative
+	// counters above keep the full session history.
+	RecentDrops bool    `json:"recent_drops"`
+	HasRssi     bool    `json:"has_rssi"`
+	RssiDBm     int8    `json:"rssi_dbm"`    // pod WiFi STA RSSI toward the Pi AP
+	HasBattery  bool    `json:"has_battery"` // true when Status reports a non-zero voltage
+	BatteryV    float32 `json:"battery_v"`
 
 	HasBatteryTelemetry bool    `json:"has_battery_telemetry"`
 	BatteryCurrentA     float32 `json:"battery_current_a"`
@@ -58,6 +67,9 @@ func (c *Client) LinkStats() LinkStats {
 		RxDropped: c.rxDropped.Load(),
 		TxPackets: c.txPackets.Load(),
 		TsClamped: c.tsClamped.Load(),
+	}
+	if lastDrop := c.lastDropNs.Load(); lastDrop > 0 {
+		st.RecentDrops = time.Now().UnixNano()-lastDrop < int64(recentDropWindow)
 	}
 	lastStatus := c.lastStatusNs.Load()
 	if lastStatus > 0 && time.Now().UnixNano()-lastStatus < int64(statusStaleTimeout) {
@@ -94,7 +106,14 @@ func (c *Client) LinkStats() LinkStats {
 }
 
 func (c *Client) noteRx() {
-	c.lastRxNs.Store(time.Now().UnixNano())
+	now := time.Now().UnixNano()
+	// After any dead period the pod's cumulative DroppedReadings counter must
+	// be re-baselined: whatever it lost while we weren't listening was not
+	// receivable by the hub and must not warn.
+	if prev := c.lastRxNs.Load(); prev > 0 && now-prev > int64(linkStaleTimeout) {
+		c.podDropBaselined.Store(false)
+	}
+	c.lastRxNs.Store(now)
 }
 
 func (c *Client) noteStatus(s wire.Status) {
@@ -105,6 +124,17 @@ func (c *Client) noteStatus(s wire.Status) {
 	c.statusSleepReason.Store(uint32(s.SleepReason))
 	c.statusBufferDepth.Store(uint32(s.BufferDepth))
 	c.statusDroppedReadings.Store(uint64(s.DroppedReadings))
+	// Warn only when the pod's overrun counter grows while we are connected.
+	// First sight after (re)connect — or a pod reboot resetting the counter —
+	// just re-baselines: that backlog predates our listening.
+	dr := uint64(s.DroppedReadings)
+	if !c.podDropBaselined.Load() || dr < c.podDropBase.Load() {
+		c.podDropBase.Store(dr)
+		c.podDropBaselined.Store(true)
+	} else if dr > c.podDropBase.Load() {
+		c.podDropBase.Store(dr)
+		c.lastDropNs.Store(time.Now().UnixNano())
+	}
 	c.maybePublishBatteryFromStatus(s.BatteryV)
 }
 
