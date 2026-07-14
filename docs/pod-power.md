@@ -1,0 +1,90 @@
+# Pod power protocol
+
+The wing pod's power policy exists to serve one goal: **the stored data is the
+product**. No stage ever discards sensor data to save power — low battery
+defers delivery; only imminent LiPo damage stops collection.
+
+## Why (assessment, July 2026)
+
+Measured board draw (bq27441, 2026-07-11 flight): **~100 mA** ≈ radio
+RX-always-on ~65-70 mA + CPU ~20-25 mA + sensors ~5 mA. 2000 mAh ≈ 20 h.
+The retired Phase-4 "sleep" quiesced sensors (losing all data) while leaving
+radio + CPU powered — ~10-20% saving for 100% data loss, and its 20% SOC
+threshold was sized for the old 750 mAh pack.
+
+Burst-cycle math: reconnect costs ~3 s at ~110 mA per cycle. At 60 s windows
+that is +5 mA average on a ~30 mA radio-off floor; longer windows change
+little (120 s saves only 2.5 mA more), so window length is a RAM choice, not a
+power choice.
+
+| Mode | Draw | 2000 mAh | Last 20% |
+|---|---|---|---|
+| Live streaming (today) | ~100 mA | ~20 h | ~4 h |
+| Burst (radio off between syncs) | ~31-37 mA | ~55-65 h | ~11-13 h |
+| Deep sleep (protect) | ~5 µA | — | — |
+
+## The three stages (`firmware/pod/src/power.rs`)
+
+1. **Active** — live streaming, exactly as before.
+2. **Burst** — on battery with SOC ≤ `burst_soc_pct` (default 30%; voltage
+   fallback `burst_voltage_v_uncalibrated` 3.60 V when the gauge is not
+   trusted), debounced `low_debounce_s` (45 s): the radio is stopped
+   (`esp_wifi_stop` via `radio.rs` — esp-radio 0.18 has no public stop/start;
+   its event-driven state machine stays coherent with the raw calls). Sensors
+   keep sampling at full rate into `burst.rs` — compact per-sensor rings
+   (~149 KB .bss) sized for 50 Hz mag/static over one `burst_window_s`
+   (default 60 s). Each window (or early at 90% ring fill) the radio comes up,
+   the backlog drains as normal wire batches, and the radio goes back down.
+   Ring overflow overwrites oldest and is counted in `dropped_readings`.
+   Hysteresis +5% SOC / +0.05 V to return to Active; charging returns
+   instantly.
+3. **Protect** — voltage ≤ `protect_voltage_v` (3.50) or SOC ≤
+   `protect_soc_pct` (5%), debounced; immediate below 3.40 V: final drain +
+   Status, then true deep sleep (~5 µA) waking every 10 min for a minimal
+   pre-WiFi gauge check (`bq27441::quick_check` in main.rs). Resumes on
+   charging or recovery; otherwise sleeps again. This is the LiPo protection —
+   and the only stage that stops collecting.
+
+## Wire / Pi contract
+
+No wire-format change. `Status.power_mode` values: 0 active, 1/2 legacy
+quiesce-sleep (retired), 3 burst-collect, 4 burst-uplink, 5 protect-pending,
+6 protect. Drained batches carry fresh `pod_uptime_us` with per-reading
+`age_us`, so the Pi's EMA clock offset stays valid across bursts
+(`tsClampPast` is 10 min to admit the backlog).
+
+Pi side (`internal/pod`): burst/protect modes are not staleness-gated in
+`LinkStats`; `burst_quiet` marks silence within one window + 90 s as healthy
+(chip shows a neutral "burst" state, warn when overdue; "protect" warns).
+The pod's `dropped_readings` counter is **no longer re-baselined after quiet
+gaps** — since burst mode, anything the pod drops is stored-data loss and must
+warn; only a counter reset (pod reboot) re-baselines.
+
+## Modem power-save: found broken on the Pi AP — default OFF
+
+esp-radio 0.18 has `Controller::set_power_saving(PowerSaveMode::Minimum)`
+(unstable feature). Bench test 2026-07-14: with Minimum enabled the pod
+associates and uplinks normally, but **never receives AP→pod unicast** — it
+re-Hellos every 30 s (no-inbound rediscovery) and SetRate/Ping never arrive.
+The Pi's brcmfmac AP apparently fails to deliver TIM-buffered frames to a
+dozing STA. Gated behind `pod.modem_power_save` (default false) until that is
+solved (external AP hardware, or hostapd tuning); expected value if it ever
+works here: ~100 → ~55-65 mA while staying live.
+
+## Config (`~/.config/kingfisher/config.json`, `pod` section)
+
+`burst_soc_pct` 30 · `burst_window_s` 60 · `burst_voltage_v_uncalibrated`
+3.60 · `protect_voltage_v` 3.50 · `protect_soc_pct` 5 · `low_debounce_s` 45 ·
+`modem_power_save` false. All build-time (`build.rs` → `cfg.rs`); the Pi reads
+`burst_window_s` for the link-quiet allowance. Replaced: `sleep_soc_pct`,
+`sleep_voltage_v_uncalibrated`, `sleep_debounce_s`, `sleep_emergency_voltage_v`.
+
+## Deliberate v1 simplifications
+
+- 60 s f32 rings instead of 5 min compressed: ~3 mA from optimal, no
+  quantization layer. Revisit with delta/quantized packing if longer windows
+  are wanted.
+- Rings assume ≤50 Hz; higher rates shorten the effective window via the 90%
+  early-uplink trigger rather than growing buffers.
+- No flash-backed store: an AP outage longer than the ring keeps only the
+  newest window (counted as drops).
