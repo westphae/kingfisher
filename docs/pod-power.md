@@ -90,3 +90,15 @@ config sets it true. Expected: ~100 → ~55-65 mA while staying fully live.
   early-uplink trigger rather than growing buffers.
 - No flash-backed store: an AP outage longer than the ring keeps only the
   newest window (counted as drops).
+
+## Bench hazard: charging the pod from Pi USB
+
+Plugging the pod into the Pi's USB with a deeply discharged battery attached
+makes the BQ25185 draw its full input current the instant VBUS appears
+(charge current + ESP32 load, plus inrush). Under the Pi 5's default 600 mA
+downstream budget this trips the RP1's *shared* VBUS over-current switch in a
+continuous storm: **every** USB device drops, including a wifi dongle, so the
+Pi can look dead while it is running fine (observed 2026-07-15; the 5 V rail
+never sagged). The Pi now sets `usb_max_current_enable=1` (1.6 A budget,
+5 V/5 A supply required). Even so: detach or pre-charge the battery before
+connecting the pod to the Pi, or strap the BQ25185 ILIM ≤ 500 mA.
