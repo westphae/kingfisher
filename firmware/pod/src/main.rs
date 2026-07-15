@@ -21,7 +21,7 @@ use embassy_net::{
     udp::{PacketMetadata, UdpSocket},
     IpAddress, IpEndpoint, Runner, Stack, StackResources,
 };
-use embassy_time::{Duration, Instant, Ticker, Timer};
+use embassy_time::{with_timeout, Duration, Instant, Ticker, Timer};
 use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::{
@@ -44,6 +44,16 @@ use pod_wire::{Frame, Status};
 /// Deep-sleep wake cadence in Protect: long enough to be negligible power,
 /// short enough that plugging in a charger is noticed within minutes.
 const PROTECT_WAKE_CHECK_S: u64 = 600;
+
+/// Upper bound on any UDP send in uplink_task. A send that cannot complete
+/// this fast is pathological — in particular, a send enqueued while the
+/// radio is being torn down parks forever on a full socket buffer that
+/// nothing will ever drain. That wedged uplink_task (and with it
+/// power::tick, which drives every burst/protect transition) for 53 min on
+/// 2026-07-15: stuck in BurstCollect, radio off, rings overwriting, until
+/// charger current forced Active from the sensor task. No await in
+/// uplink_task may block unbounded.
+const SEND_TIMEOUT: Duration = Duration::from_millis(250);
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -305,7 +315,10 @@ async fn uplink_task(stack: Stack<'static>) {
                     let hello = hello::build(mask);
                     match pod_wire::encode_to_slice(&hello, &mut frame_buf) {
                         Ok(bytes) => {
-                            if socket.send_to(bytes, dest).await.is_ok() {
+                            if matches!(
+                                with_timeout(SEND_TIMEOUT, socket.send_to(bytes, dest)).await,
+                                Ok(Ok(()))
+                            ) {
                                 link::mark_hello_sent(uptime_us);
                                 println!("pod: sent Hello (caps={})", mask);
                             }
@@ -330,7 +343,10 @@ async fn uplink_task(stack: Stack<'static>) {
                         let mut sent = false;
                         if let Ok(bytes) = pod_wire::encode_to_slice(&frame, &mut frame_buf) {
                             let peer = pi_peer.unwrap_or(dest);
-                            sent = socket.send_to(bytes, peer).await.is_ok();
+                            sent = matches!(
+                                with_timeout(SEND_TIMEOUT, socket.send_to(bytes, peer)).await,
+                                Ok(Ok(()))
+                            );
                         }
                         if sent {
                             sent_since_log += 1;
@@ -359,7 +375,10 @@ async fn uplink_task(stack: Stack<'static>) {
                         let frame = Frame::Sample(batch);
                         if let Ok(bytes) = pod_wire::encode_to_slice(&frame, &mut frame_buf) {
                             let peer = pi_peer.unwrap_or(dest);
-                            if socket.send_to(bytes, peer).await.is_ok() {
+                            if matches!(
+                                with_timeout(SEND_TIMEOUT, socket.send_to(bytes, peer)).await,
+                                Ok(Ok(()))
+                            ) {
                                 sent_since_log += 1;
                                 flushed = true;
                             }
@@ -410,7 +429,7 @@ async fn uplink_task(stack: Stack<'static>) {
                     });
                     if let Ok(bytes) = pod_wire::encode_to_slice(&status, &mut frame_buf) {
                         let peer = pi_peer.unwrap_or(dest);
-                        let _ = socket.send_to(bytes, peer).await;
+                        let _ = with_timeout(SEND_TIMEOUT, socket.send_to(bytes, peer)).await;
                     }
                 }
 
@@ -431,12 +450,20 @@ async fn uplink_task(stack: Stack<'static>) {
                 let now_us = Instant::now().as_micros();
                 let uptime_us = now_us;
                 let replies = cmd::handle_datagram(&udp_rx[..n], now_us, uptime_us);
-                for reply in replies {
-                    if let Frame::Ack(a) = &reply {
-                        println!("pod: ack for_seq={} ok={}", a.for_seq, a.ok);
-                    }
-                    if let Ok(bytes) = pod_wire::encode_to_slice(&reply, &mut frame_buf) {
-                        let _ = socket.send_to(bytes, peer).await;
+                // Reply only while the radio is meant to be up: a datagram
+                // that raced the burst radio-stop (or sat queued in the
+                // socket across a radio-off window) must still be applied,
+                // but answering it can wait for the next uplink — this send
+                // is what wedged uplink_task on 2026-07-15.
+                if power::radio_wanted() && stack.is_config_up() {
+                    for reply in replies {
+                        if let Frame::Ack(a) = &reply {
+                            println!("pod: ack for_seq={} ok={}", a.for_seq, a.ok);
+                        }
+                        if let Ok(bytes) = pod_wire::encode_to_slice(&reply, &mut frame_buf) {
+                            let _ =
+                                with_timeout(SEND_TIMEOUT, socket.send_to(bytes, peer)).await;
+                        }
                     }
                 }
             }
