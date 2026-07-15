@@ -69,8 +69,14 @@ func TestBurstQuietAllowance(t *testing.T) {
 	}
 
 	c.lastStatusNs.Store(time.Now().Add(-time.Duration(config.DefaultPodBurstWindowS)*time.Second - 2*time.Minute).UnixNano())
-	if st := c.LinkStats(); st.BurstQuiet {
-		t.Errorf("silence beyond the burst allowance should not be BurstQuiet")
+	if st := c.LinkStats(); st.BurstQuiet || st.BurstLost {
+		t.Errorf("silence just beyond the allowance should be overdue, not quiet/lost: quiet=%v lost=%v", st.BurstQuiet, st.BurstLost)
+	}
+
+	// Far beyond any collect window: presumed protect sleep or dead link.
+	c.lastStatusNs.Store(time.Now().Add(-burstLostTimeout - time.Minute).UnixNano())
+	if st := c.LinkStats(); !st.BurstLost {
+		t.Errorf("silence beyond burstLostTimeout should be BurstLost")
 	}
 
 	c.noteStatus(wire.Status{PowerMode: powerModeProtect})

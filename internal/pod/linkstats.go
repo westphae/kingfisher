@@ -22,6 +22,15 @@ const batteryTelemetryStaleTimeout = 15 * time.Second
 // stays yellow. Older drops remain in the counters but stop warning.
 const recentDropWindow = time.Minute
 
+// burstLostTimeout is total silence after which a burst-mode pod is no longer
+// merely "overdue": no collect window is that long, and it matches the
+// firmware's protect wake-check period (PROTECT_WAKE_CHECK_S), so a pod that
+// was going to recover and re-Hello would have by now. The likeliest causes
+// are an unannounced protect sleep (the final protect Status is a single UDP
+// datagram, easily lost when the battery sags mid-flush), a dead battery, or
+// leaving radio range — the UI reports it as presumed asleep/lost.
+const burstLostTimeout = 10 * time.Minute
+
 // LinkStats is a snapshot of wing-pod UDP link health for the cockpit UI.
 type LinkStats struct {
 	Enabled   bool   `json:"enabled"`
@@ -41,9 +50,13 @@ type LinkStats struct {
 	BatteryV    float32 `json:"battery_v"`
 	// BurstQuiet: the pod said it is in burst mode and the current silence is
 	// still within the expected collect window — radio off by design, not a
-	// link problem. ProtectSleep: the pod announced deep-sleep battery
-	// protection; silence is indefinite until charged.
+	// link problem. BurstLost: burst-mode silence has exceeded
+	// burstLostTimeout, so the pod has presumably gone to protect sleep
+	// without the announcement arriving, died, or left range. ProtectSleep:
+	// the pod announced deep-sleep battery protection; silence is indefinite
+	// until charged.
 	BurstQuiet   bool `json:"burst_quiet"`
+	BurstLost    bool `json:"burst_lost"`
 	ProtectSleep bool `json:"protect_sleep"`
 	// StatusAgeS is seconds since the last Status frame (-1 before the first).
 	StatusAgeS int64 `json:"status_age_s"`
@@ -107,6 +120,7 @@ func (c *Client) LinkStats() LinkStats {
 		switch mode {
 		case powerModeBurstCollect, powerModeBurstUplink:
 			st.BurstQuiet = quiet < c.burstQuietAllowance()
+			st.BurstLost = quiet >= burstLostTimeout
 		case powerModeProtectPending, powerModeProtect:
 			st.ProtectSleep = true
 		}

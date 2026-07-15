@@ -724,6 +724,7 @@ function podLinkLabel(pod) {
     const age = Number.isFinite(pod.status_age_s) && pod.status_age_s >= 0 ? ` ${formatAgeShort(pod.status_age_s)}` : '';
     if (pod.connected) return 'Burst mode — uplinking';
     if (pod.burst_quiet) return `Burst mode — collecting, radio off (last sync${age})`;
+    if (pod.burst_lost) return `Silent since burst mode (last sync${age}) — protect sleep, dead battery, or pod fault`;
     return `Burst mode — sync overdue (last sync${age})`;
   }
   if (pod.power_mode === 'sleeping') return `Sleeping (${pod.sleep_reason || 'battery'})`;
@@ -854,11 +855,13 @@ function formatAgeSeconds(sec) {
 
 function disciplineSourceLabel(d) {
   if (!d) return '—';
+  // NTP source_label is the server hostname/IP — too long for the header chip;
+  // the tooltip still carries it via the detail string.
+  if (d.source === 'ntp') return 'NTP';
   if (d.source_label) return d.source_label;
   switch (d.source) {
     case 'pps': return 'PPS';
     case 'gps': return 'GPS';
-    case 'ntp': return 'NTP';
     case 'local': return 'Local';
     default: return 'Unknown';
   }
@@ -1115,7 +1118,12 @@ function compactPodChip() {
   if (p.protect_sleep) {
     parts.push('protect');
   } else if (p.power_mode === 'burst' && !p.connected) {
-    parts.push(p.burst_quiet ? 'burst' : 'burst overdue');
+    if (p.burst_lost) {
+      const age = Number.isFinite(p.status_age_s) && p.status_age_s >= 0 ? ` ${Math.round(p.status_age_s / 60)}m` : '';
+      parts.push(`silent${age}`);
+    } else {
+      parts.push(p.burst_quiet ? 'burst' : 'burst overdue');
+    }
   } else if (p.has_rssi && Number.isFinite(p.rssi_dbm)) {
     parts.push(`${p.rssi_dbm} dBm`);
   } else if (!p.connected) {
