@@ -48,6 +48,7 @@ import (
 	"github.com/westphae/kingfisher/internal/pod"
 	"github.com/westphae/kingfisher/internal/sensors"
 	"github.com/westphae/kingfisher/internal/store"
+	"github.com/westphae/kingfisher/internal/ups"
 	"github.com/westphae/kingfisher/internal/web/terminal"
 )
 
@@ -82,6 +83,7 @@ type Server struct {
 	reg     *sensors.Registry
 	compass *derive.Engine
 	nudger  *clock.AutoNudger
+	ups     *ups.Monitor
 	gdl90   *gdl90.Broadcaster
 
 	requestShutdown func(powerOff bool)
@@ -98,7 +100,7 @@ type Server struct {
 // on disk (parent of static/ and templates/). UI assets are read on each
 // request with Cache-Control: no-cache — no go build/restart needed for CSS/JS
 // edits. Production binaries leave devWebRoot empty and use go:embed instead.
-func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, gpsc *gps.Client, podc *pod.Client, reg *sensors.Registry, compass *derive.Engine, nudger *clock.AutoNudger, requestShutdown func(powerOff bool), devWebRoot string, gdl90bc *gdl90.Broadcaster) (*Server, error) {
+func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, gpsc *gps.Client, podc *pod.Client, reg *sensors.Registry, compass *derive.Engine, nudger *clock.AutoNudger, upsMon *ups.Monitor, requestShutdown func(powerOff bool), devWebRoot string, gdl90bc *gdl90.Broadcaster) (*Server, error) {
 	tpl, err := template.ParseFS(assets, "templates/*.html")
 	if err != nil {
 		return nil, err
@@ -119,6 +121,7 @@ func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, 
 		reg:             reg,
 		compass:         compass,
 		nudger:          nudger,
+		ups:             upsMon,
 		gdl90:           gdl90bc,
 		requestShutdown: requestShutdown,
 		tpl:             tpl,
@@ -322,6 +325,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		st["gdl90"] = s.gdl90.Stats()
 	} else {
 		st["gdl90"] = gdl90.Stats{Enabled: s.cfg.Get().GDL90.Enabled}
+	}
+	if s.ups != nil {
+		st["ups"] = s.ups.Status()
+	} else {
+		st["ups"] = ups.Snapshot{Enabled: cfg.UPS.Enabled}
 	}
 	writeJSON(w, st)
 }

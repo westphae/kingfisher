@@ -31,6 +31,7 @@ require (
 	github.com/dlclark/regexp2/v2 v2.1.1 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/google/pprof v0.0.0-20250317173921-a4b03ec1a45e // indirect
+	github.com/warthog618/go-gpiocdev v0.9.1 // indirect
 	golang.org/x/text v0.37.0 // indirect
 )
 

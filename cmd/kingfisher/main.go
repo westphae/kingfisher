@@ -27,6 +27,7 @@ import (
 	"github.com/westphae/kingfisher/internal/sensors"
 	"github.com/westphae/kingfisher/internal/store"
 	"github.com/westphae/kingfisher/internal/system"
+	"github.com/westphae/kingfisher/internal/ups"
 	"github.com/westphae/kingfisher/internal/web"
 )
 
@@ -202,7 +203,12 @@ func main() {
 
 	gdl90BC := gdl90.Run(ctx, stop, holder, hub, gpsClient)
 
-	srv, err := web.New(holder, hub, st, buf, gpsClient, podClient, registry, compassEngine, autoNudger, requestShutdown, devRoot, gdl90BC)
+	var upsMon *ups.Monitor
+	if cfg.UPS.Enabled {
+		upsMon = ups.New(holder, hub, buf, st, requestShutdown)
+	}
+
+	srv, err := web.New(holder, hub, st, buf, gpsClient, podClient, registry, compassEngine, autoNudger, upsMon, requestShutdown, devRoot, gdl90BC)
 	if err != nil {
 		log.Fatalf("web: %v", err)
 	}
@@ -227,6 +233,9 @@ func main() {
 	}
 	safeGo(&wg, "sensors", false, st, func() { sensors.Run(ctx, holder, readers, hub, buf, st, registry) })
 	safeGo(&wg, "system", false, st, func() { system.Run(ctx, holder, hub, buf, st, stop) })
+	if upsMon != nil {
+		safeGo(&wg, "ups", false, st, func() { upsMon.Run(ctx, stop) })
+	}
 	safeGo(&wg, "web", false, st, func() {
 		if err := srv.Run(cfg.HTTPAddr, stop); err != nil {
 			log.Printf("web: %v", err)

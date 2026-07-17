@@ -38,5 +38,12 @@
     "ownship_mode_s": "F00000",
     "device_short_name": "Kingfisher",
     "device_long_name": "kingfisher"
+  },
+  "ups": {
+    "enabled": false,
+    "rate_hz": 1,
+    "shutdown_after_s": 0,
+    "shutdown_soc_pct": 10,
+    "shutdown_voltage_v": 3.2
   }
 }

@@ -601,6 +601,7 @@ type Config struct {
 	Display    Display           `json:"display,omitempty"`
 	GDL90      GDL90             `json:"gdl90,omitempty"`
 	System     System            `json:"system,omitempty"`
+	UPS        UPS               `json:"ups,omitempty"`
 	Access     Access            `json:"access,omitempty"`
 }
 
@@ -651,6 +652,67 @@ func (s System) RateHzEffective() float64 {
 		return defaultSystemRateHz
 	}
 	return s.RateHz
+}
+
+// UPS configures the Geekworm X1200 UPS HAT monitor (`ups` device): MAX17040
+// fuel gauge on I²C bus 1 @0x36, power-loss detect on GPIO6 (1 = external
+// power present). GPIO16 (drive high = disable charging) is deliberately
+// never claimed. Default off — the HAT is optional hardware.
+//
+// Shutdown policy is run-to-floor: on power loss the recorder keeps
+// recording and powers off cleanly only when a debounced SOC or voltage
+// floor is reached. ShutdownAfterS is an optional fixed on-battery ride
+// timer, disabled by default.
+type UPS struct {
+	Enabled          bool    `json:"enabled"`
+	RateHz           float64 `json:"rate_hz,omitempty"`            // default 1, clamped to [0.1, 10]
+	ShutdownAfterS   float64 `json:"shutdown_after_s,omitempty"`   // 0 (default) = disabled: run to floor
+	ShutdownSocPct   float64 `json:"shutdown_soc_pct,omitempty"`   // default 10; <0 disables
+	ShutdownVoltageV float64 `json:"shutdown_voltage_v,omitempty"` // default 3.20; <0 disables
+}
+
+const (
+	defaultUPSRateHz           = 1.0
+	defaultUPSShutdownSocPct   = 10.0
+	defaultUPSShutdownVoltageV = 3.20
+)
+
+// RateHzEffective returns the poll rate, defaulting to 1 Hz.
+func (u UPS) RateHzEffective() float64 {
+	if u.RateHz <= 0 {
+		return defaultUPSRateHz
+	}
+	return math.Min(math.Max(u.RateHz, 0.1), 10)
+}
+
+// ShutdownAfterEffective returns the ride-timer seconds; <=0 means disabled.
+func (u UPS) ShutdownAfterEffective() float64 {
+	if u.ShutdownAfterS <= 0 {
+		return 0
+	}
+	return u.ShutdownAfterS
+}
+
+// ShutdownSocEffective returns the SOC floor percent, -1 when disabled.
+func (u UPS) ShutdownSocEffective() float64 {
+	if u.ShutdownSocPct < 0 {
+		return -1
+	}
+	if u.ShutdownSocPct == 0 {
+		return defaultUPSShutdownSocPct
+	}
+	return u.ShutdownSocPct
+}
+
+// ShutdownVoltageEffective returns the voltage floor, -1 when disabled.
+func (u UPS) ShutdownVoltageEffective() float64 {
+	if u.ShutdownVoltageV < 0 {
+		return -1
+	}
+	if u.ShutdownVoltageV == 0 {
+		return defaultUPSShutdownVoltageV
+	}
+	return u.ShutdownVoltageV
 }
 
 // Terminal configures the optional browser shell (/terminal).
