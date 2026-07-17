@@ -10,6 +10,7 @@ const state = {
   iioDevices: new Set(),
   podLink: null,
   clock: null,
+  ups: null,
   serverConnected: false,
   wsOpen: false,
   lastWsAt: 0,
@@ -41,6 +42,7 @@ const moreBufStatEl = document.getElementById('moreBufStat');
 const statusDrawer = document.getElementById('statusDrawer');
 const statusDrawerClock = document.getElementById('statusDrawerClock');
 const statusDrawerPod = document.getElementById('statusDrawerPod');
+const statusDrawerUps = document.getElementById('statusDrawerUps');
 const settingsDlg = document.getElementById('settingsDlg');
 const accessDlg = document.getElementById('accessDlg');
 const accessBodyEl = document.getElementById('accessBody');
@@ -1173,9 +1175,83 @@ function compactSystemChip() {
   return `<button type="button" class="statusChip statusChip-${cls}" data-goto-sensor="system">${escapeHtml(text)}</button>`;
 }
 
+// compactUpsChip shows the X1200 hub battery: ⚡SOC on external power,
+// 🔋SOC + estimated time remaining on battery (run-to-floor policy: the
+// recorder keeps recording and shuts down cleanly near the floor).
+// Clicking opens the `ups` device tab.
+function compactUpsChip() {
+  const u = state.ups;
+  if (!u || !u.enabled) return '';
+  if (!state.serverConnected) {
+    return '<button type="button" class="statusChip statusChip-offline" data-goto-sensor="ups">UPS offline</button>';
+  }
+  if (!u.present && !u.pld_ok) {
+    return '<button type="button" class="statusChip statusChip-warn" data-goto-sensor="ups">UPS ?</button>';
+  }
+  const soc = Number.isFinite(u.soc_pct) ? `${Math.round(u.soc_pct)}%` : '?';
+  if (u.pld_ok && !u.ac_ok) {
+    let text = `🔋 ${soc}`;
+    if (u.shutdown_after_s > 0) {
+      const left = u.shutdown_after_s - u.on_battery_s;
+      if (Number.isFinite(left) && left >= 0) {
+        text += ` ⏻${Math.floor(left / 60)}:${String(Math.max(0, Math.floor(left % 60))).padStart(2, '0')}`;
+      }
+    } else {
+      const tte = formatBatteryTimeRemainCompact(u.time_remaining_s);
+      if (tte) text += ` ${tte}`;
+    }
+    const critical = battSocClass(u.soc_pct) === 'batt-bad' ||
+      (Number.isFinite(u.time_remaining_s) && u.time_remaining_s >= 0 && u.time_remaining_s < 900);
+    const cls = critical ? 'off' : 'warn';
+    return `<button type="button" class="statusChip statusChip-${cls}" data-goto-sensor="ups">${escapeHtml(text)}</button>`;
+  }
+  const battCls = battSocClass(u.soc_pct);
+  const cls = battCls === 'batt-bad' ? 'warn' : 'ok';
+  return `<button type="button" class="statusChip statusChip-${cls}" data-goto-sensor="ups">${escapeHtml(`⚡ ${soc}`)}</button>`;
+}
+
+function renderUpsStatusFull(el) {
+  if (!el) return;
+  const u = state.ups;
+  if (!u || !u.enabled) {
+    el.innerHTML = '';
+    return;
+  }
+  if (!state.serverConnected) {
+    el.className = 'podStatus podStatus-offline';
+    el.innerHTML = '<span class="dim">Server offline</span>';
+    return;
+  }
+  const onBatt = u.pld_ok && !u.ac_ok;
+  const cls = !u.present ? 'warn' : onBatt ? 'warn' : 'ok';
+  const power = !u.pld_ok ? '?' : u.ac_ok ? 'external' : `battery ${formatDurShort(u.on_battery_s)}`;
+  const tte = onBatt && Number.isFinite(u.time_remaining_s) && u.time_remaining_s >= 0
+    ? formatDurShort(u.time_remaining_s)
+    : '—';
+  const floors = `${u.shutdown_soc_pct >= 0 ? Math.round(u.shutdown_soc_pct) + '%' : 'off'} / ` +
+    `${u.shutdown_voltage_v >= 0 ? u.shutdown_voltage_v.toFixed(2) + 'V' : 'off'}`;
+  el.className = `podStatus podStatus-${cls}`;
+  el.innerHTML =
+    `<span class="podStatusItem"><span class="lbl">UPS</span> ${u.present ? escapeHtml(`${Number(u.voltage_v).toFixed(3)} V · ${u.soc_pct.toFixed(1)}%`) : 'gauge ?'}</span>` +
+    `<span class="podStatusItem"><span class="lbl">Power</span> ${escapeHtml(power)}</span>` +
+    `<span class="podStatusItem"><span class="lbl">Est left</span> ${escapeHtml(tte)}</span>` +
+    `<span class="podStatusItem" title="Shutdown floors: SOC / voltage"><span class="lbl">Floors</span> ${escapeHtml(floors)}</span>` +
+    (u.shutdown_reason ? `<span class="podStatusItem warn"><span class="lbl">Shutdown</span> ${escapeHtml(u.shutdown_reason)}</span>` : '') +
+    (u.last_error ? `<span class="podStatusItem warn"><span class="lbl">Err</span> ${escapeHtml(u.last_error)}</span>` : '');
+}
+
+function formatDurShort(s) {
+  if (!Number.isFinite(s) || s < 0) return '—';
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h > 0) return `${h}h${String(m).padStart(2, '0')}`;
+  if (m > 0) return `${m}m`;
+  return `${Math.floor(s)}s`;
+}
+
 function renderStatusChips() {
   if (!statusChipsEl) return;
-  const chips = [compactSystemChip(), compactClockChip(), compactPodChip()].filter(Boolean);
+  const chips = [compactSystemChip(), compactClockChip(), compactPodChip(), compactUpsChip()].filter(Boolean);
   statusChipsEl.innerHTML = chips.join('') || '<span class="dim">Status loading…</span>';
   updateClockBanner();
 }
@@ -1206,6 +1282,7 @@ function updateClockBanner() {
 function openStatusDrawer() {
   renderClockStatusFull(statusDrawerClock);
   renderPodStatusFull(statusDrawerPod);
+  renderUpsStatusFull(statusDrawerUps);
   statusDrawer.showModal();
 }
 
@@ -1473,6 +1550,7 @@ async function refreshStatus() {
     updateRecordingUI();
     state.podLink = s.pod || null;
     state.clock = s.clock || null;
+    state.ups = s.ups || null;
     renderStatusChips();
   } catch {
     if (!state.wsOpen) setServerConnected(false);
