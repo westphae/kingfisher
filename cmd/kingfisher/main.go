@@ -122,6 +122,11 @@ func main() {
 			log.Printf("store: %s: %v", k, err)
 		}
 	}
+	for k, v := range clock.RTCStartupMeta(clock.QueryRTC()) {
+		if err := st.SetMeta(k, v); err != nil {
+			log.Printf("store: %s: %v", k, err)
+		}
+	}
 	if err := st.WriteSession(cfg.Aircraft, cfg.AircraftName, cfg.Notes, version); err != nil {
 		log.Printf("store: write session: %v", err)
 	}
