@@ -97,7 +97,7 @@ func (s *Server) handleFlights(w http.ResponseWriter, r *http.Request) {
 		SizeBytes: s.store.Size(),
 		StartUTC:  start,
 		Notes:     notes,
-		Unsynced:  strings.HasPrefix(activeBase, "unsynced_"),
+		Unsynced:  flights.FallbackNamed(activeBase),
 		Recording: true,
 		Backup:    "recording",
 	}

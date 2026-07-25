@@ -27,13 +27,17 @@ type Store struct {
 	path string
 
 	mu        sync.Mutex
-	fallback  bool      // named unsynced_NNNN_* because the clock was insane at Open
+	fallback  bool      // named NOTIME_NNNN because the clock was untrusted at Open
+	tail      string    // sanitized aircraft tail, restored by the rename at Close
 	trueStart time.Time // real session start, learned once the clock syncs (zero until then)
 }
 
 // saneClockYear is the earliest wall-clock year considered plausible at Open.
 // Below it the RTC is assumed dead/unset (e.g. 1970) and the DB gets a
-// clock-independent fallback name instead of a garbage timestamp.
+// clock-independent fallback name instead of a garbage timestamp. This check
+// alone is not sufficient: systemd's clock-epoch floor advances a dead RTC's
+// 1970 to a plausible recent date before userspace runs, so callers that can
+// tell should use OpenWithClockTrust.
 const saneClockYear = 2025
 
 // Open creates the flight DB at <dir>/<rfc3339>_<tail>.db and initialises the
@@ -41,6 +45,14 @@ const saneClockYear = 2025
 // wall clock, so deployment should start kingfisher only after GNSS discipline
 // is healthy if cold-boot naming accuracy matters.
 func Open(dir, tail string) (*Store, error) {
+	return OpenWithClockTrust(dir, tail, true)
+}
+
+// OpenWithClockTrust is Open with an explicit caller verdict on the wall
+// clock. trusted=false (RTC lost time at boot and chrony not yet synced)
+// forces the NOTIME_NNNN fallback name regardless of the year check —
+// systemd's epoch floor can make a dead-RTC clock look plausibly recent.
+func OpenWithClockTrust(dir, tail string, trusted bool) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
@@ -49,12 +61,12 @@ func Open(dir, tail string) (*Store, error) {
 		safeTail = "unknown"
 	}
 	var path string
-	fallback := time.Now().Year() < saneClockYear
+	fallback := !trusted || time.Now().Year() < saneClockYear
 	if fallback {
-		// RTC dead/unset: a timestamp name would be garbage (and could collide
+		// Clock untrusted: a timestamp name would be garbage (and could collide
 		// across boots). Use a scan-and-increment sequence instead; Close renames
 		// to the corrected timestamp once the true start time is learned.
-		path = nextUnsyncedPath(dir, safeTail)
+		path = nextNoTimePath(dir, safeTail)
 	} else {
 		stamp := time.Now().UTC().Format("20060102T150405Z")
 		path = filepath.Join(dir, fmt.Sprintf("%s_%s.db", stamp, safeTail))
@@ -67,7 +79,7 @@ func Open(dir, tail string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	s := &Store{db: db, path: path, fallback: fallback}
+	s := &Store{db: db, path: path, fallback: fallback, tail: safeTail}
 	if err := s.bootstrap(); err != nil {
 		db.Close()
 		return nil, err
@@ -78,7 +90,7 @@ func Open(dir, tail string) (*Store, error) {
 func (s *Store) Path() string { return s.path }
 
 // FallbackNamed reports whether the DB was opened with a clock-independent
-// unsynced_NNNN name because the wall clock was implausible at Open.
+// NOTIME_NNNN name because the wall clock was untrusted at Open.
 func (s *Store) FallbackNamed() bool { return s.fallback }
 
 // SetTrueStart records the real session start time, learned after the clock
@@ -90,13 +102,13 @@ func (s *Store) SetTrueStart(t time.Time) {
 	s.mu.Unlock()
 }
 
-// nextUnsyncedPath returns dir/unsynced_NNNN_<tail>.db with NNNN one greater
-// than the highest existing sequence in dir — unique across boots without
+// nextNoTimePath returns dir/NOTIME_NNNN_<tail>.db with NNNN one greater than
+// the highest existing sequence in dir — unique across boots without
 // consulting the (untrusted) wall clock.
-func nextUnsyncedPath(dir, tail string) string {
+func nextNoTimePath(dir, tail string) string {
 	max := 0
-	if matches, err := filepath.Glob(filepath.Join(dir, "unsynced_*_*.db")); err == nil {
-		re := regexp.MustCompile(`^unsynced_(\d+)_`)
+	if matches, err := filepath.Glob(filepath.Join(dir, "NOTIME_*_*.db")); err == nil {
+		re := regexp.MustCompile(`^NOTIME_(\d+)_`)
 		for _, m := range matches {
 			if sm := re.FindStringSubmatch(filepath.Base(m)); sm != nil {
 				if n, err := strconv.Atoi(sm[1]); err == nil && n > max {
@@ -105,7 +117,7 @@ func nextUnsyncedPath(dir, tail string) string {
 			}
 		}
 	}
-	return filepath.Join(dir, fmt.Sprintf("unsynced_%04d_%s.db", max+1, tail))
+	return filepath.Join(dir, fmt.Sprintf("NOTIME_%04d_%s.db", max+1, tail))
 }
 
 func (s *Store) DB() *sql.DB { return s.db }
@@ -160,7 +172,7 @@ func (s *Store) Close() error {
 // renameFallback renames a fallback-named DB to its corrected timestamp name
 // once the handle is closed and the true start time is known. Renaming while
 // open would be unsafe: the -wal/-shm sidecar paths are derived from the main
-// path at open time. Crashed sessions keep the unsynced_ name for manual
+// path at open time. Crashed sessions keep the NOTIME_ name for manual
 // handling.
 func (s *Store) renameFallback() {
 	s.mu.Lock()
@@ -170,14 +182,8 @@ func (s *Store) renameFallback() {
 		return
 	}
 	base := filepath.Base(s.path)
-	i := strings.Index(base, "_")
-	j := strings.Index(base[i+1:], "_")
-	if i < 0 || j < 0 {
-		return
-	}
-	tail := base[i+1+j+1:] // "<tail>.db"
 	stamp := trueStart.UTC().Format("20060102T150405Z")
-	dest := filepath.Join(filepath.Dir(s.path), fmt.Sprintf("%s_%s", stamp, tail))
+	dest := filepath.Join(filepath.Dir(s.path), fmt.Sprintf("%s_%s.db", stamp, s.tail))
 	if _, err := os.Stat(dest); err == nil {
 		log.Printf("store: fallback rename target %s already exists; keeping %s", filepath.Base(dest), base)
 		return

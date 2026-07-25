@@ -131,10 +131,13 @@ a substitute for input-sample time alignment.
   or attr change), not sensor physics time.
 - **`_session.start_time`** and the **DB filename** — Pi wall clock at open.
   Kingfisher starts *before* chrony syncs (RTC keeps the clock within ~1 s), so
-  the filename is normally accurate to ~1 s. If the RTC is dead (clock reads
-  1970) the DB is named `unsynced_NNNN_<tail>.db` instead and renamed to the
-  corrected timestamp at graceful close once true time is learned
-  (`clock_true_start_utc` records it either way).
+  the filename is normally accurate to ~1 s. If the wall clock is untrusted at
+  open — RTC lost time at boot and chrony not yet synced (note systemd's
+  clock-epoch floor advances a dead RTC's 1970 to a plausible recent date, so
+  the raw year can't be trusted) — the DB is named `NOTIME_NNNN_<tail>.db` instead
+  and renamed to the corrected timestamp at graceful close once true time is
+  learned (`clock_true_start_utc` records it either way). Older directories
+  may still contain files with the legacy `unsynced_` fallback prefix.
 
 ## Clock corrections (`clock_offsets` table)
 

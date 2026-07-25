@@ -60,7 +60,7 @@ type Summary struct {
 	MaxPressAltFt  float64 `json:"max_press_alt_ft"`
 	Notes          string  `json:"notes"`
 	Aircraft       string  `json:"aircraft,omitempty"`
-	Unsynced       bool    `json:"unsynced"` // fallback-named DB (clock was insane at open)
+	Unsynced       bool    `json:"unsynced"` // fallback-named DB (clock was untrusted at open)
 	ScanError      string  `json:"scan_error,omitempty"`
 
 	// Set per-request by the web layer, not by the scanner (cached values are
@@ -84,6 +84,13 @@ type Manager struct {
 	cache map[string]cacheEntry
 
 	scanning atomic.Bool
+}
+
+// FallbackNamed reports whether base is a clock-independent fallback DB name:
+// the current NOTIME_NNNN scheme or the legacy unsynced_ prefix still present
+// in older flight directories.
+func FallbackNamed(base string) bool {
+	return strings.HasPrefix(base, "NOTIME_") || strings.HasPrefix(base, "unsynced_")
 }
 
 func NewManager(dir string) *Manager {
@@ -143,7 +150,7 @@ func (m *Manager) List(activeBase string) (sums []Summary, scanning bool) {
 		stale = true
 		sums = append(sums, Summary{
 			File: base, SizeBytes: fi.Size(),
-			Unsynced:  strings.HasPrefix(base, "unsynced_"),
+			Unsynced:  FallbackNamed(base),
 			ScanError: "pending",
 		})
 	}
@@ -189,7 +196,7 @@ func (m *Manager) refreshAsync(activeBase string) {
 			if err != nil {
 				sum = Summary{File: base, SizeBytes: fi.Size(), ScanError: err.Error()}
 			}
-			sum.Unsynced = strings.HasPrefix(base, "unsynced_")
+			sum.Unsynced = FallbackNamed(base)
 			m.mu.Lock()
 			m.cache[base] = cacheEntry{Size: fi.Size(), Mtime: fi.ModTime().Unix(), Sum: sum}
 			m.saveCacheLocked()

@@ -84,7 +84,16 @@ func main() {
 		log.Printf("clock: startup assessment: %s", startupClock.Summary())
 	}
 
-	st, err := store.Open(cfg.DBDir, cfg.Aircraft)
+	// The wall clock is trusted when the RTC held time across boot or chrony
+	// has already synced. Otherwise (dead/unseated RTC battery, no sync yet)
+	// the year check inside Open can be fooled by systemd's clock-epoch floor,
+	// so force the NOTIME fallback name explicitly.
+	clockTrusted := clock.QueryRTC().HeldTimeAtBoot != "no" ||
+		clock.QueryDiscipline(context.Background()).Synced
+	if !clockTrusted {
+		log.Printf("clock: RTC lost time at boot and chrony not yet synced — flight DB gets a NOTIME fallback name")
+	}
+	st, err := store.OpenWithClockTrust(cfg.DBDir, cfg.Aircraft, clockTrusted)
 	if err != nil {
 		log.Fatalf("store: %v", err)
 	}

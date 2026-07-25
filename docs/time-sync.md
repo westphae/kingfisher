@@ -391,8 +391,10 @@ cost up to ~120 s of unreachable UI at engine start for no data benefit. Instead
 - chrony is configured `makestep 0.2 -1` + `maxslewrate 1000`: corrections
   > 0.2 s are applied as one discrete logged **step** (analysis-friendly)
   rather than a long fast slew; residual slews distort intervals ≤ 0.1 %.
-- A dead RTC (clock reads 1970) only changes the DB *filename* to a fallback
-  `unsynced_NNNN_<tail>.db`, renamed at close once true time is learned.
+- A dead RTC only changes the DB *filename* to a fallback `NOTIME_NNNN_<tail>.db`,
+  renamed at close once true time is learned. Detection uses the kernel's RTC
+  boot line plus chrony sync state, not the wall-clock year — systemd's
+  clock-epoch floor makes a dead-RTC clock look plausibly recent.
 
 Kingfisher runs as a **user** unit, which cannot order against system units, so
 `After=chronyd.service gpsd.service` would be a no-op and is omitted — and no
