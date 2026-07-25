@@ -1417,9 +1417,15 @@ function noteWsSnapshot(snap) {
   }
 }
 
+let liveWs = null;
+let reconnectTimer = 0;
+
 function connect() {
+  if (liveWs && (liveWs.readyState === WebSocket.CONNECTING || liveWs.readyState === WebSocket.OPEN)) return;
+  clearTimeout(reconnectTimer);
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  liveWs = ws;
   ws.onopen = () => {
     state.wsOpen = true;
     state.lastWsAt = Date.now();
@@ -1450,11 +1456,35 @@ function connect() {
     setServerConnected(false);
   };
   ws.onclose = () => {
+    if (liveWs === ws) liveWs = null;
     state.wsOpen = false;
     setServerConnected(false);
-    setTimeout(connect, 1000);
+    reconnectTimer = setTimeout(connect, 1000);
   };
 }
+
+// Android Chrome freezes background tabs: the WS can die without firing
+// onclose, and the retry timer doesn't run until the tab is foregrounded
+// (throttled). Force an immediate reconnect when the page comes back.
+function reconnectIfStale() {
+  if (document.visibilityState !== 'visible') return;
+  if (liveWs && liveWs.readyState === WebSocket.CONNECTING) return;
+  const stale = !state.lastWsAt || Date.now() - state.lastWsAt > STALENESS_MS;
+  if (liveWs && liveWs.readyState === WebSocket.OPEN && !stale) return;
+  if (liveWs) {
+    const old = liveWs;
+    liveWs = null;
+    old.onclose = null;
+    try { old.close(); } catch {}
+  }
+  state.wsOpen = false;
+  clearTimeout(reconnectTimer);
+  connect();
+}
+
+document.addEventListener('visibilitychange', reconnectIfStale);
+window.addEventListener('pageshow', reconnectIfStale);
+window.addEventListener('online', reconnectIfStale);
 
 function setServerConnected(connected) {
   if (state.serverConnected === connected) return;
