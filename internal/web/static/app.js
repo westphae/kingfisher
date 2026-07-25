@@ -872,6 +872,9 @@ function disciplineSourceLabel(d) {
 function clockBadgeClass(clock) {
   const d = clock?.discipline;
   const g = clock?.gps_check;
+  // RTC lost time at boot → backup battery dead/unseated. Overrides green:
+  // the clock may be synced now, but the next unpowered boot starts at 1970.
+  if (clock?.rtc?.held_time_at_boot === 'no') return 'warn';
   if (d?.available && d.synced) {
     if (d.pps_steering) return 'ok';
     if (d.source === 'gps') return 'warn';
@@ -1043,6 +1046,13 @@ function renderClockStatusFull(el) {
     parts.push('<span class="clockStatusItem"><span class="lbl">Pi time</span> GPS fix only</span>');
   } else {
     parts.push('<span class="clockStatusItem"><span class="lbl">Pi time</span> no GPS fix</span>');
+  }
+  const rtc = c.rtc || {};
+  if (Number.isFinite(rtc.battery_v)) {
+    const dead = rtc.held_time_at_boot === 'no';
+    parts.push(`<span class="clockStatusItem${dead ? ' clockWarn' : ''}"><span class="lbl">Batt</span> ${rtc.battery_v.toFixed(3)} V${dead ? ' — RTC lost time at boot' : ''}</span>`);
+  } else if (rtc.held_time_at_boot === 'no') {
+    parts.push('<span class="clockStatusItem clockWarn"><span class="lbl">Batt</span> RTC lost time at boot</span>');
   }
   if (g.has_fix && Number.isFinite(g.fix_age_s)) {
     const stale = g.fresh === false;

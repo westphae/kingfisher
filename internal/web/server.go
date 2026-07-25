@@ -900,12 +900,14 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 func clockStatusView(ctx context.Context, st gps.ClockStatus, nudger *clock.AutoNudger) map[string]any {
 	disc := clock.QueryDiscipline(ctx)
+	rtc := clock.QueryRTC()
 
 	out := map[string]any{
 		"startup_fallback": st.StartupCheck.Fallback,
 		"startup_state":    st.StartupCheck.State,
 		"discipline":       disciplineView(disc),
 		"gps_check":        gpsCrosscheckView(st),
+		"rtc":              rtcView(rtc),
 	}
 	if nudger != nil {
 		out["resync"] = resyncView(nudger.State(time.Now()))
@@ -919,8 +921,19 @@ func clockStatusView(ctx context.Context, st gps.ClockStatus, nudger *clock.Auto
 	if st.StartupCheck.HasFix {
 		out["startup_offset_ms"] = float64(st.StartupCheck.Offset) / float64(time.Millisecond)
 	}
-	out["detail"] = clockDetailTooltip(disc, st)
+	out["detail"] = clockDetailTooltip(disc, st, rtc)
 	return out
+}
+
+func rtcView(rtc clock.RTCStatus) map[string]any {
+	v := map[string]any{"held_time_at_boot": rtc.HeldTimeAtBoot}
+	if rtc.BatteryVoltage > 0 {
+		v["battery_v"] = rtc.BatteryVoltage
+	}
+	if rtc.ChargingVoltage > 0 {
+		v["charging_v"] = rtc.ChargingVoltage
+	}
+	return v
 }
 
 func disciplineView(disc clock.DisciplineStatus) map[string]any {
@@ -998,7 +1011,7 @@ func gpsCrosscheckView(st gps.ClockStatus) map[string]any {
 	return v
 }
 
-func clockDetailTooltip(disc clock.DisciplineStatus, st gps.ClockStatus) string {
+func clockDetailTooltip(disc clock.DisciplineStatus, st gps.ClockStatus, rtc clock.RTCStatus) string {
 	var parts []string
 	if disc.Available && disc.Synced {
 		parts = append(parts, fmt.Sprintf("Pi wall clock steered by %s via chrony (stratum %d). Last correction: %s, RMS %s.",
@@ -1026,6 +1039,11 @@ func clockDetailTooltip(disc clock.DisciplineStatus, st gps.ClockStatus) string 
 		}
 	} else {
 		parts = append(parts, "No GPS fix for cross-check.")
+	}
+	if rtc.HeldTimeAtBoot == "no" {
+		parts = append(parts, "RTC lost time across the last power-off — backup battery dead or unseated (battery_voltage reads the charger setpoint either way).")
+	} else if rtc.BatteryVoltage > 0 {
+		parts = append(parts, fmt.Sprintf("RTC battery %.3f V.", rtc.BatteryVoltage))
 	}
 	if st.StartupCheck.Fallback && st.StartupCheck.Reason != "" {
 		parts = append(parts, "Startup: "+st.StartupCheck.Reason)
