@@ -1,0 +1,4 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "Kingfisher")(type "KiCad")(uri "${KIPRJMOD}/libs/Kingfisher.pretty")(options "")(descr "Kingfisher HAT footprints"))
+)

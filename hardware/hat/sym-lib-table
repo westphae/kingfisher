@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "Kingfisher")(type "KiCad")(uri "${KIPRJMOD}/libs/Kingfisher.kicad_sym")(options "")(descr "Kingfisher HAT symbols"))
+)
