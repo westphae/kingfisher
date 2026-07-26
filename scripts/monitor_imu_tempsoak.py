@@ -130,13 +130,18 @@ class PhaseTracker:
         self.stable_span_c = stable_span_c
         self.stable_slope_c_min = stable_slope_c_min
         self.t0 = None
+        self.run_min = None
+        self.run_max = None
         self.phase = "baseline"
         self.recent = deque()  # (wallclock_s, temp_c)
 
+    def _window_pts(self):
+        cutoff = time.time() - self.stable_minutes * 60
+        return cutoff, [(t, c) for t, c in self.recent if t >= cutoff]
+
     def _stability(self):
         """Return (is_stable, span, slope_c_per_min) over the stable window."""
-        cutoff = time.time() - self.stable_minutes * 60
-        pts = [(t, c) for t, c in self.recent if t >= cutoff]
+        cutoff, pts = self._window_pts()
         if len(pts) < 5 or pts[0][0] > cutoff + 0.2 * self.stable_minutes * 60:
             return False, None, None  # window not yet filled
         temps = [c for _, c in pts]
@@ -154,24 +159,44 @@ class PhaseTracker:
             self.recent.popleft()
         if self.t0 is None:
             self.t0 = temp_c
+            self.run_min = self.run_max = temp_c
+            self.ext_min = self.ext_max = temp_c
+        self.run_min = min(self.run_min, temp_c)
+        self.run_max = max(self.run_max, temp_c)
 
         stable, span, slope = self._stability()
         prev = self.phase
+        # Plateaus arm against the run's global extremes; direction
+        # reversals compare to the extreme since the current phase began.
         if self.phase == "baseline":
             if temp_c < self.t0 - 1.5:
                 self.phase = "cooling"
             elif temp_c > self.t0 + 1.5:
                 self.phase = "warming"
         elif self.phase == "cooling":
-            if stable and temp_c < self.t0 - self.arm_delta_c:
+            if stable and temp_c < self.run_max - self.arm_delta_c:
                 self.phase = "cold_stable"
-        elif self.phase == "cold_stable":
-            if temp_c > min(c for _, c in self.recent) + 1.5:
+            elif temp_c > self.ext_min + 1.5:
                 self.phase = "warming"
         elif self.phase == "warming":
-            if stable:
+            if stable and temp_c > self.run_min + self.arm_delta_c:
                 self.phase = "warm_stable"
-        # warm_stable is terminal; restart the script for a hot-soak leg
+            elif temp_c < self.ext_max - 1.5:
+                self.phase = "cooling"
+        elif self.phase in ("cold_stable", "warm_stable"):
+            # exit thresholds lag a departure by the stability window and
+            # sit above the entry span (1.5 vs 1.0) so enter/exit can't
+            # both be satisfied by the same window contents
+            win = [c for _, c in self._window_pts()[1]]
+            if win and temp_c > min(win) + 1.5:
+                self.phase = "warming"
+            elif win and temp_c < max(win) - 1.5:
+                self.phase = "cooling"
+        if self.phase != prev:
+            self.ext_min = self.ext_max = temp_c
+        else:
+            self.ext_min = min(self.ext_min, temp_c)
+            self.ext_max = max(self.ext_max, temp_c)
         return prev, self.phase, span, slope
 
 
