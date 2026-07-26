@@ -17,16 +17,20 @@ ICM-45686 IMU in a rear bay. One script generates `case_base.{step,stl}`,
 
 ## Regenerating
 
+Python deps are managed with **uv** (workspace member `enclosures/`, CadQuery
+2.8.0; see [`docs/python.md`](../docs/python.md)):
+
 ```bash
-cd enclosures/case && /home/eric/.venvs/cadquery/bin/python pi5_aviation_case.py
+uv sync --all-packages   # from repo root → ./.venv
+cd enclosures/case && uv run --project .. python pi5_aviation_case.py
 ```
 
-The venv (Python 3.12 via uv, CadQuery 2.8.0) lives at `~/.venvs/cadquery`.
-`nlopt` had **no aarch64 wheels** and was built from source (nlopt 2.10.0:
-cmake static+PIC, `-DNLOPT_PYTHON=ON`, swig; copy `_nlopt.so` + `nlopt.py`
-into site-packages). If the venv is ever rebuilt on a different Python, nlopt
-must be rebuilt the same way. Exports land in the CWD — run from
-`enclosures/case/`.
+Exports land in the CWD — run from `enclosures/case/` so STEP/STL sit beside
+the script.
+
+**nlopt:** `uv sync` currently pulls an `nlopt` wheel (incl. aarch64). If that
+ever regresses, the old fallback was a source build into
+`~/.venvs/cadquery` (cmake + swig); prefer fixing the lock/wheel first.
 
 ## Coordinate system & layout
 

@@ -38,13 +38,16 @@ Project-local libraries:
 - `libs/Kingfisher.kicad_sym` — ICM-45686, BMP581, NEO-M9N
 - `libs/Kingfisher.pretty` — BMP581 land pattern (adapted from SparkFun Qwiic BMP581, CC-BY-SA 4.0)
 
-Regenerate libraries / schematic scaffolding:
+Regenerate libraries / schematic scaffolding (stdlib only — **no uv project**):
 
 ```bash
 python3 hardware/hat/scripts/build_libs.py
 python3 hardware/hat/scripts/build_sch.py   # overwrites schematic
 kicad-cli sch export netlist hardware/hat/kingfisher-hat.kicad_sch
 ```
+
+Any future `pcbnew` automation must use **system** Python with apt KiCad
+(`python3-pcbnew`), not a uv venv — the PCB API is not a PyPI package.
 
 ## Status (rev 0.2)
 

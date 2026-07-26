@@ -9,6 +9,13 @@ research/
 target/
 *.test
 
+# Python (uv / venv)
+.venv/
+**/.venv/
+**/__pycache__/
+*.py[cod]
+.python-version
+
 # Editor / OS.
 *.swp
 .DS_Store

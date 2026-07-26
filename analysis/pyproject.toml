@@ -1,0 +1,12 @@
+[project]
+name = "kingfisher-analysis"
+version = "0.1.0"
+description = "Flight DB catalog, sampling health, and analysis CLI helpers for kingfisher"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.0",
+    "matplotlib>=3.8",
+]
+
+[tool.uv]
+package = false

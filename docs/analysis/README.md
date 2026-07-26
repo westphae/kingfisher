@@ -5,9 +5,12 @@ ongoing ledger for modeling (compass, AHRS, performance) and cleanup.
 
 ## Quick start
 
+Uses **uv** (workspace member `analysis/`; see [`docs/python.md`](../python.md)).
+From repo root (Pi or workstation with a copy of `flights/`):
+
 ```bash
-# From repo root (Pi or workstation with a copy of flights/)
-python3 scripts/analyze_flights.py all
+uv sync --all-packages   # or: uv sync --project analysis
+uv run --project analysis python scripts/analyze_flights.py all
 ```
 
 Outputs:
@@ -21,13 +24,16 @@ Outputs:
 Commands:
 
 ```bash
-python3 scripts/analyze_flights.py catalog
-python3 scripts/analyze_flights.py health --flights-only
-python3 scripts/analyze_flights.py report
-python3 scripts/analyze_flights.py health --file 20260722T203620Z_n456t.db
+uv run --project analysis python scripts/analyze_flights.py catalog
+uv run --project analysis python scripts/analyze_flights.py health --flights-only
+uv run --project analysis python scripts/analyze_flights.py report
+uv run --project analysis python scripts/analyze_flights.py health --file 20260722T203620Z_n456t.db
+
+# Legacy sampling plots (matplotlib):
+uv run --project analysis python scripts/analyze_flight_sampling.py --help
 ```
 
-Dependencies: Python 3.10+, `numpy`. Plots optional later (`matplotlib`).
+Dependencies (locked in root `uv.lock`): Python ≥3.11, `numpy`, `matplotlib`.
 
 ## Layout
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Kingfisher flight DB catalog + health analysis CLI.
 
-Examples:
-  python scripts/analyze_flights.py catalog
-  python scripts/analyze_flights.py health --flights-only
-  python scripts/analyze_flights.py report
-  python scripts/analyze_flights.py all
+Examples (from repo root; uses uv workspace — see docs/python.md):
+  uv run --project analysis python scripts/analyze_flights.py catalog
+  uv run --project analysis python scripts/analyze_flights.py health --flights-only
+  uv run --project analysis python scripts/analyze_flights.py report
+  uv run --project analysis python scripts/analyze_flights.py all
 """
 
 from __future__ import annotations

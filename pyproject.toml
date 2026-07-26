@@ -1,0 +1,12 @@
+[project]
+name = "kingfisher"
+version = "0.0.0"
+description = "uv workspace root for kingfisher Python side projects"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["analysis", "enclosures"]

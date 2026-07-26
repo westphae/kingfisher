@@ -50,6 +50,11 @@ cargo run --example pod_wire_dump > ../internal/pod/wire/testdata/fixtures.txt
 
 # Pod firmware (reads ~/.config/kingfisher/config.json pod section at build time)
 cd firmware/pod && cargo build --release
+
+# Python (uv workspace — analysis + enclosures; see docs/python.md)
+uv sync --all-packages
+uv run --project analysis python scripts/analyze_flights.py all
+cd enclosures/case && uv run --project .. python pi5_aviation_case.py
 ```
 
 After any change to types in `pod_wire/src/lib.rs`, regenerate `fixtures.txt` and re-run `go test ./internal/pod/wire/`. The Go test loads those fixtures and decodes them — if they diverge, the wire contract is broken. `scripts/check-wire.sh` enforces this: it regenerates to a temp file and diffs against the committed fixtures (exit 1 on drift), and `scripts/check-wire.sh --write` regenerates in place. Wire it into CI / a pre-commit hook so the honour-system regen can't be forgotten.
