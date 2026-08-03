@@ -1,6 +1,6 @@
 # Sensor noise & parameter study (Phase 1)
 
-_Generated 2026-08-03T11:14:19Z from stationary windows (65/69 sessions). See [PLAN.md](PLAN.md)._
+_Generated 2026-08-03T13:37:16Z from stationary windows (67/71 sessions). See [PLAN.md](PLAN.md)._
 
 ## Method (1a)
 
@@ -10,20 +10,20 @@ For each session with ≥120 s of `stationary` segments (from Phase 0 windows), 
 
 | Channel | Sessions | Obs Hz | Config Hz | σ (med) | σ 1s (med) | σ/σ₁ₛ | Density `σ√Δt` | Unit |
 |---------|----------|--------|-----------|---------|------------|-------|----------------|------|
-| `bmp581.static_pressure_pa` | 48 | 50.00 | 50 | 13.31 | 13.29 | 1.00 | 2.087 | Pa |
-| `icm45686_accel.accel_x` | 65 | 24.91 | 800 | 0.02674 | 0.009528 | 2.81 | 0.007208 | m/s² |
-| `icm45686_accel.accel_y` | 65 | 24.91 | 800 | 0.02518 | 0.01015 | 2.48 | 0.007612 | m/s² |
-| `icm45686_accel.accel_z` | 65 | 24.91 | 800 | 0.02168 | 0.007319 | 2.96 | 0.005722 | m/s² |
-| `icm45686_gyro.anglvel_x` | 65 | 24.91 | 800 | 0.0003672 | 0.0001565 | 2.35 | 0.0001261 | rad/s |
-| `icm45686_gyro.anglvel_y` | 65 | 24.91 | 800 | 0.0007167 | 0.0002165 | 3.31 | 0.0001922 | rad/s |
-| `icm45686_gyro.anglvel_z` | 65 | 24.91 | 800 | 0.0002643 | 0.0001516 | 1.74 | 9.865e-05 | rad/s |
-| `mmc5983.mag_x_ut` | 48 | 10.00 | 50 | 0.2732 | 0.1428 | 1.91 | 0.1203 | µT |
-| `mmc5983.mag_y_ut` | 48 | 10.00 | 50 | 0.2732 | 0.1761 | 1.55 | 0.121 | µT |
-| `mmc5983.mag_z_ut` | 48 | 10.00 | 50 | 0.2995 | 0.1567 | 1.91 | 0.08376 | µT |
+| `bmp581.static_pressure_pa` | 50 | 50.00 | 50 | 13.24 | 13.18 | 1.00 | 2 | Pa |
+| `icm45686_accel.accel_x` | 67 | 24.91 | 800 | 0.02664 | 0.009218 | 2.89 | 0.007197 | m/s² |
+| `icm45686_accel.accel_y` | 67 | 24.91 | 800 | 0.02498 | 0.009639 | 2.59 | 0.007095 | m/s² |
+| `icm45686_accel.accel_z` | 67 | 24.91 | 800 | 0.02161 | 0.007287 | 2.97 | 0.005694 | m/s² |
+| `icm45686_gyro.anglvel_x` | 67 | 24.91 | 800 | 0.0003609 | 0.000147 | 2.45 | 0.0001198 | rad/s |
+| `icm45686_gyro.anglvel_y` | 67 | 24.91 | 800 | 0.0006597 | 0.0002125 | 3.10 | 0.0001894 | rad/s |
+| `icm45686_gyro.anglvel_z` | 67 | 24.91 | 800 | 0.0002557 | 0.0001499 | 1.71 | 9.861e-05 | rad/s |
+| `mmc5983.mag_x_ut` | 50 | 10.00 | 50 | 0.2678 | 0.1158 | 2.31 | 0.1013 | µT |
+| `mmc5983.mag_y_ut` | 50 | 10.00 | 50 | 0.2697 | 0.1662 | 1.62 | 0.09608 | µT |
+| `mmc5983.mag_z_ut` | 50 | 10.00 | 50 | 0.2984 | 0.1469 | 2.03 | 0.07156 | µT |
 
 ### Accel scale hint (feeds Phase 2)
 
-Median stationary ‖a‖ ≈ **9.9633** m/s² vs (g₀=9.80665). Crude multiplicative scale (g₀/‖a‖) ≈ **0.9843** (~-1.6%). Confirm with 6-position cal before applying online.
+Median stationary ‖a‖ ≈ **9.9625** m/s² vs (g₀=9.80665). Crude multiplicative scale (g₀/‖a‖) ≈ **0.9844** (~-1.6%). Confirm with 6-position cal before applying online.
 
 ## Plots
 
@@ -38,9 +38,9 @@ Written under `~/kingfisher/analysis-cache/noise/` — one scale per sensor:
 ## Findings (1a)
 
 - **ICM45686:** `sensor_attrs` reports ~800 Hz ODR but stored/observed rate in DB is ~24.9 Hz. Noise figures below are for the **stored** stream (what AHRS sees unless you change publish/store rate).
-- **BMP581:** stationary σ(P) ≈ 13.31 Pa (~1.1 cm barometric at SL); 1 s means σ ≈ 13.29 Pa.
-- **MMC5983:** axis σ ≈ 0.273 µT at ~10 Hz stored.
-- **Gyro:** axis σ ≈ 0.00037 rad/s (76 °/h rms) at ~25 Hz stored.
+- **BMP581:** stationary σ(P) ≈ 13.24 Pa (~1.1 cm barometric at SL); 1 s means σ ≈ 13.18 Pa.
+- **MMC5983:** axis σ ≈ 0.268 µT at ~10 Hz stored.
+- **Gyro:** axis σ ≈ 0.00036 rad/s (74 °/h rms) at ~25 Hz stored.
 - Historical sessions share the **same** configured ODRs (accel/gyro 800, BMP/MMC 50) — little natural A/B for rate knobs in the archive; use σ(1 s means) as a proxy for heavier averaging / lower effective rate.
 
 ## Parameter recommendations (1b)
@@ -104,4 +104,22 @@ Short-window / high-frequency noise is ~**80×** quieter than the old OSR×1 str
 Allan σ(τ=1 s) on this soak ≈ **0.037 Pa**.
 
 Applied via `pod.attrs` + `SetAttr` (`oversampling_*`, `iir_*`).
+
+### MMC5983 — `20260803T132632Z_n456t` (quiet location)
+
+After firmware flash with `SetAttr` bandwidth knob. Cruise: BW **100 Hz**, ODR **20 Hz**.
+Relocated mid-session (‖B‖ 89→62 µT); first **50 s** excluded. ~322 s clean.
+
+| Metric | Quiet location | Prior desk soak @ 20 Hz | Archive median (~10 Hz) |
+|--------|---------------:|------------------------:|------------------------:|
+| σ(mag_x) | **0.038** µT | 0.043 µT | 0.273 µT |
+| σ(mag_y) | **0.044** µT | 0.064 µT | 0.273 µT |
+| σ(mag_z) | **0.063** µT | 0.065 µT | 0.300 µT |
+| Observed rate | ~15 Hz | ~13 Hz | 10 Hz |
+
+Axis σ ≈ datasheet **0.4 mG (0.04 µT)** floor. Archive median was the old ~10 Hz
+harvest path + ambient interference, not BW. Raising BW above 100 Hz increases
+noise; use **50 Hz / BW=100** for taxi cal.
+
+`pod.attrs`: `in_mmc5983_sampling_frequency=20`, `in_mmc5983_bandwidth=100`.
 <!-- HAND_NOTES_END -->
