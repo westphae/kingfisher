@@ -31,9 +31,9 @@ func TestLogPodSensorAttrsOnHello(t *testing.T) {
 	if err := st.DB().QueryRow(`SELECT COUNT(*) FROM sensor_attrs WHERE location = 'pod'`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	// bmp581: rate + 4 OSR/IIR + min/max/default; mmc/ms: rate + min/max/default
-	if n != 16 {
-		t.Fatalf("sensor_attrs rows = %d, want 16", n)
+	// bmp581: rate + 4 OSR/IIR + min/max/default; mmc: rate + bw + min/max/default; ms: rate + min/max/default
+	if n != 17 {
+		t.Fatalf("sensor_attrs rows = %d, want 17", n)
 	}
 }
 
@@ -45,7 +45,7 @@ func TestFlightLogAttrRecordsIncludeCaps(t *testing.T) {
 		}},
 	})
 	recs := r.FlightLogAttrRecordsForUIDevice("mmc5983")
-	if len(recs) != 4 {
-		t.Fatalf("recs len %d, want 4", len(recs))
+	if len(recs) != 5 { // rate + bandwidth + min/max/default
+		t.Fatalf("recs len %d, want 5", len(recs))
 	}
 }

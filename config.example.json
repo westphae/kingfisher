@@ -22,7 +22,9 @@
       "in_bmp581_oversampling_pressure": "32",
       "in_bmp581_oversampling_temp": "2",
       "in_bmp581_iir_pressure": "3",
-      "in_bmp581_iir_temp": "3"
+      "in_bmp581_iir_temp": "3",
+      "in_mmc5983_sampling_frequency": "20",
+      "in_mmc5983_bandwidth": "100"
     },
     "battery_capacity_mah": 850,
     "sleep_soc_pct": 20,

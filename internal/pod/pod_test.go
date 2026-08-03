@@ -229,8 +229,11 @@ func TestRegistrySnapshotAfterHello(t *testing.T) {
 	for _, device := range []string{"bmp581", "mmc5983", "ms4525"} {
 		views := reg.Get(device)
 		wantRows := 1
-		if device == "bmp581" {
+		switch device {
+		case "bmp581":
 			wantRows = 5 // sampling_frequency + OSR/IIR
+		case "mmc5983":
+			wantRows = 2 // sampling_frequency + bandwidth
 		}
 		if len(views) != wantRows {
 			t.Fatalf("%s: got %d attr rows, want %d (%+v)", device, len(views), wantRows, views)

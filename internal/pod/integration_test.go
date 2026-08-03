@@ -84,8 +84,11 @@ func TestUDPIntegration(t *testing.T) {
 			for _, dev := range []string{"bmp581", "mmc5983", "ms4525"} {
 				views := reg.Get(dev)
 				wantRows := 1
-				if dev == "bmp581" {
+				switch dev {
+				case "bmp581":
 					wantRows = 5
+				case "mmc5983":
+					wantRows = 2
 				}
 				if len(views) != wantRows || views[0].Attr != "sampling_frequency" || !views[0].Writable {
 					t.Errorf("%s registry views: %+v", dev, views)

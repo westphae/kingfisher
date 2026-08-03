@@ -7,12 +7,13 @@ import (
 	"github.com/westphae/kingfisher/internal/sensors"
 )
 
-// BMP581 attr names (IIO-style, device-level on the bmp581 tab).
+// BMP581 / MMC5983 attr names (IIO-style, device-level on chip tabs).
 const (
 	AttrOversamplingPressure = "oversampling_pressure"
 	AttrOversamplingTemp     = "oversampling_temp"
 	AttrIIRPressure          = "iir_pressure"
 	AttrIIRTemp              = "iir_temp"
+	AttrBandwidth            = "bandwidth" // MMC5983 IC1 BW label (Hz)
 )
 
 // parsePodAttrKey maps config/UI keys to a chip device name and attr.
@@ -50,7 +51,8 @@ func parsePodAttrKey(full string) (device, attr string, ok bool) {
 	switch a {
 	case "sampling_frequency",
 		AttrOversamplingPressure, AttrOversamplingTemp,
-		AttrIIRPressure, AttrIIRTemp:
+		AttrIIRPressure, AttrIIRTemp,
+		AttrBandwidth:
 		return dev, a, true
 	default:
 		return "", "", false
@@ -85,6 +87,8 @@ func wireAttrKeyFor(attr string) (wire.AttrKey, bool) {
 		return wire.AttrBmpIirPress, true
 	case AttrIIRTemp:
 		return wire.AttrBmpIirTemp, true
+	case AttrBandwidth:
+		return wire.AttrMmcBandwidth, true
 	default:
 		return 0, false
 	}

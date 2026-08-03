@@ -30,8 +30,16 @@ rates from `config.json` + caps, not from an explicit attr snapshot on the wire.
 - `in_bmp581_oversampling_pressure` / `_temp` (multipliers; default **32** / **2**)
 - `in_bmp581_iir_pressure` / `_temp` (coeffs 0=bypass,1,3,…; default **3**)
 
+## Done: MMC5983 bandwidth via SetAttr
+
+`AttrKey::MmcBandwidth` + firmware `mmc_cfg` / IC1 BW apply. Config keys:
+
+- `in_mmc5983_sampling_frequency` (cruise default **20** — exact CM_Freq step)
+- `in_mmc5983_bandwidth` (100 / 200 / 400 / 800 Hz; cruise **100** = lowest noise)
+
 ## Later: more configurable chip registers
 
-- MMC5983 / MS4525 attrs via the same `SetAttr` pattern.
-- Ack + rollback for BMP attrs (today optimistic cache like DesignCapacity without chip confirm).
+- MS4525 attrs via the same `SetAttr` pattern.
+- MMC5983 periodic SET (`En_prd_set`) if long-flight offset drift needs it.
+- Ack + rollback for BMP/MMC attrs (today optimistic cache like DesignCapacity without chip confirm).
 - Log attr changes to `sensor_attrs` on successful Ack.

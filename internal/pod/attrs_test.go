@@ -20,6 +20,8 @@ func TestParsePodAttrKey_legacyDataChannels(t *testing.T) {
 		{"in_bmp581_oversampling_pressure", "bmp581", AttrOversamplingPressure},
 		{"in_bmp581_iir_pressure", "bmp581", AttrIIRPressure},
 		{"in_static_oversampling_temp", "bmp581", AttrOversamplingTemp},
+		{"in_mmc5983_bandwidth", "mmc5983", AttrBandwidth},
+		{"in_mag_bandwidth", "mmc5983", AttrBandwidth},
 	}
 	for _, tc := range cases {
 		dev, attr, ok := parsePodAttrKey(tc.key)
@@ -66,5 +68,24 @@ func TestApplyDeviceConfig_bmpOSRIIR(t *testing.T) {
 	defer r.mu.RUnlock()
 	if r.rates[wire.SensorStatic] != 25 || r.bmpOsrPress != 32 || r.bmpIirPress != 3 {
 		t.Fatalf("cache: hz=%d osr_p=%d iir_p=%d", r.rates[wire.SensorStatic], r.bmpOsrPress, r.bmpIirPress)
+	}
+}
+
+func TestApplyDeviceConfig_mmcBandwidth(t *testing.T) {
+	cmdOut := make(chan outboundCmd, 4)
+	r := newReader(cmdOut)
+	outs := r.ApplyDeviceConfig(config.Device{
+		Attrs: map[string]string{
+			"in_mmc5983_sampling_frequency": "20",
+			"in_mmc5983_bandwidth":          "100",
+		},
+	})
+	if len(outs) != 2 {
+		t.Fatalf("cmds: got %d want 2", len(outs))
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.rates[wire.SensorMag] != 20 || r.mmcBandwidth != 100 {
+		t.Fatalf("cache: hz=%d bw=%d", r.rates[wire.SensorMag], r.mmcBandwidth)
 	}
 }
