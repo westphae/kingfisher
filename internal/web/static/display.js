@@ -140,6 +140,20 @@ const KFDisplay = (function () {
     return OVERVIEW_DEVICE_NAMES[device] || device;
   }
 
+  // Aviation (0, 360]: north is 360, never 0. Matches Go units.Heading360.
+  // Apply at display (and after circular EWMA) — published values are already
+  // normalized, but atan2-based smoothers reintroduce (-180, 180].
+  function heading360(deg) {
+    const n = Number(deg);
+    if (!Number.isFinite(n)) return n;
+    const m = ((n % 360) + 360) % 360;
+    return m === 0 ? 360 : m;
+  }
+
+  function isHeadingChannel(channel) {
+    return channel === 'track' || channel === 'yaw' || /^heading_/.test(channel);
+  }
+
   const PRESSURE_SOURCE_LABEL = {
     1: 'Wing pod (BMP581)',
     2: 'Cabin baro (e.g. BMP280)',
@@ -792,6 +806,7 @@ const KFDisplay = (function () {
       return { text: '—' };
     }
     if (typeof value !== 'number' || !Number.isFinite(value)) return { text: value };
+    if (isHeadingChannel(channel)) value = heading360(value);
     const spec = channelSpec(device, channel);
     if (spec && spec.fmt) {
       const out = spec.fmt(value);
@@ -1158,7 +1173,7 @@ const KFDisplay = (function () {
       return '±' + fmtOverviewNum(kt, 1) + ' kt';
     }
     if (channel === 'gs') return fmtOverviewNum(value * MPS_TO_KT, 0) + ' kt';
-    if (channel === 'track') return fmtOverviewNum(value, 0) + '°';
+    if (channel === 'track') return fmtOverviewNum(heading360(value), 0) + '°';
     if (channel === 'vs') {
       const fpm = value * MPS_TO_FPM;
       const sign = fpm >= 0 ? '+' : '';
@@ -1166,10 +1181,11 @@ const KFDisplay = (function () {
     }
     if (channel === 'fix') return String(Math.round(value));
     if (channel === 'sats') return String(Math.round(value));
-    if (channel === 'roll' || channel === 'pitch' || channel === 'yaw') {
+    if (channel === 'yaw') return fmtOverviewNum(heading360(value), 0) + '°';
+    if (channel === 'roll' || channel === 'pitch') {
       return fmtOverviewNum(value, 0) + '°';
     }
-    if (channel === 'heading_mag_deg') return fmtOverviewNum(value, 0) + '°';
+    if (isHeadingChannel(channel)) return fmtOverviewNum(heading360(value), 0) + '°';
     if (channel === 'ias_kt' || channel === 'tas_kt') return fmtOverviewNum(value, 0) + ' kt';
     if (channel.endsWith('_ft')) return fmtOverviewNum(value, 0) + ' ft';
     if (channel === 'field_f_nt') {
@@ -1236,5 +1252,7 @@ const KFDisplay = (function () {
     noSmoothChannel,
     listSmoothGroups,
     smoothGroupLabel,
+    heading360,
+    isHeadingChannel,
   };
 })();

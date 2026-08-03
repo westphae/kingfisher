@@ -100,6 +100,7 @@ const KFSmooth = (function () {
         st = { y: raw, lastMs: nowMs, angle: false };
       }
       filterState.set(key, st);
+      if (KFDisplay.isHeadingChannel(channel)) return KFDisplay.heading360(raw);
       return raw;
     }
     const dtSec = Math.max(0.001, (nowMs - st.lastMs) / 1000);
@@ -111,7 +112,10 @@ const KFSmooth = (function () {
       const cosR = Math.cos(rad);
       st.sinY += alpha * (sinR - st.sinY);
       st.cosY += alpha * (cosR - st.cosY);
-      return (Math.atan2(st.sinY, st.cosY) * 180) / Math.PI;
+      let deg = (Math.atan2(st.sinY, st.cosY) * 180) / Math.PI;
+      // atan2 is (-180, 180]; headings/tracks use aviation (0, 360].
+      if (KFDisplay.isHeadingChannel(channel)) deg = KFDisplay.heading360(deg);
+      return deg;
     }
     st.y += alpha * (raw - st.y);
     return st.y;

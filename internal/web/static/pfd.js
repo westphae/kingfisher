@@ -34,8 +34,9 @@ const KFPFD = (function () {
     return v != null && Number.isFinite(Number(v)) ? Number(v) : null;
   }
 
+  // Aviation (0, 360]: north is 360. Round then normalize (matches units.Heading360).
   function wrap360(d) {
-    return ((Math.round(d) % 360) + 360) % 360;
+    return KFDisplay.heading360(Math.round(d));
   }
 
   function pad3(d) {
