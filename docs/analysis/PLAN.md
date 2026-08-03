@@ -85,9 +85,10 @@ uv run --project analysis python scripts/analyze_flights.py windows
 
 ## Phase 1 — Sensor noise & parameter study
 
-**Status:** 1a done; 1b cruise profile applied for ICM-45686 (chip ODR 200 Hz,
-UI LPF 12.5 Hz / ODR/16, boxcar→25 Hz publish, ±4 g / ±62.5 dps, LN). See
-[`sensor_noise.md`](sensor_noise.md). BMP/MMC bench sweeps still open.
+**Status:** 1a done; 1b cruise profiles confirmed for ICM-45686 and BMP581
+(desk soaks in [`sensor_noise.md`](sensor_noise.md)). ICM: chip 200 Hz /
+LPF 12.5 / boxcar→25 Hz. BMP: 25 Hz, OSR×32, IIR 3 (first 90 s of
+`20260803T110148Z` excluded — blow/relocate). MMC bench sweeps still open.
 Tooling: `analysis/noise.py`, CLI `noise`.
 
 **Goal:** quantify noise vs rate/scale/filter; recommend bench + aircraft
