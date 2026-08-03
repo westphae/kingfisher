@@ -5,6 +5,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use pod_wire::{Ack, AttrKey, Cmd, CmdEnvelope, Frame, SensorId};
 
 use crate::battery_cfg;
+use crate::bmp_cfg;
 use crate::link;
 use crate::rates;
 use crate::sensors;
@@ -33,6 +34,9 @@ pub fn handle(envelope: CmdEnvelope) -> Ack {
         Cmd::SetRate { sensor, hz } => {
             if !rate_ok(sensor, hz) || !sensor_attached(sensor) {
                 false
+            } else if sensor == SensorId::Static && hz > bmp_cfg::max_odr_hz_for_osr_p(bmp_cfg::osr_p())
+            {
+                false
             } else {
                 rates::try_set(sensor, hz)
             }
@@ -44,6 +48,18 @@ pub fn handle(envelope: CmdEnvelope) -> Ack {
                 } else {
                     battery_cfg::request_design_mah(value as u16)
                 }
+            }
+            (SensorId::Static, AttrKey::BmpOsrPress) => {
+                sensor_attached(SensorId::Static) && bmp_cfg::request_osr_p_mult(value)
+            }
+            (SensorId::Static, AttrKey::BmpOsrTemp) => {
+                sensor_attached(SensorId::Static) && bmp_cfg::request_osr_t_mult(value)
+            }
+            (SensorId::Static, AttrKey::BmpIirPress) => {
+                sensor_attached(SensorId::Static) && bmp_cfg::request_iir_p_coeff(value)
+            }
+            (SensorId::Static, AttrKey::BmpIirTemp) => {
+                sensor_attached(SensorId::Static) && bmp_cfg::request_iir_t_coeff(value)
             }
             _ => false,
         },

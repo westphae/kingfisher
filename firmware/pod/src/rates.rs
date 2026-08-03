@@ -12,8 +12,9 @@ use pod_wire::SensorId;
 use crate::cfg;
 use crate::link;
 
-/// Default sensor rates match [`crate::cfg::BASE_HZ`] (uplink / poll tick, 10 Hz).
-const DEFAULT_STATIC_HZ: u16 = 10;
+/// Default static (BMP581) rate for cruise noise profile (OSR×32 + IIR).
+const DEFAULT_STATIC_HZ: u16 = 25;
+/// Mag / airspeed defaults match [`crate::cfg::BASE_HZ`] (poll tick, 10 Hz).
 const DEFAULT_MAG_HZ: u16 = 10;
 const DEFAULT_AIRSPEED_HZ: u16 = 10;
 const DEFAULT_BATTERY_HZ: u16 = 1;

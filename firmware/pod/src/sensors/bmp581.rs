@@ -1,8 +1,7 @@
 //! Bosch BMP581 static pressure + temperature (I²C).
 //!
 //! NORMAL mode + on-chip FIFO (PT frames). The sensor samples at the
-//! configured ODR; the poll loop drains all pending frames once per tick
-//! and assigns capture times from ODR and frame order.
+//! configured ODR with programmable OSR and IIR (see `crate::bmp_cfg`).
 
 use esp_hal::delay::Delay;
 use esp_println::println;
@@ -10,6 +9,7 @@ use heapless::Vec;
 use pod_wire::MAX_READINGS;
 
 use super::bus::Bus as I2cBus;
+use crate::bmp_cfg;
 
 pub const ADDR_PRIMARY: u8 = 0x46;
 pub const ADDR_SECONDARY: u8 = 0x47;
@@ -22,6 +22,8 @@ const REG_FIFO_SEL: u8 = 0x18;
 const REG_FIFO_DATA: u8 = 0x29;
 const REG_INT_STATUS: u8 = 0x27;
 const REG_STATUS: u8 = 0x28;
+const REG_DSP_CONFIG: u8 = 0x30;
+const REG_DSP_IIR: u8 = 0x31;
 const REG_OSR: u8 = 0x36;
 const REG_ODR: u8 = 0x37;
 const REG_CMD: u8 = 0x7E;
@@ -32,9 +34,6 @@ const CMD_SOFT_RESET: u8 = 0xB6;
 
 const PWR_STANDBY: u8 = 0;
 const PWR_NORMAL: u8 = 1;
-
-const OSR_TEMP_NONE: u8 = 0;
-const OSR_PRESS_NONE: u8 = 0;
 
 /// FIFO frame: pressure + temperature (48 bit / 6 bytes).
 const FIFO_FRAME_SEL_PT: u8 = 0x03;
@@ -53,6 +52,10 @@ pub struct Sample {
 pub struct Bmp581 {
     addr: u8,
     active_hz: u16,
+    applied_osr_p: u8,
+    applied_osr_t: u8,
+    applied_iir_p: u8,
+    applied_iir_t: u8,
 }
 
 impl Bmp581 {
@@ -66,7 +69,14 @@ impl Bmp581 {
                 Ok(id) => {
                     println!("pod: i2c 0x{addr:02x} chip_id=0x{id:02x}");
                     if id == CHIP_ID_BMP581 || id == CHIP_ID_BMP585 {
-                        return Some(Self { addr, active_hz: 0 });
+                        return Some(Self {
+                            addr,
+                            active_hz: 0,
+                            applied_osr_p: 0xff,
+                            applied_osr_t: 0xff,
+                            applied_iir_p: 0xff,
+                            applied_iir_t: 0xff,
+                        });
                     }
                 }
                 Err(e) => println!("pod: i2c 0x{addr:02x} chip_id read: {:?}", e),
@@ -87,15 +97,36 @@ impl Bmp581 {
         Ok(())
     }
 
-    /// Ensure NORMAL+FIFO is running at `hz` (reconfigures from standby when Hz changes).
+    /// Ensure NORMAL+FIFO is running at `hz` with current bmp_cfg OSR/IIR.
     pub fn ensure_odr(&mut self, bus: &mut I2cBus, hz: u16) -> Result<(), ()> {
         let hz = hz.max(1);
-        if self.active_hz == hz {
+        let dirty = bmp_cfg::take_dirty();
+        let osr_p = bmp_cfg::osr_p();
+        let osr_t = bmp_cfg::osr_t();
+        let iir_p = bmp_cfg::iir_p();
+        let iir_t = bmp_cfg::iir_t();
+        let cfg_changed = dirty
+            || osr_p != self.applied_osr_p
+            || osr_t != self.applied_osr_t
+            || iir_p != self.applied_iir_p
+            || iir_t != self.applied_iir_t;
+        if self.active_hz == hz && !cfg_changed {
             return Ok(());
         }
-        self.configure_fifo_normal(bus, hz)?;
+        if hz > bmp_cfg::max_odr_hz_for_osr_p(osr_p) {
+            println!(
+                "pod: bmp581 ODR {hz} Hz exceeds max {} for osr_p={osr_p}",
+                bmp_cfg::max_odr_hz_for_osr_p(osr_p)
+            );
+            return Err(());
+        }
+        self.configure_fifo_normal(bus, hz, osr_p, osr_t, iir_p, iir_t)?;
         self.active_hz = hz;
-        println!("pod: bmp581 ODR {hz} Hz");
+        self.applied_osr_p = osr_p;
+        self.applied_osr_t = osr_t;
+        self.applied_iir_p = iir_p;
+        self.applied_iir_t = iir_t;
+        println!("pod: bmp581 ODR {hz} Hz osr_p={osr_p} osr_t={osr_t} iir_p={iir_p} iir_t={iir_t}");
         Ok(())
     }
 
@@ -135,15 +166,40 @@ impl Bmp581 {
         Ok(out)
     }
 
-    fn configure_fifo_normal(&self, bus: &mut I2cBus, hz: u16) -> Result<(), ()> {
+    fn configure_fifo_normal(
+        &self,
+        bus: &mut I2cBus,
+        hz: u16,
+        osr_p: u8,
+        osr_t: u8,
+        iir_p: u8,
+        iir_t: u8,
+    ) -> Result<(), ()> {
         let odr = odr_code_for_hz(hz).ok_or(())?;
         self.enter_standby(bus)?;
 
         write_u8(bus, self.addr, REG_INT_SOURCE, 0x01)?; // drdy_data_reg_en
 
-        // OSR fields: press bits[5:3], temp bits[2:0]; bit 6 = press_en.
-        let osr = (OSR_PRESS_NONE << 3) | OSR_TEMP_NONE | (1 << 6);
+        // OSR: press bits[5:3], temp bits[2:0]; bit 6 = press_en.
+        let osr = ((osr_p & 0x07) << 3) | (osr_t & 0x07) | (1 << 6);
         write_u8(bus, self.addr, REG_OSR, osr)?;
+
+        // DSP_IIR: set_iir_t bits[2:0], set_iir_p bits[5:3].
+        let iir = ((iir_p & 0x07) << 3) | (iir_t & 0x07);
+        write_u8(bus, self.addr, REG_DSP_IIR, iir)?;
+
+        // Keep pressure/temp compensation (reset 0b11); route IIR into FIFO when enabled.
+        let mut dsp = 0x03u8; // comp_pt_en
+        if iir_p != 0 {
+            dsp |= 1 << 6; // fifo_sel_iir_p
+            dsp |= 1 << 5; // shdw_sel_iir_p
+        }
+        if iir_t != 0 {
+            dsp |= 1 << 4; // fifo_sel_iir_t
+            dsp |= 1 << 3; // shdw_sel_iir_t
+        }
+        write_u8(bus, self.addr, REG_DSP_CONFIG, dsp)?;
+
         // PT frames, no decimation, streaming FIFO, threshold off.
         write_u8(bus, self.addr, REG_FIFO_SEL, FIFO_FRAME_SEL_PT)?;
         write_u8(bus, self.addr, REG_FIFO_CONFIG, 0x00)?;
@@ -168,6 +224,10 @@ impl Bmp581 {
             return Err(());
         }
         self.active_hz = 0;
+        self.applied_osr_p = 0xff;
+        self.applied_osr_t = 0xff;
+        self.applied_iir_p = 0xff;
+        self.applied_iir_t = 0xff;
         Ok(())
     }
 
@@ -261,6 +321,7 @@ mod tests {
     #[test]
     fn odr_table_covers_defaults() {
         assert_eq!(odr_code_for_hz(10), Some(0x17));
+        assert_eq!(odr_code_for_hz(25), Some(0x14));
         assert_eq!(odr_code_for_hz(50), Some(0x0F));
     }
 

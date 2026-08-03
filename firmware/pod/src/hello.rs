@@ -10,7 +10,7 @@ pub fn build(mask: u8) -> Frame {
     let mut sensors: Vec<SensorCap, MAX_SENSORS> = Vec::new();
     if mask & sensors::BMP_BIT != 0 {
         let max = crate::rates::hello_max_hz(SensorId::Static, mask);
-        let _ = sensors.push(cap(SensorId::Static, "bmp581", 1, max, 10));
+        let _ = sensors.push(cap(SensorId::Static, "bmp581", 1, max, 25));
     }
     if mask & sensors::MMC_BIT != 0 {
         let max = crate::rates::hello_max_hz(SensorId::Mag, mask);

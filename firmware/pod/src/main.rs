@@ -5,6 +5,7 @@
 #![no_main]
 
 mod battery_cfg;
+mod bmp_cfg;
 mod burst;
 mod cfg;
 mod cmd;
