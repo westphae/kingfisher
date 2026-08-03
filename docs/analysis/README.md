@@ -19,6 +19,9 @@ Outputs:
 |----------|----------------|
 | Catalog JSON | `~/kingfisher/analysis-cache/catalog.json` |
 | Health JSON | `~/kingfisher/analysis-cache/health.json` |
+| Motion windows | `~/kingfisher/analysis-cache/windows/` (parquet) |
+| Noise study | `~/kingfisher/analysis-cache/noise/` + `docs/analysis/sensor_noise.md` |
+| Full plan | [`PLAN.md`](PLAN.md) |
 | Ledger (git) | `docs/analysis/ledger.md` |
 
 Commands:
@@ -26,14 +29,16 @@ Commands:
 ```bash
 uv run --project analysis python scripts/analyze_flights.py catalog
 uv run --project analysis python scripts/analyze_flights.py health --flights-only
+uv run --project analysis python scripts/analyze_flights.py windows
+uv run --project analysis python scripts/analyze_flights.py noise
 uv run --project analysis python scripts/analyze_flights.py report
-uv run --project analysis python scripts/analyze_flights.py health --file 20260722T203620Z_n456t.db
+uv run --project analysis python scripts/analyze_flights.py windows --file 20260722T203620Z_n456t.db
 
 # Legacy sampling plots (matplotlib):
 uv run --project analysis python scripts/analyze_flight_sampling.py --help
 ```
 
-Dependencies (locked in root `uv.lock`): Python ≥3.11, `numpy`, `matplotlib`.
+Dependencies (locked in root `uv.lock`): Python ≥3.11, `numpy`, `matplotlib`, `pyarrow`, `pandas`.
 
 ## Layout
 
@@ -76,6 +81,44 @@ tags: pattern, kcxo
 ---
 
 Free-form notes…
+```
+
+## Motion windows (Phase 0)
+
+Label every session in `flights/` (aircraft *and* desk soaks) into 1 s epochs,
+then merge contiguous runs into segments:
+
+| Label | Meaning |
+|-------|---------|
+| `stationary` | Still — use for calibration ("level windows") |
+| `taxi` | GPS gs in taxi band (default 5–40 kt) |
+| `flight` | GPS gs ≥ 40 kt |
+| `transient` | Bump / pick-up, or motion without GPS taxi/flight (desk handling) |
+
+Without reliable GPS, only `stationary` / `transient` are used (so desktop
+sessions never become fake taxi/flight).
+
+### Parquet layout (append-friendly)
+
+One giant file would work for epochs (~1 Hz × hours × tens of sessions is only
+tens–hundreds of MB), but **rewriting it on every run is painful**. Instead:
+
+```
+~/kingfisher/analysis-cache/windows/
+  manifest.json
+  epochs/session_id=<stem>/part.parquet    # 1 Hz labels + features
+  segments/session_id=<stem>/part.parquet  # contiguous runs (small)
+  segments_all.parquet                     # compacted segments (optional)
+```
+
+Re-running one session overwrites only that `session_id=` partition. Read with
+pandas/pyarrow datasets:
+
+```python
+import pyarrow.dataset as ds
+epochs = ds.dataset(".../windows/epochs", format="parquet", partitioning="hive")
+segments = ds.dataset(".../windows/segments", format="parquet", partitioning="hive")
+# or: pd.read_parquet(".../windows/segments_all.parquet")
 ```
 
 ## Health grades

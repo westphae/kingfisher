@@ -8,7 +8,7 @@ workspace. From the repo root:
 | `pyproject.toml` | Workspace root (`members = analysis, enclosures`) |
 | `uv.lock` | Committed lockfile for both members |
 | `.venv/` | Shared workspace venv (gitignored) |
-| `analysis/pyproject.toml` | Flight DB catalog / health (`numpy`, `matplotlib`) |
+| `analysis/pyproject.toml` | Flight DB catalog / health / windows (`numpy`, `matplotlib`, `pyarrow`, `pandas`) |
 | `enclosures/pyproject.toml` | CadQuery case models |
 | `hardware/hat/scripts/` | Stdlib only — **no** uv project; KiCad/`pcbnew` = apt |
 
