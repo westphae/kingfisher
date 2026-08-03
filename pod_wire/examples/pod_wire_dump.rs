@@ -108,6 +108,17 @@ fn main() {
             },
         }),
     );
+    dump(
+        "cmd_set_attr_bmp_osr",
+        &Frame::Cmd(CmdEnvelope {
+            seq: 3,
+            cmd: Cmd::SetAttr {
+                sensor: SensorId::Static,
+                key: AttrKey::BmpOsrPress,
+                value: 32.0,
+            },
+        }),
+    );
 
     dump(
         "status",

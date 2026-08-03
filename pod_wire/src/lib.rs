@@ -161,6 +161,14 @@ pub enum Cmd {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AttrKey {
     DesignCapacity,
+    /// BMP581 pressure oversampling multiplier (1,2,4,…,128).
+    BmpOsrPress,
+    /// BMP581 temperature oversampling multiplier (1,2,4,…,128).
+    BmpOsrTemp,
+    /// BMP581 pressure IIR filter coefficient (0=bypass, 1,3,7,…,127).
+    BmpIirPress,
+    /// BMP581 temperature IIR filter coefficient (0=bypass, 1,3,7,…,127).
+    BmpIirTemp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -333,6 +341,14 @@ mod tests {
                 sensor: SensorId::Battery,
                 key: AttrKey::DesignCapacity,
                 value: 850.0,
+            },
+        }));
+        rt(&Frame::Cmd(CmdEnvelope {
+            seq: 3,
+            cmd: Cmd::SetAttr {
+                sensor: SensorId::Static,
+                key: AttrKey::BmpOsrPress,
+                value: 32.0,
             },
         }));
     }

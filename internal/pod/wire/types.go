@@ -216,6 +216,10 @@ type AttrKey uint8
 
 const (
 	AttrDesignCapacity AttrKey = 0
+	AttrBmpOsrPress    AttrKey = 1
+	AttrBmpOsrTemp     AttrKey = 2
+	AttrBmpIirPress    AttrKey = 3
+	AttrBmpIirTemp     AttrKey = 4
 )
 
 // Ack acknowledges a Cmd by its outbound seq number.
