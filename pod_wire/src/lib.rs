@@ -169,6 +169,8 @@ pub enum AttrKey {
     BmpIirPress,
     /// BMP581 temperature IIR filter coefficient (0=bypass, 1,3,7,…,127).
     BmpIirTemp,
+    /// MMC5983 bandwidth (Hz): 100, 200, 400, or 800 (IC1 BW[1:0]).
+    MmcBandwidth,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -349,6 +351,14 @@ mod tests {
                 sensor: SensorId::Static,
                 key: AttrKey::BmpOsrPress,
                 value: 32.0,
+            },
+        }));
+        rt(&Frame::Cmd(CmdEnvelope {
+            seq: 4,
+            cmd: Cmd::SetAttr {
+                sensor: SensorId::Mag,
+                key: AttrKey::MmcBandwidth,
+                value: 100.0,
             },
         }));
     }

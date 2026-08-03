@@ -47,6 +47,9 @@ func TestRustFixtures(t *testing.T) {
 		"cmd_set_attr_bmp_osr": CmdFrame{Seq: 3, Cmd: CmdSetAttr{
 			Sensor: SensorStatic, Key: AttrBmpOsrPress, Value: 32.0,
 		}},
+		"cmd_set_attr_mmc_bw": CmdFrame{Seq: 4, Cmd: CmdSetAttr{
+			Sensor: SensorMag, Key: AttrMmcBandwidth, Value: 100.0,
+		}},
 		"status": Status{
 			PodUptimeUs:     5_000_000,
 			BatteryV:        3.78,

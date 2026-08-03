@@ -119,6 +119,17 @@ fn main() {
             },
         }),
     );
+    dump(
+        "cmd_set_attr_mmc_bw",
+        &Frame::Cmd(CmdEnvelope {
+            seq: 4,
+            cmd: Cmd::SetAttr {
+                sensor: SensorId::Mag,
+                key: AttrKey::MmcBandwidth,
+                value: 100.0,
+            },
+        }),
+    );
 
     dump(
         "status",
