@@ -94,7 +94,7 @@ Plan files live under `~/.claude/plans/` outside the repo.
 ## Driver TODOs (sibling repos)
 
 - **[icm20948-mod](../icm20948-mod/TODO.md)** — Implement on-chip **hardware FIFO** (today: hrtimer + one SMBus burst per sample; mag aux ~100 Hz cap). Kingfisher `MaxBufferedHz` reflects that limit until FIFO lands.
-- **[icm45686-mod](../icm45686-mod/TODO.md)** — INT1 is mandatory in DT; Pi overlay often needs `dtoverlay=icm45686,int_trigger=8` (level-low) for active-low INT1. Kingfisher uses **hwfifo** on `icm45686-gyro` / `icm45686-accel`, syncs `sampling_frequency` to `sample_hz`, skips `buffer/data_available` polling, and restarts the buffer on stall before polled fallback.
+- **[icm45686-mod](../icm45686-mod/TODO.md)** — INT1 is mandatory in DT; Pi overlay often needs `dtoverlay=icm45686,int_trigger=8` (level-low) for active-low INT1. Kingfisher uses **hwfifo** on `icm45686-gyro` / `icm45686-accel`. When `attrs.sampling_frequency` > `sample_hz`, chip ODR stays high (with UI LPF via `in_*_filter_low_pass_3db_frequency`) and frames are **boxcar-averaged** down to `sample_hz` for hub/store. Skips `buffer/data_available` polling; restarts the buffer on stall before polled fallback.
 
 ## Git / release etiquette
 
