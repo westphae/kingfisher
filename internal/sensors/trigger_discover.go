@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/westphae/kingfisher/internal/config"
 )
 
 // discoverIIOTrigger returns the kernel trigger name for a chip-backed data-ready
@@ -78,9 +80,37 @@ func snapSamplingFrequency(hz float64, available string) (token string, snappedH
 	return token, snappedHz, nil
 }
 
-// syncDeviceSamplingHz aligns the chip ODR with kingfisher's buffered publish
-// rate so FIFO watermark IRQs fire near the requested sample_hz. The inv driver
-// only accepts discrete ODR values from sampling_frequency_available.
+// configuredChipHz returns the desired on-chip ODR for a buffered device.
+// When attrs.sampling_frequency is set (and > 0) it wins — allowing chip ODR
+// above sample_hz so the driver can LPF/average before kingfisher boxcars down
+// to the publish rate. Otherwise the publish rate is used.
+func configuredChipHz(dev config.Device, publishHz float64) float64 {
+	if s, ok := dev.Attrs["sampling_frequency"]; ok {
+		if v, err := strconv.ParseFloat(strings.TrimSpace(s), 64); err == nil && v > 0 {
+			return v
+		}
+	}
+	if publishHz > 0 {
+		return publishHz
+	}
+	return 0
+}
+
+// boxcarRatio is how many chip frames to average into one published sample.
+// Returns 1 when chip ODR is not meaningfully above the publish rate.
+func boxcarRatio(chipHz, publishHz float64) int {
+	if publishHz <= 0 || chipHz <= publishHz*1.05 {
+		return 1
+	}
+	n := int(math.Round(chipHz / publishHz))
+	if n < 2 {
+		return 1
+	}
+	return n
+}
+
+// syncDeviceSamplingHz programs the chip ODR (sampling_frequency). The inv
+// driver only accepts discrete values from sampling_frequency_available.
 func syncDeviceSamplingHz(r *iioReader, hz float64) error {
 	if hz <= 0 || !usesHWFIFOBuffer(r.Name()) {
 		return nil
@@ -97,7 +127,7 @@ func syncDeviceSamplingHz(r *iioReader, hz float64) error {
 		return err
 	}
 	if math.Abs(snapped-hz) > 1e-9 {
-		log.Printf("sensors: %s: sample_hz %.4g -> chip sampling_frequency %s",
+		log.Printf("sensors: %s: requested chip ODR %.4g -> sampling_frequency %s",
 			r.Name(), hz, token)
 	}
 	return r.SetChannelAttr("", "sampling_frequency", token)

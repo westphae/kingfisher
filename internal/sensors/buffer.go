@@ -146,12 +146,14 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 
 	paused := !dev.Enabled
 
-	effectiveHz := clampBufferedHz(r, dev.SampleHz)
-	if effectiveHz != dev.SampleHz {
+	publishHz := clampBufferedHz(r, dev.SampleHz)
+	if publishHz != dev.SampleHz {
 		log.Printf("sensors: %s: sample_hz %.0f exceeds max %.1f for oversampling — using %.1f Hz",
-			name, dev.SampleHz, effectiveHz, effectiveHz)
+			name, dev.SampleHz, publishHz, publishHz)
 	}
-	hz := int(math.Round(effectiveHz))
+	chipHz := configuredChipHz(dev, publishHz)
+	avgN := boxcarRatio(chipHz, publishHz)
+	hz := int(math.Round(chipHz))
 	if hz <= 0 {
 		hz = 10
 	}
@@ -169,7 +171,7 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 				triggerName = chipTrig
 				log.Printf("sensors: %s: binding chip trigger %q", name, chipTrig)
 			} else {
-				trig, err = iio.EnsureHRTimer(tname, hz)
+				trig, err = iio.EnsureHRTimer(tname, int(math.Round(publishHz)))
 				if err != nil {
 					log.Printf("sensors: %s: buffer trigger: %v — using polled reads", name, err)
 					runOne(ctx, r, name, holder, hub, buf, st, reg)
@@ -179,10 +181,15 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 				defer releaseHRTimer(trig)
 			}
 		} else if hwFIFO {
-			if err := syncDeviceSamplingHz(r, effectiveHz); err != nil {
+			if err := syncDeviceSamplingHz(r, chipHz); err != nil {
 				log.Printf("sensors: %s: sampling_frequency: %v", name, err)
 			}
-			log.Printf("sensors: %s: hwfifo buffer (INT1); no trigger/current_trigger", name)
+			if avgN > 1 {
+				log.Printf("sensors: %s: hwfifo buffer (INT1); chip %.0f Hz → publish %.0f Hz (boxcar %d)",
+					name, chipHz, publishHz, avgN)
+			} else {
+				log.Printf("sensors: %s: hwfifo buffer (INT1); no trigger/current_trigger", name)
+			}
 		} else {
 			log.Printf("sensors: %s: no trigger/current_trigger; trying device-native buffer", name)
 		}
@@ -190,7 +197,7 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		log.Printf("sensors: %s: disabled — paused until enabled in config", name)
 	}
 
-	blen := bufferLengthForHz(effectiveHz)
+	blen := bufferLengthForHz(chipHz)
 	var iobuf *iio.Buffer
 	if !paused {
 		iobuf, err = r.openIIOBuffer(chans, blen, triggerName)
@@ -239,8 +246,15 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		consecutiveStalls  int
 		stallRestartCycles int
 		fallbackToPolled   bool
+		boxSum             map[string]float64
+		boxCount           int
 	)
 	const maxStallRestartCycles = 8
+
+	resetBoxcar := func() {
+		boxSum = nil
+		boxCount = 0
+	}
 
 	restartCapture := func(newDev config.Device) bool {
 		if !newDev.Enabled {
@@ -253,27 +267,34 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		if err := applyConfiguredAttrs(r, newDev); err != nil {
 			log.Printf("sensors: %s reapply attrs: %v", name, err)
 		}
-		effectiveHz := clampBufferedHz(r, newDev.SampleHz)
+		publishHz = clampBufferedHz(r, newDev.SampleHz)
+		chipHz = configuredChipHz(newDev, publishHz)
+		avgN = boxcarRatio(chipHz, publishHz)
+		resetBoxcar()
 		if hwFIFO {
-			if err := syncDeviceSamplingHz(r, effectiveHz); err != nil {
+			if err := syncDeviceSamplingHz(r, chipHz); err != nil {
 				log.Printf("sensors: %s: sampling_frequency: %v", name, err)
 			}
 		}
-		if effectiveHz != newDev.SampleHz {
+		if publishHz != newDev.SampleHz {
 			log.Printf("sensors: %s: sample_hz %.0f exceeds max %.1f for oversampling — using %.1f Hz",
-				name, newDev.SampleHz, effectiveHz, effectiveHz)
+				name, newDev.SampleHz, publishHz, publishHz)
 		}
-		newHz := int(math.Round(effectiveHz))
+		newHz := int(math.Round(chipHz))
 		if newHz <= 0 {
 			newHz = 10
 		}
 		if trig != nil {
-			if err := trig.SetFrequency(newHz); err != nil {
-				log.Printf("sensors: %s: set trigger %d Hz: %v", name, newHz, err)
+			trigHz := int(math.Round(publishHz))
+			if trigHz <= 0 {
+				trigHz = 10
+			}
+			if err := trig.SetFrequency(trigHz); err != nil {
+				log.Printf("sensors: %s: set trigger %d Hz: %v", name, trigHz, err)
 			}
 		}
 		hz = newHz
-		blen = bufferLengthForHz(effectiveHz)
+		blen = bufferLengthForHz(chipHz)
 		var err error
 		iobuf, err = r.openIIOBuffer(chans, blen, triggerName)
 		if err != nil {
@@ -433,11 +454,35 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 				continue
 			}
 			ts := sampleTimeNs(recs[i], clock)
-			sm := live.Sample{Device: name, TsNs: ts, Values: values}
+			if avgN <= 1 {
+				sm := live.Sample{Device: name, TsNs: ts, Values: values}
+				hub.Publish(sm)
+				if buf != nil {
+					buf.Append(sm)
+				}
+				continue
+			}
+			if boxSum == nil {
+				boxSum = make(map[string]float64, len(values))
+			}
+			for k, v := range values {
+				boxSum[k] += v
+			}
+			boxCount++
+			if boxCount < avgN {
+				continue
+			}
+			avg := make(map[string]float64, len(boxSum))
+			inv := 1.0 / float64(boxCount)
+			for k, v := range boxSum {
+				avg[k] = v * inv
+			}
+			sm := live.Sample{Device: name, TsNs: ts, Values: avg}
 			hub.Publish(sm)
 			if buf != nil {
 				buf.Append(sm)
 			}
+			resetBoxcar()
 		}
 	}
 }

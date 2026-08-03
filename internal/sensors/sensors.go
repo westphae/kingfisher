@@ -234,14 +234,21 @@ func applyConfiguredAttrs(r Reader, dev config.Device) error {
 		return nil
 	}
 	var firstErr error
-	for k, v := range dev.Attrs {
-		// channel/attr split: "<channel>_<attr>" — the IIO sysfs name is
-		// already the full "in_<ch>_<attr>" form; pass through as-is by
-		// finding the channel name embedded in the key.
+	set := func(k, v string) {
 		ch, attr := SplitIIOAttr(k)
 		if err := r.SetChannelAttr(ch, attr, v); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("setattr %s=%s: %w", k, v, err)
 		}
+	}
+	// ODR before UI LPF: filter values are absolute Hz derived from current ODR.
+	if v, ok := dev.Attrs["sampling_frequency"]; ok {
+		set("sampling_frequency", v)
+	}
+	for k, v := range dev.Attrs {
+		if k == "sampling_frequency" {
+			continue
+		}
+		set(k, v)
 	}
 	if err := r.ReloadScale(); err != nil && firstErr == nil {
 		firstErr = fmt.Errorf("reload scale: %w", err)

@@ -1,6 +1,10 @@
 package sensors
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/westphae/kingfisher/internal/config"
+)
 
 func TestDiscoverIIOTrigger(t *testing.T) {
 	if discoverIIOTrigger("") != "" {
@@ -29,5 +33,30 @@ func TestUsesHWFIFOBuffer(t *testing.T) {
 	}
 	if usesHWFIFOBuffer("icm20948") {
 		t.Fatal("20948")
+	}
+}
+
+func TestConfiguredChipHz(t *testing.T) {
+	dev := config.Device{
+		SampleHz: 25,
+		Attrs:    map[string]string{"sampling_frequency": "200"},
+	}
+	if got := configuredChipHz(dev, 25); got != 200 {
+		t.Fatalf("chip hz: got %v want 200", got)
+	}
+	if got := configuredChipHz(config.Device{SampleHz: 25}, 25); got != 25 {
+		t.Fatalf("fallback: got %v want 25", got)
+	}
+}
+
+func TestBoxcarRatio(t *testing.T) {
+	if boxcarRatio(200, 25) != 8 {
+		t.Fatalf("200/25: got %d", boxcarRatio(200, 25))
+	}
+	if boxcarRatio(25, 25) != 1 {
+		t.Fatalf("equal: got %d", boxcarRatio(25, 25))
+	}
+	if boxcarRatio(30, 25) != 1 {
+		t.Fatalf("near: got %d", boxcarRatio(30, 25))
 	}
 }
