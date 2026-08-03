@@ -68,6 +68,21 @@ Archive attrs do **not** vary. To finish 1b experimentally:
 - For **calibration (Phase 2–3)**, prefer long `stationary` segments; 1 s averaging already cuts high-frequency noise substantially when `σ/σ₁ₛ` ≫ 1.
 - Apply **accel scale** (Phase 2) before interpreting ‖a‖−g as noise.
 
+### Confirmation soak (new profile)
+
+Session `20260803T023253Z_n456t` — ~1000 s desk-stationary after enabling the cruise profile. Published rate still ~25 Hz; chip ODR/LPF/FS as above.
+
+| Channel | σ new | σ archive (med) | σ_new/σ_base |
+|---------|------:|----------------:|-------------:|
+| accel_x | 0.00299 | 0.0267 | **0.11** |
+| accel_y | 0.00224 | 0.0264 | **0.08** |
+| accel_z | 0.00236 | 0.0218 | **0.11** |
+| anglvel_x | 2.13e-4 | 3.72e-4 | **0.57** |
+| anglvel_y | 4.12e-4 | 7.41e-4 | **0.56** |
+| anglvel_z | 2.05e-4 | 2.70e-4 | **0.76** |
+
+Accel σ is now ≈ datasheet brickwall at \(f_c=12.5\) Hz (~0.0024 m/s²). Gyro improved ~1.3–1.8× (still above pure ND×√fc on Y — residual bias wander / vib). Median σ ratio across six axes ≈ **0.33**.
+
 ## Next
 
 Phase 2 — accel scale/bias from stationary windows + optional 6-position bench ([PLAN.md](PLAN.md)).
