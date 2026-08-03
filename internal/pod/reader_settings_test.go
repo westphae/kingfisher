@@ -19,8 +19,9 @@ func TestSettingsAttrRecordsFromSavedConfigWithoutHello(t *testing.T) {
 	c := New("", nil, nil, nil, nil, reg, holder)
 
 	recs := c.reader.SettingsAttrRecords()
-	if len(recs) != 2 {
-		t.Fatalf("records: got %d want 2 (%+v)", len(recs), recs)
+	// mmc: rate; bmp: rate + 4 OSR/IIR
+	if len(recs) != 6 {
+		t.Fatalf("records: got %d want 6 (%+v)", len(recs), recs)
 	}
 	var vals []string
 	for _, r := range recs {
@@ -32,7 +33,11 @@ func TestSettingsAttrRecordsFromSavedConfigWithoutHello(t *testing.T) {
 
 	for _, dev := range []string{"bmp581", "mmc5983"} {
 		views := reg.Get(dev)
-		if len(views) != 1 {
+		wantRows := 1
+		if dev == "bmp581" {
+			wantRows = 5
+		}
+		if len(views) != wantRows {
 			t.Fatalf("%s registry views: %+v", dev, views)
 		}
 		v := views[0]

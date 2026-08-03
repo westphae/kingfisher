@@ -7,9 +7,17 @@ import (
 	"github.com/westphae/kingfisher/internal/sensors"
 )
 
+// BMP581 attr names (IIO-style, device-level on the bmp581 tab).
+const (
+	AttrOversamplingPressure = "oversampling_pressure"
+	AttrOversamplingTemp     = "oversampling_temp"
+	AttrIIRPressure          = "iir_pressure"
+	AttrIIRTemp              = "iir_temp"
+)
+
 // parsePodAttrKey maps config/UI keys to a chip device name and attr.
 // Accepts canonical "in_bmp581_sampling_frequency", legacy "in_mag_sampling_frequency",
-// and device-level "sampling_frequency".
+// BMP581 OSR/IIR keys, and device-level "sampling_frequency".
 func parsePodAttrKey(full string) (device, attr string, ok bool) {
 	if full == "sampling_frequency" {
 		return "", "sampling_frequency", true
@@ -30,17 +38,54 @@ func parsePodAttrKey(full string) (device, attr string, ok bool) {
 			return prefix, "sampling_frequency", true
 		}
 	}
+
 	ch, a := sensors.SplitIIOAttr(full)
-	if a != "sampling_frequency" {
+	if a == "" {
 		return "", "", false
 	}
-	if sid, ok := legacySettingsChannel[ch]; ok {
-		return DefaultDeviceName(sid), a, true
+	dev := resolvePodDevice(ch)
+	if dev == "" {
+		return "", "", false
 	}
-	for _, sid := range []wire.SensorID{wire.SensorStatic, wire.SensorMag, wire.SensorAirspeed} {
-		if ch == DefaultDeviceName(sid) {
-			return ch, a, true
+	switch a {
+	case "sampling_frequency",
+		AttrOversamplingPressure, AttrOversamplingTemp,
+		AttrIIRPressure, AttrIIRTemp:
+		return dev, a, true
+	default:
+		return "", "", false
+	}
+}
+
+func resolvePodDevice(chOrDev string) string {
+	if sid, ok := legacySettingsChannel[chOrDev]; ok {
+		return DefaultDeviceName(sid)
+	}
+	for _, sid := range []wire.SensorID{
+		wire.SensorStatic, wire.SensorMag, wire.SensorAirspeed, wire.SensorBattery,
+	} {
+		if chOrDev == DefaultDeviceName(sid) {
+			return chOrDev
 		}
 	}
-	return "", "", false
+	// in_static_oversampling_pressure → channel "static"
+	if sid, ok := legacySettingsChannel[chOrDev]; ok {
+		return DefaultDeviceName(sid)
+	}
+	return ""
+}
+
+func wireAttrKeyFor(attr string) (wire.AttrKey, bool) {
+	switch attr {
+	case AttrOversamplingPressure:
+		return wire.AttrBmpOsrPress, true
+	case AttrOversamplingTemp:
+		return wire.AttrBmpOsrTemp, true
+	case AttrIIRPressure:
+		return wire.AttrBmpIirPress, true
+	case AttrIIRTemp:
+		return wire.AttrBmpIirTemp, true
+	default:
+		return 0, false
+	}
 }

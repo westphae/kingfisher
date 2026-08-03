@@ -31,8 +31,9 @@ func TestLogPodSensorAttrsOnHello(t *testing.T) {
 	if err := st.DB().QueryRow(`SELECT COUNT(*) FROM sensor_attrs WHERE location = 'pod'`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n != 12 { // 3 devices × (sampling_frequency + min/max/default_hz)
-		t.Fatalf("sensor_attrs rows = %d, want 12", n)
+	// bmp581: rate + 4 OSR/IIR + min/max/default; mmc/ms: rate + min/max/default
+	if n != 16 {
+		t.Fatalf("sensor_attrs rows = %d, want 16", n)
 	}
 }
 

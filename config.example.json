@@ -17,6 +17,13 @@
     "wifi_ssid": "kingfisher",
     "wifi_password": "",
     "udp_addr": "192.168.10.1:47808",
+    "attrs": {
+      "in_bmp581_sampling_frequency": "25",
+      "in_bmp581_oversampling_pressure": "32",
+      "in_bmp581_oversampling_temp": "2",
+      "in_bmp581_iir_pressure": "3",
+      "in_bmp581_iir_temp": "3"
+    },
     "battery_capacity_mah": 850,
     "sleep_soc_pct": 20,
     "sleep_voltage_v_uncalibrated": 3.60,

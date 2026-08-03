@@ -21,13 +21,17 @@ rates from `config.json` + caps, not from an explicit attr snapshot on the wire.
 3. Pi: on `applyHello`, log those rows to `sensor_attrs` (source of truth =
    pod, not Pi cache).
 
-## Later: configurable chip registers
+## Done: BMP581 OSR / IIR via SetAttr
 
-Wire has `Cmd::SetAttr`, but `AttrKey` currently carries only
-`DesignCapacity` (the speculative `Oversampling` / `IirFilter` variants were
-removed as unused — re-add them here when the firmware actually applies them).
-End state:
+`AttrKey::{BmpOsrPress,BmpOsrTemp,BmpIirPress,BmpIirTemp}` + firmware
+`bmp_cfg` / `bmp581` apply path. Config keys:
 
-- Pi UI / `config.json` `pod.attrs` keys beyond `*_sampling_frequency`.
-- Firmware applies via BMP581/MMC5983/MS4525 driver APIs; Ack + rollback like `SetRate`.
+- `in_bmp581_sampling_frequency` (cruise default **25**)
+- `in_bmp581_oversampling_pressure` / `_temp` (multipliers; default **32** / **2**)
+- `in_bmp581_iir_pressure` / `_temp` (coeffs 0=bypass,1,3,…; default **3**)
+
+## Later: more configurable chip registers
+
+- MMC5983 / MS4525 attrs via the same `SetAttr` pattern.
+- Ack + rollback for BMP attrs (today optimistic cache like DesignCapacity without chip confirm).
 - Log attr changes to `sensor_attrs` on successful Ack.

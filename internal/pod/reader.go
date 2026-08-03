@@ -72,7 +72,7 @@ func defaultSensorCap(sid wire.SensorID) (wire.SensorCap, bool) {
 	switch sid {
 	case wire.SensorStatic:
 		return wire.SensorCap{
-			ID: sid, MinHz: 1, MaxHz: 50, DefaultHz: 10,
+			ID: sid, MinHz: 1, MaxHz: 50, DefaultHz: 25,
 			DeviceName: wire.NewDeviceName(DefaultDeviceName(sid)),
 		}, true
 	case wire.SensorMag:
@@ -182,15 +182,24 @@ type reader struct {
 	pendingDesignMah   uint16 // user value awaiting chip program confirm
 	pendingDesignAt    time.Time
 	prevDesignMah      uint16 // value before pending user edit
-	out                chan<- outboundCmd
+	// BMP581 tunables (multipliers / IIR coefficients); firmware defaults match.
+	bmpOsrPress uint16
+	bmpOsrTemp  uint16
+	bmpIirPress uint16
+	bmpIirTemp  uint16
+	out         chan<- outboundCmd
 }
 
 func newReader(out chan<- outboundCmd) *reader {
 	r := &reader{
-		values: make(map[string]float64, len(podChannels)),
-		rates:  make(map[wire.SensorID]uint16, 3),
-		caps:   make(map[wire.SensorID]wire.SensorCap, 3),
-		out:    out,
+		values:      make(map[string]float64, len(podChannels)),
+		rates:       make(map[wire.SensorID]uint16, 3),
+		caps:        make(map[wire.SensorID]wire.SensorCap, 3),
+		bmpOsrPress: 32,
+		bmpOsrTemp:  2,
+		bmpIirPress: 3,
+		bmpIirTemp:  3,
+		out:         out,
 	}
 	return r
 }
@@ -428,6 +437,14 @@ func (r *reader) attrRecords(onlyDevice string, includeCapMeta bool) []store.Att
 			Attr:    "sampling_frequency",
 			Value:   strconv.FormatUint(uint64(hz), 10),
 		})
+		if sid == wire.SensorStatic {
+			out = append(out,
+				store.AttrRecord{Channel: "", Attr: AttrOversamplingPressure, Value: strconv.FormatUint(uint64(r.bmpOsrPress), 10)},
+				store.AttrRecord{Channel: "", Attr: AttrOversamplingTemp, Value: strconv.FormatUint(uint64(r.bmpOsrTemp), 10)},
+				store.AttrRecord{Channel: "", Attr: AttrIIRPressure, Value: strconv.FormatUint(uint64(r.bmpIirPress), 10)},
+				store.AttrRecord{Channel: "", Attr: AttrIIRTemp, Value: strconv.FormatUint(uint64(r.bmpIirTemp), 10)},
+			)
+		}
 		if sid == wire.SensorBattery {
 			if mah := r.designCapacityDisplayLocked(); mah > 0 {
 				out = append(out, store.AttrRecord{
@@ -463,6 +480,22 @@ func (r *reader) ChannelAttr(ch, attr string) (string, error) {
 			return "", fmt.Errorf("pod: no rate cached yet for %s", sid)
 		}
 		return strconv.FormatUint(uint64(hz), 10), nil
+	case AttrOversamplingPressure, AttrOversamplingTemp, AttrIIRPressure, AttrIIRTemp:
+		if sid != wire.SensorStatic {
+			return "", fmt.Errorf("pod: attr %q only on bmp581", attr)
+		}
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		switch attr {
+		case AttrOversamplingPressure:
+			return strconv.FormatUint(uint64(r.bmpOsrPress), 10), nil
+		case AttrOversamplingTemp:
+			return strconv.FormatUint(uint64(r.bmpOsrTemp), 10), nil
+		case AttrIIRPressure:
+			return strconv.FormatUint(uint64(r.bmpIirPress), 10), nil
+		default:
+			return strconv.FormatUint(uint64(r.bmpIirTemp), 10), nil
+		}
 	case AttrDesignCapacityMah:
 		if sid != wire.SensorBattery {
 			return "", fmt.Errorf("pod: attr %q only on battery sensor", attr)
@@ -482,6 +515,10 @@ func (r *reader) ChannelAttr(ch, attr string) (string, error) {
 			return "", fmt.Errorf("pod: no caps cached yet for %s", sid)
 		}
 		return fmt.Sprintf("[%d 1 %d]", c.MinHz, c.MaxHz), nil
+	case AttrOversamplingPressure + "_available", AttrOversamplingTemp + "_available":
+		return "1 2 4 8 16 32 64 128", nil
+	case AttrIIRPressure + "_available", AttrIIRTemp + "_available":
+		return "0 1 3 7 15 31 63 127", nil
 	default:
 		return "", fmt.Errorf("pod: attr %q not supported", attr)
 	}
@@ -495,6 +532,8 @@ func (r *reader) SetChannelAttr(ch, attr, value string) error {
 	switch attr {
 	case "sampling_frequency":
 		return r.setSamplingFrequency(ch, value)
+	case AttrOversamplingPressure, AttrOversamplingTemp, AttrIIRPressure, AttrIIRTemp:
+		return r.setBmpAttr(ch, attr, value)
 	case AttrDesignCapacityMah:
 		return r.setDesignCapacity(ch, value)
 	default:
@@ -588,12 +627,12 @@ func (r *reader) SetDesignCapacityFromConfig(mah uint16) {
 }
 
 
-// ApplyDeviceConfig loads pod.attrs from config into the rate
-// cache and returns SetRate commands to push to the pod (when the link is up).
+// ApplyDeviceConfig loads pod.attrs from config into the rate / BMP caches
+// and returns SetRate / SetAttr commands to push to the pod (when the link is up).
 func (r *reader) ApplyDeviceConfig(dev config.Device) []outboundCmd {
 	var outs []outboundCmd
 	for k, v := range dev.Attrs {
-		device, _, ok := parsePodAttrKey(k)
+		device, attr, ok := parsePodAttrKey(k)
 		if !ok {
 			continue
 		}
@@ -601,29 +640,122 @@ func (r *reader) ApplyDeviceConfig(dev config.Device) []outboundCmd {
 		if !ok {
 			continue
 		}
-		hz64, err := strconv.ParseUint(strings.TrimSpace(v), 10, 16)
-		if err != nil {
-			continue
-		}
-		hz := uint16(hz64)
-		r.mu.Lock()
-		if c, ok := r.caps[sid]; ok {
-			if hz < c.MinHz || hz > c.MaxHz {
-				r.mu.Unlock()
+		val := strings.TrimSpace(v)
+		switch attr {
+		case "sampling_frequency":
+			hz64, err := strconv.ParseUint(val, 10, 16)
+			if err != nil {
 				continue
 			}
+			hz := uint16(hz64)
+			r.mu.Lock()
+			if c, ok := r.caps[sid]; ok {
+				if hz < c.MinHz || hz > c.MaxHz {
+					r.mu.Unlock()
+					continue
+				}
+			}
+			prev := r.rates[sid]
+			r.rates[sid] = hz
+			r.mu.Unlock()
+			outs = append(outs, outboundCmd{
+				Cmd:     wire.CmdSetRate{Sensor: sid, Hz: hz},
+				Sensor:  sid,
+				PrevHz:  prev,
+				HasPrev: true,
+			})
+		case AttrOversamplingPressure, AttrOversamplingTemp, AttrIIRPressure, AttrIIRTemp:
+			if sid != wire.SensorStatic {
+				continue
+			}
+			n64, err := strconv.ParseUint(val, 10, 16)
+			if err != nil {
+				continue
+			}
+			n := uint16(n64)
+			if !validBmpAttrValue(attr, n) {
+				continue
+			}
+			key, ok := wireAttrKeyFor(attr)
+			if !ok {
+				continue
+			}
+			r.mu.Lock()
+			r.setBmpCachedLocked(attr, n)
+			r.mu.Unlock()
+			outs = append(outs, outboundCmd{
+				Cmd: wire.CmdSetAttr{
+					Sensor: wire.SensorStatic,
+					Key:    key,
+					Value:  float32(n),
+				},
+			})
 		}
-		prev := r.rates[sid]
-		r.rates[sid] = hz
-		r.mu.Unlock()
-		outs = append(outs, outboundCmd{
-			Cmd:     wire.CmdSetRate{Sensor: sid, Hz: hz},
-			Sensor:  sid,
-			PrevHz:  prev,
-			HasPrev: true,
-		})
 	}
 	return outs
+}
+
+func validBmpAttrValue(attr string, n uint16) bool {
+	switch attr {
+	case AttrOversamplingPressure, AttrOversamplingTemp:
+		switch n {
+		case 1, 2, 4, 8, 16, 32, 64, 128:
+			return true
+		}
+	case AttrIIRPressure, AttrIIRTemp:
+		switch n {
+		case 0, 1, 3, 7, 15, 31, 63, 127:
+			return true
+		}
+	}
+	return false
+}
+
+func (r *reader) setBmpCachedLocked(attr string, n uint16) {
+	switch attr {
+	case AttrOversamplingPressure:
+		r.bmpOsrPress = n
+	case AttrOversamplingTemp:
+		r.bmpOsrTemp = n
+	case AttrIIRPressure:
+		r.bmpIirPress = n
+	case AttrIIRTemp:
+		r.bmpIirTemp = n
+	}
+}
+
+func (r *reader) setBmpAttr(ch, attr, value string) error {
+	sid, ok := r.sensorIDForKey(ch)
+	if !ok || sid != wire.SensorStatic {
+		return fmt.Errorf("pod: attr %q only on bmp581", attr)
+	}
+	n64, err := strconv.ParseUint(strings.TrimSpace(value), 10, 16)
+	if err != nil {
+		return fmt.Errorf("pod: parse %s %q: %w", attr, value, err)
+	}
+	n := uint16(n64)
+	if !validBmpAttrValue(attr, n) {
+		return fmt.Errorf("pod: invalid %s %d", attr, n)
+	}
+	key, ok := wireAttrKeyFor(attr)
+	if !ok {
+		return fmt.Errorf("pod: unknown bmp attr %q", attr)
+	}
+	r.mu.Lock()
+	r.setBmpCachedLocked(attr, n)
+	r.mu.Unlock()
+	select {
+	case r.out <- outboundCmd{
+		Cmd: wire.CmdSetAttr{
+			Sensor: wire.SensorStatic,
+			Key:    key,
+			Value:  float32(n),
+		},
+	}:
+	default:
+		return fmt.Errorf("pod: outbound queue full; dropped SetAttr %s", attr)
+	}
+	return nil
 }
 
 // setRateHz updates the cached rate (Ack success or timeout revert).
@@ -655,6 +787,13 @@ func (r *reader) WritableForDevice(device, ch, attr string) bool {
 			return false
 		}
 		return ch == "" || ch == r.deviceNameLocked(sid) || legacySettingsChannel[ch] == sid
+	case AttrOversamplingPressure, AttrOversamplingTemp, AttrIIRPressure, AttrIIRTemp:
+		if device != "" {
+			sid, ok := r.sensorIDForDevice(device)
+			return ok && sid == wire.SensorStatic && (ch == "" || ch == device || ch == "static")
+		}
+		sid, ok := r.sensorIDForKey(ch)
+		return ok && sid == wire.SensorStatic
 	case AttrDesignCapacityMah:
 		if device != "" {
 			sid, ok := r.sensorIDForDevice(device)
