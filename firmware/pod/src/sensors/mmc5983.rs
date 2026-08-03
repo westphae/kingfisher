@@ -1,13 +1,13 @@
 //! MEMSIC MMC5983MA magnetometer (I²C).
 //!
-//! Continuous measurement mode with CM_Freq tied to [`crate::rates`] SetRate.
-//! Auto SET/RESET is enabled once at init; each sample is a 7-byte burst from
-//! `XOUT` (no per-read control register poke). Optional INT pin support is
-//! prepared via `INT_meas_done_en` when the board wires Qwiic INT.
+//! Continuous measurement mode with CM_Freq tied to [`crate::rates`] SetRate
+//! and IC1 BW from [`crate::mmc_cfg`]. Auto SET/RESET is enabled once at init;
+//! each sample is a 7-byte burst from `XOUT` (no per-read control poke).
 
 use esp_println::println;
 
 use super::bus::Bus as I2cBus;
+use crate::mmc_cfg;
 
 pub const ADDR: u8 = 0x30;
 
@@ -42,6 +42,7 @@ pub struct Sample {
 pub struct Mmc5983 {
     addr: u8,
     active_hz: u16,
+    applied_bw: u8,
 }
 
 impl Mmc5983 {
@@ -53,6 +54,7 @@ impl Mmc5983 {
                     return Some(Self {
                         addr: ADDR,
                         active_hz: 0,
+                        applied_bw: 0xff,
                     });
                 }
             }
@@ -65,24 +67,43 @@ impl Mmc5983 {
         for reg in [REG_IC0, REG_IC1, REG_IC2] {
             write_u8(bus, self.addr, reg, 0)?;
         }
-        // BW[1:0]=00 (100 Hz filter), continuous mode enabled in ensure_cm_freq.
         write_u8(bus, self.addr, REG_IC0, IC0_AUTO_SR | IC0_INT_MEAS_DONE)?;
         self.active_hz = 0;
+        self.applied_bw = 0xff;
+        mmc_cfg::mark_dirty();
         println!("pod: mmc5983 init ok (continuous, AUTO_SR)");
         Ok(())
     }
 
-    /// Reconfigure continuous-mode ODR to the highest CM_Freq not above `hz`.
+    /// Reconfigure continuous-mode ODR / BW to match rates + mmc_cfg.
     pub fn ensure_cm_freq(&mut self, bus: &mut I2cBus, hz: u16) -> Result<(), ()> {
         let hz = hz.max(1);
-        if self.active_hz == hz {
+        let dirty = mmc_cfg::take_dirty();
+        let bw = mmc_cfg::bw_code();
+        let cfg_changed = dirty || bw != self.applied_bw;
+        if self.active_hz == hz && !cfg_changed {
             return Ok(());
         }
-        let code = cm_freq_code_for_hz(hz).ok_or(())?;
+        if hz > mmc_cfg::max_odr_hz_for_bw(bw) {
+            println!(
+                "pod: mmc5983 ODR {hz} Hz exceeds max {} for bw={}",
+                mmc_cfg::max_odr_hz_for_bw(bw),
+                mmc_cfg::bw_hz()
+            );
+            return Err(());
+        }
+        let code = cm_freq_code_for_hz(hz, bw).ok_or(())?;
+        // IC1: BW[1:0] only (X/YZ inhibit off).
+        write_u8(bus, self.addr, REG_IC1, bw & 0x03)?;
         let ic2 = IC2_CMM_EN | code;
         write_u8(bus, self.addr, REG_IC2, ic2)?;
         self.active_hz = hz;
-        println!("pod: mmc5983 CM_Freq ~{hz} Hz (IC2=0x{ic2:02x})");
+        self.applied_bw = bw;
+        println!(
+            "pod: mmc5983 CM_Freq ~{hz} Hz bw={} (IC1=0x{:02x} IC2=0x{ic2:02x})",
+            mmc_cfg::bw_hz(),
+            bw & 0x03
+        );
         Ok(())
     }
 
@@ -114,17 +135,41 @@ impl Mmc5983 {
     }
 }
 
-/// Map requested Hz to CM_Freq[2:0] with BW[1:0]=00 (datasheet table).
-fn cm_freq_code_for_hz(hz: u16) -> Option<u8> {
-    const TABLE: &[(u16, u8)] = &[
+/// Map requested Hz to CM_Freq[2:0] for the active BW (datasheet tables).
+fn cm_freq_code_for_hz(hz: u16, bw_code: u8) -> Option<u8> {
+    // Base continuous rates (BW=00…01).
+    let mut table: &[(u16, u8)] = &[
         (1, 0b001),
         (10, 0b010),
         (20, 0b011),
         (50, 0b100),
         (100, 0b101),
     ];
+    // Higher CM_Freq codes require wider BW.
+    const WITH_200: &[(u16, u8)] = &[
+        (1, 0b001),
+        (10, 0b010),
+        (20, 0b011),
+        (50, 0b100),
+        (100, 0b101),
+        (200, 0b110),
+    ];
+    const WITH_1000: &[(u16, u8)] = &[
+        (1, 0b001),
+        (10, 0b010),
+        (20, 0b011),
+        (50, 0b100),
+        (100, 0b101),
+        (200, 0b110),
+        (1000, 0b111),
+    ];
+    if bw_code >= 3 {
+        table = WITH_1000;
+    } else if bw_code >= 2 {
+        table = WITH_200;
+    }
     let mut best: Option<(u16, u8)> = None;
-    for &(h, code) in TABLE {
+    for &(h, code) in table {
         if h <= hz {
             best = Some((h, code));
         }
@@ -158,11 +203,13 @@ mod tests {
 
     #[test]
     fn cm_freq_codes() {
-        assert_eq!(cm_freq_code_for_hz(0), None);
-        assert_eq!(cm_freq_code_for_hz(1), Some(0b001));
-        assert_eq!(cm_freq_code_for_hz(15), Some(0b010));
-        assert_eq!(cm_freq_code_for_hz(50), Some(0b100));
-        assert_eq!(cm_freq_code_for_hz(75), Some(0b101));
-        assert_eq!(cm_freq_code_for_hz(200), Some(0b101));
+        assert_eq!(cm_freq_code_for_hz(0, 0), None);
+        assert_eq!(cm_freq_code_for_hz(1, 0), Some(0b001));
+        assert_eq!(cm_freq_code_for_hz(15, 0), Some(0b010));
+        assert_eq!(cm_freq_code_for_hz(50, 0), Some(0b100));
+        assert_eq!(cm_freq_code_for_hz(75, 0), Some(0b101));
+        assert_eq!(cm_freq_code_for_hz(200, 0), Some(0b101)); // capped by BW=00 table
+        assert_eq!(cm_freq_code_for_hz(200, 2), Some(0b110));
+        assert_eq!(cm_freq_code_for_hz(1000, 3), Some(0b111));
     }
 }

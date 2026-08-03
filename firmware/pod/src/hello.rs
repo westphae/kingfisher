@@ -14,7 +14,7 @@ pub fn build(mask: u8) -> Frame {
     }
     if mask & sensors::MMC_BIT != 0 {
         let max = crate::rates::hello_max_hz(SensorId::Mag, mask);
-        let _ = sensors.push(cap(SensorId::Mag, "mmc5983", 1, max, 10));
+        let _ = sensors.push(cap(SensorId::Mag, "mmc5983", 1, max, 20));
     }
     if mask & sensors::MS4525_BIT != 0 {
         let max = crate::rates::hello_max_hz(SensorId::Airspeed, mask);

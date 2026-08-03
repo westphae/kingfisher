@@ -6,6 +6,7 @@
 
 mod battery_cfg;
 mod bmp_cfg;
+mod mmc_cfg;
 mod burst;
 mod cfg;
 mod cmd;

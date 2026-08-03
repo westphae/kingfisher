@@ -7,6 +7,7 @@ use pod_wire::{Ack, AttrKey, Cmd, CmdEnvelope, Frame, SensorId};
 use crate::battery_cfg;
 use crate::bmp_cfg;
 use crate::link;
+use crate::mmc_cfg;
 use crate::rates;
 use crate::sensors;
 
@@ -37,6 +38,9 @@ pub fn handle(envelope: CmdEnvelope) -> Ack {
             } else if sensor == SensorId::Static && hz > bmp_cfg::max_odr_hz_for_osr_p(bmp_cfg::osr_p())
             {
                 false
+            } else if sensor == SensorId::Mag && hz > mmc_cfg::max_odr_hz_for_bw(mmc_cfg::bw_code())
+            {
+                false
             } else {
                 rates::try_set(sensor, hz)
             }
@@ -60,6 +64,9 @@ pub fn handle(envelope: CmdEnvelope) -> Ack {
             }
             (SensorId::Static, AttrKey::BmpIirTemp) => {
                 sensor_attached(SensorId::Static) && bmp_cfg::request_iir_t_coeff(value)
+            }
+            (SensorId::Mag, AttrKey::MmcBandwidth) => {
+                sensor_attached(SensorId::Mag) && mmc_cfg::request_bw_hz(value)
             }
             _ => false,
         },
