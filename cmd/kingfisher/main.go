@@ -219,7 +219,7 @@ func main() {
 
 	var upsMon *ups.Monitor
 	if cfg.UPS.Enabled {
-		upsMon = ups.New(holder, hub, buf, st, requestShutdown)
+		upsMon = ups.New(holder, hub, buf, st)
 	}
 
 	srv, err := web.New(holder, hub, st, buf, gpsClient, podClient, registry, compassEngine, autoNudger, upsMon, requestShutdown, devRoot, gdl90BC)

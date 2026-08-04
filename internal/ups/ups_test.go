@@ -29,7 +29,7 @@ func testMonitor(t *testing.T, og func() (Gauge, error), op func() (PLD, error))
 	t.Helper()
 	holder := config.NewHolder("", &config.Config{UPS: config.UPS{Enabled: true}})
 	hub := live.NewHub()
-	m := New(holder, hub, nil, nil, nil)
+	m := New(holder, hub, nil, nil)
 	m.openGauge = og
 	m.openPLD = op
 	return m, hub
@@ -94,22 +94,17 @@ func TestPollDegradesWithoutHardware(t *testing.T) {
 	}
 }
 
-// A gauge read error drops the handle for reopen; the shutdown hook must
-// not fire from degraded data.
-func TestReadErrorDropsGaugeNoShutdown(t *testing.T) {
-	fired := false
+// A gauge read error drops the handle so the next cycle re-probes, and the
+// snapshot stops claiming presence rather than reporting the stale reading.
+func TestReadErrorDropsGauge(t *testing.T) {
 	g := &fakeGauge{v: 1.0, soc: 0, err: errors.New("i2c timeout")}
 	m, _ := testMonitor(t,
 		func() (Gauge, error) { return g, nil },
 		func() (PLD, error) { return &fakePLD{ac: false}, nil },
 	)
-	m.shutdown = func(bool) { fired = true }
 
 	for i := 0; i < 10; i++ {
 		m.poll()
-	}
-	if fired {
-		t.Fatalf("shutdown fired on gauge read errors")
 	}
 	if m.Status().Present {
 		t.Errorf("gauge still marked present after read error")

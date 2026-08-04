@@ -1201,15 +1201,8 @@ function compactUpsChip() {
   const soc = Number.isFinite(u.soc_pct) ? `${Math.round(u.soc_pct)}%` : '?';
   if (u.pld_ok && !u.ac_ok) {
     let text = `🔋 ${soc}`;
-    if (u.shutdown_after_s > 0) {
-      const left = u.shutdown_after_s - u.on_battery_s;
-      if (Number.isFinite(left) && left >= 0) {
-        text += ` ⏻${Math.floor(left / 60)}:${String(Math.max(0, Math.floor(left % 60))).padStart(2, '0')}`;
-      }
-    } else {
-      const tte = formatBatteryTimeRemainCompact(u.time_remaining_s);
-      if (tte) text += ` ${tte}`;
-    }
+    const tte = formatBatteryTimeRemainCompact(u.time_remaining_s);
+    if (tte) text += ` ${tte}`;
     const critical = battSocClass(u.soc_pct) === 'batt-bad' ||
       (Number.isFinite(u.time_remaining_s) && u.time_remaining_s >= 0 && u.time_remaining_s < 900);
     const cls = critical ? 'off' : 'warn';
@@ -1238,15 +1231,15 @@ function renderUpsStatusFull(el) {
   const tte = onBatt && Number.isFinite(u.time_remaining_s) && u.time_remaining_s >= 0
     ? formatDurShort(u.time_remaining_s)
     : '—';
-  const floors = `${u.shutdown_soc_pct >= 0 ? Math.round(u.shutdown_soc_pct) + '%' : 'off'} / ` +
-    `${u.shutdown_voltage_v >= 0 ? u.shutdown_voltage_v.toFixed(2) + 'V' : 'off'}`;
+  const poweroff = Number.isFinite(u.poweroff_soc_pct)
+    ? `${Math.round(u.poweroff_soc_pct)}%`
+    : '?';
   el.className = `podStatus podStatus-${cls}`;
   el.innerHTML =
     `<span class="podStatusItem"><span class="lbl">UPS</span> ${u.present ? escapeHtml(`${Number(u.voltage_v).toFixed(3)} V · ${u.soc_pct.toFixed(1)}%`) : 'gauge ?'}</span>` +
     `<span class="podStatusItem"><span class="lbl">Power</span> ${escapeHtml(power)}</span>` +
     `<span class="podStatusItem"><span class="lbl">Est left</span> ${escapeHtml(tte)}</span>` +
-    `<span class="podStatusItem" title="Shutdown floors: SOC / voltage"><span class="lbl">Floors</span> ${escapeHtml(floors)}</span>` +
-    (u.shutdown_reason ? `<span class="podStatusItem warn"><span class="lbl">Shutdown</span> ${escapeHtml(u.shutdown_reason)}</span>` : '') +
+    `<span class="podStatusItem" title="The x120x driver and UPower power the Pi off at this SOC; kingfisher only records"><span class="lbl">Auto-off</span> ${escapeHtml(poweroff)}</span>` +
     (u.last_error ? `<span class="podStatusItem warn"><span class="lbl">Err</span> ${escapeHtml(u.last_error)}</span>` : '');
 }
 

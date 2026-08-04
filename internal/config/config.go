@@ -659,22 +659,20 @@ func (s System) RateHzEffective() float64 {
 // power present). GPIO16 (drive high = disable charging) is deliberately
 // never claimed. Default off — the HAT is optional hardware.
 //
-// Shutdown policy is run-to-floor: on power loss the recorder keeps
-// recording and powers off cleanly only when a debounced SOC or voltage
-// floor is reached. ShutdownAfterS is an optional fixed on-battery ride
-// timer, disabled by default.
+// Kingfisher does not manage power: the x120x kernel driver plus UPower own
+// the shutdown decision. PoweroffSocPct only mirrors UPower's
+// PercentageAction so the UI can display it and so time-remaining means
+// time-until-poweroff. Changing it here changes no behaviour — edit
+// /etc/UPower/UPower.conf for that.
 type UPS struct {
-	Enabled          bool    `json:"enabled"`
-	RateHz           float64 `json:"rate_hz,omitempty"`            // default 1, clamped to [0.1, 10]
-	ShutdownAfterS   float64 `json:"shutdown_after_s,omitempty"`   // 0 (default) = disabled: run to floor
-	ShutdownSocPct   float64 `json:"shutdown_soc_pct,omitempty"`   // default 10; <0 disables
-	ShutdownVoltageV float64 `json:"shutdown_voltage_v,omitempty"` // default 3.20; <0 disables
+	Enabled        bool    `json:"enabled"`
+	RateHz         float64 `json:"rate_hz,omitempty"`           // default 1, clamped to [0.1, 10]
+	PoweroffSocPct float64 `json:"poweroff_soc_pct,omitempty"`  // default 5, matching UPower PercentageAction
 }
 
 const (
-	defaultUPSRateHz           = 1.0
-	defaultUPSShutdownSocPct   = 10.0
-	defaultUPSShutdownVoltageV = 3.20
+	defaultUPSRateHz         = 1.0
+	defaultUPSPoweroffSocPct = 5.0
 )
 
 // RateHzEffective returns the poll rate, defaulting to 1 Hz.
@@ -685,34 +683,13 @@ func (u UPS) RateHzEffective() float64 {
 	return math.Min(math.Max(u.RateHz, 0.1), 10)
 }
 
-// ShutdownAfterEffective returns the ride-timer seconds; <=0 means disabled.
-func (u UPS) ShutdownAfterEffective() float64 {
-	if u.ShutdownAfterS <= 0 {
-		return 0
+// PoweroffSocEffective returns the SOC at which the driver/UPower will power
+// the machine off. Informational only — used to scale time-remaining.
+func (u UPS) PoweroffSocEffective() float64 {
+	if u.PoweroffSocPct <= 0 {
+		return defaultUPSPoweroffSocPct
 	}
-	return u.ShutdownAfterS
-}
-
-// ShutdownSocEffective returns the SOC floor percent, -1 when disabled.
-func (u UPS) ShutdownSocEffective() float64 {
-	if u.ShutdownSocPct < 0 {
-		return -1
-	}
-	if u.ShutdownSocPct == 0 {
-		return defaultUPSShutdownSocPct
-	}
-	return u.ShutdownSocPct
-}
-
-// ShutdownVoltageEffective returns the voltage floor, -1 when disabled.
-func (u UPS) ShutdownVoltageEffective() float64 {
-	if u.ShutdownVoltageV < 0 {
-		return -1
-	}
-	if u.ShutdownVoltageV == 0 {
-		return defaultUPSShutdownVoltageV
-	}
-	return u.ShutdownVoltageV
+	return u.PoweroffSocPct
 }
 
 // Terminal configures the optional browser shell (/terminal).

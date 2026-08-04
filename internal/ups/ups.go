@@ -21,15 +21,15 @@ const Device = "ups"
 // an error loop.
 const openRetry = 30 * time.Second
 
-// Monitor polls the X1200 fuel gauge and power-loss line, publishes the
-// `ups` device, and requests a clean poweroff when decide() says the
-// battery is nearly exhausted.
+// Monitor polls the X1200 fuel gauge and the driver's AC state and publishes
+// the `ups` device. It never powers the machine off: the x120x kernel driver
+// plus UPower own that decision, and systemd stops this service (SIGTERM,
+// TimeoutStopSec=45) so the DB closes cleanly on the way down.
 type Monitor struct {
-	holder   *config.Holder
-	hub      *live.Hub
-	buf      *store.Buffer
-	st       *store.Store
-	shutdown func(powerOff bool)
+	holder *config.Holder
+	hub    *live.Hub
+	buf    *store.Buffer
+	st     *store.Store
 
 	// injectable for tests
 	openGauge func() (Gauge, error)
@@ -41,6 +41,7 @@ type Monitor struct {
 	pldNextTryNs   int64
 	gaugeWasOK     bool
 	pldWasOK       bool
+	loggedAC       bool // force one AC-state log line even if it starts unavailable
 	acWasOK        bool
 	haveACState    bool
 	wroteVersion   bool
@@ -53,14 +54,13 @@ type Monitor struct {
 }
 
 // New builds a Monitor. hub is required; buf/st may be nil (skip persistence
-// / metadata). shutdown is main's requestShutdown closure.
-func New(holder *config.Holder, hub *live.Hub, buf *store.Buffer, st *store.Store, shutdown func(powerOff bool)) *Monitor {
+// / metadata).
+func New(holder *config.Holder, hub *live.Hub, buf *store.Buffer, st *store.Store) *Monitor {
 	return &Monitor{
 		holder:    holder,
 		hub:       hub,
 		buf:       buf,
 		st:        st,
-		shutdown:  shutdown,
 		openGauge: openGauge,
 		openPLD:   openPLD,
 	}
@@ -85,8 +85,8 @@ func (m *Monitor) Run(ctx context.Context, stop <-chan struct{}) {
 		return
 	}
 	rate := cfg.RateHzEffective()
-	log.Printf("ups: X1200 monitor at %.2f Hz (soc floor %.0f%%, voltage floor %.2fV, ride timer %s)",
-		rate, cfg.ShutdownSocEffective(), cfg.ShutdownVoltageEffective(), rideTimerDesc(cfg.ShutdownAfterEffective()))
+	log.Printf("ups: X1200 monitor at %.2f Hz (recording only; poweroff owned by x120x driver + UPower at %.0f%% SOC)",
+		rate, cfg.PoweroffSocEffective())
 	ticker := time.NewTicker(hzDur(rate))
 	defer ticker.Stop()
 	defer m.closeAll()
@@ -159,7 +159,7 @@ func (m *Monitor) poll() {
 		m.gaugeWasOK = r.gaugeOK
 	}
 
-	// PLD line, same shape.
+	// AC state from the driver's sysfs node, same shape.
 	if m.pld == nil && nowNs >= m.pldNextTryNs {
 		p, err := m.openPLD()
 		if err != nil {
@@ -181,20 +181,17 @@ func (m *Monitor) poll() {
 			r.acOK = ac
 		}
 	}
-	if r.pldOK != m.pldWasOK {
+	if r.pldOK != m.pldWasOK || !m.loggedAC {
 		if r.pldOK {
-			log.Printf("ups: power-loss line online (ac=%v)", r.acOK)
+			log.Printf("ups: AC state online via %s (ac=%v)", acOnlinePath, r.acOK)
 		} else {
-			log.Printf("ups: power-loss line unavailable: %s", lastErr)
+			log.Printf("ups: AC state unavailable (is the x120x driver loaded?): %s", lastErr)
 		}
 		m.pldWasOK = r.pldOK
+		m.loggedAC = true
 	}
 
-	v := decide(&m.dec, nowNs, r, thresholds{
-		afterS:    cfg.ShutdownAfterEffective(),
-		socFloor:  cfg.ShutdownSocEffective(),
-		voltFloor: cfg.ShutdownVoltageEffective(),
-	})
+	v := decide(&m.dec, nowNs, r, cfg.PoweroffSocEffective())
 	if r.pldOK {
 		if m.haveACState && m.acWasOK != r.acOK {
 			if r.acOK {
@@ -234,39 +231,19 @@ func (m *Monitor) poll() {
 	}
 	m.mu.Lock()
 	m.snap = Snapshot{
-		Enabled:          true,
-		Present:          r.gaugeOK,
-		PLDOk:            r.pldOK,
-		VoltageV:         r.voltageV,
-		SocPct:           r.socPct,
-		ACOk:             r.acOK,
-		OnBatteryS:       v.onBatteryS,
-		TimeRemainingS:   tte,
-		ShutdownAfterS:   cfg.ShutdownAfterEffective(),
-		ShutdownSocPct:   cfg.ShutdownSocEffective(),
-		ShutdownVoltageV: cfg.ShutdownVoltageEffective(),
-		ShutdownReason:   m.dec.reason,
-		LastError:        lastErr,
+		Enabled:        true,
+		Present:        r.gaugeOK,
+		PLDOk:          r.pldOK,
+		VoltageV:       r.voltageV,
+		SocPct:         r.socPct,
+		ACOk:           r.acOK,
+		OnBatteryS:     v.onBatteryS,
+		TimeRemainingS: tte,
+		PoweroffSocPct: cfg.PoweroffSocEffective(),
+		LastError:      lastErr,
 	}
 	m.lastSampleNs = nowNs
 	m.mu.Unlock()
-
-	if v.shutdown {
-		blob, _ := json.Marshal(map[string]any{
-			"reason":       v.reason,
-			"voltage_v":    r.voltageV,
-			"soc_pct":      r.socPct,
-			"on_battery_s": v.onBatteryS,
-			"ts_utc":       now.UTC().Format(time.RFC3339),
-		})
-		if m.st != nil {
-			_ = m.st.SetMeta("ups_shutdown", string(blob))
-		}
-		log.Printf("ups: shutting down: %s", blob)
-		if m.shutdown != nil {
-			m.shutdown(true)
-		}
-	}
 }
 
 func (m *Monitor) closeAll() {
@@ -280,12 +257,6 @@ func (m *Monitor) closeAll() {
 	}
 }
 
-func rideTimerDesc(afterS float64) string {
-	if afterS <= 0 {
-		return "off (run to floor)"
-	}
-	return time.Duration(afterS * float64(time.Second)).String()
-}
 
 func jsonNum(v uint16) string {
 	b, _ := json.Marshal(v)
