@@ -16,6 +16,12 @@ import "math"
 const (
 	tteMinElapsedS = 120.0
 	tteMinDeltaPct = 0.25
+
+	// tteMinFracUsed guards the divide that calibrates the profile's scale.
+	// Near the top of the curve a real SOC move maps to a tiny change in
+	// runtime fraction, and dividing by it would amplify gauge noise into a
+	// wild estimate.
+	tteMinFracUsed = 0.005
 )
 
 type reading struct {
@@ -65,18 +71,32 @@ func decide(st *deciderState, nowNs int64, r reading, poweroffFloorPct float64) 
 		}
 	}
 
-	// Time-to-empty from the SOC slope since power loss (the MAX17040 has no
-	// current sense). Anchored average: robust to the 1/256 % quantization
-	// that the raw gauge read preserves and sysfs `capacity` does not.
-	if onBattery && r.gaugeOK && st.haveLossSoc {
-		delta := st.socAtLossPct - r.socPct
-		if v.onBatteryS >= tteMinElapsedS && delta >= tteMinDeltaPct {
-			rate := delta / v.onBatteryS // %/s discharged
-			floor := math.Max(poweroffFloorPct, 0)
-			if rem := r.socPct - floor; rem > 0 {
-				v.timeRemainingS = rem / rate
-			} else {
-				v.timeRemainingS = 0
+	// Time-to-empty via the runtime profile in tte.go (the MAX17040 has no
+	// current sense, so this is all derived from SOC). Position on the curve
+	// gives the shape; elapsed time since power loss calibrates its scale to
+	// this discharge's actual load. The 1/256 % resolution of the raw gauge
+	// read matters here — sysfs `capacity` is integer-only and would quantise
+	// the consumed-fraction term badly early on.
+	if onBattery && r.gaugeOK {
+		floor := math.Max(poweroffFloorPct, 0)
+		switch {
+		case r.socPct <= floor:
+			// At or past the poweroff point there is no time left to report,
+			// and the profile is too flat down here to calibrate against.
+			// Say zero rather than withholding: "—" would read as "unknown"
+			// at the moment the answer is most certain.
+			v.timeRemainingS = 0
+		case st.haveLossSoc && v.onBatteryS >= tteMinElapsedS &&
+			st.socAtLossPct-r.socPct >= tteMinDeltaPct:
+			fStart := runtimeFrac(st.socAtLossPct)
+			fNow := runtimeFrac(r.socPct)
+			if used := fStart - fNow; used > tteMinFracUsed {
+				total := v.onBatteryS / used // seconds for a full discharge at this load
+				if rem := fNow - runtimeFrac(floor); rem > 0 {
+					v.timeRemainingS = total * rem
+				} else {
+					v.timeRemainingS = 0
+				}
 			}
 		}
 	}

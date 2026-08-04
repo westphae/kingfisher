@@ -73,21 +73,47 @@ func TestDeadACLineFreezesTimer(t *testing.T) {
 	}
 }
 
+// refDischarge is the 2026-08-04 verified discharge: seconds on battery, and
+// the SOC kingfisher's raw gauge read reported at that moment. The Pi powered
+// off at the last row. Estimates are scored against the real remaining time.
+var refDischarge = []struct {
+	onBatteryS float64
+	socPct     float64
+}{
+	{8, 94.02}, {660, 89.91}, {3185, 79.93}, {5346, 69.95}, {6958, 59.79},
+	{8370, 49.62}, {9390, 39.75}, {10228, 29.97}, {10960, 19.83},
+	{11627, 10.00}, {11917, 5.83},
+}
+
+// The estimator exists to be believed in the cockpit, so hold it to the real
+// discharge rather than to a synthetic ramp. The anchored-average version this
+// replaced was 2.37x optimistic at the 50% mark.
+func TestTimeRemainingTracksReferenceDischarge(t *testing.T) {
+	total := refDischarge[len(refDischarge)-1].onBatteryS
+
+	for _, mark := range []int{2, 4, 5, 7, 8} { // ~80%, 60%, 50%, 30%, 20%
+		st := &deciderState{}
+		var v verdict
+		for i := 0; i <= mark; i++ {
+			p := refDischarge[i]
+			v = decide(st, baseNs+int64(p.onBatteryS)*secNs, onBatt(p.socPct, 3.7), testFloor)
+		}
+		want := total - refDischarge[mark].onBatteryS
+		if math.IsNaN(v.timeRemainingS) {
+			t.Fatalf("soc %.1f%%: TTE withheld with a full discharge history", refDischarge[mark].socPct)
+		}
+		ratio := v.timeRemainingS / want
+		t.Logf("soc %5.2f%%  actual %5.1f min  estimated %5.1f min  (%.2fx)",
+			refDischarge[mark].socPct, want/60, v.timeRemainingS/60, ratio)
+		if ratio < 0.8 || ratio > 1.25 {
+			t.Errorf("soc %.1f%%: TTE %.0fs vs actual %.0fs (%.2fx) — outside 0.8-1.25x",
+				refDischarge[mark].socPct, v.timeRemainingS, want, ratio)
+		}
+	}
+}
+
 func TestTimeRemainingEstimate(t *testing.T) {
 	st := &deciderState{}
-
-	// Discharge 1% per 100s from 50%: after 300s SOC 47, rate 0.01 %/s,
-	// remaining above the 5% poweroff floor = 42% → 4200s.
-	var last verdict
-	for i := int64(0); i <= 300; i++ {
-		last = decide(st, baseNs+i*secNs, onBatt(50-float64(i)/100, 3.8), testFloor)
-	}
-	if math.IsNaN(last.timeRemainingS) {
-		t.Fatalf("TTE still NaN after 300s of measurable discharge")
-	}
-	if math.Abs(last.timeRemainingS-4200) > 50 {
-		t.Fatalf("TTE = %.0fs, want ~4200s", last.timeRemainingS)
-	}
 
 	// Too early / too little delta: withheld.
 	st = &deciderState{}
