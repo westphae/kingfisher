@@ -447,6 +447,256 @@ body.shutting-down::after {
   flex-direction: column;
 }
 
+#viewCalibrate {
+  padding: 0;
+  overflow: hidden;
+}
+
+#calibrateMount {
+  flex: 1;
+  min-height: 1px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.cal-panel {
+  padding: 1rem 0.85rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.cal-panel-ready {
+  background: linear-gradient(180deg, rgba(45, 140, 90, 0.22), transparent 55%);
+  border-radius: 12px;
+}
+
+.cal-ready-msg {
+  margin-top: 0.55rem;
+  font-weight: 700;
+  color: #3d8;
+}
+
+.cal-ready-bar {
+  margin-top: 0.35rem;
+  height: 10px;
+  border-radius: 5px;
+  background: #1a2740;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.cal-ready-fill {
+  height: 100%;
+  background: #3d8;
+  transition: width 0.15s linear;
+}
+
+.cal-hint {
+  margin: 0;
+}
+
+.cal-status-hint {
+  margin: 0;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.cal-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.cal-chip {
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted, #8aa);
+}
+
+.cal-chip.current {
+  color: #fff;
+  background: #3d8bfd;
+  border-color: #3d8bfd;
+}
+
+.cal-chip.done {
+  color: #3d8;
+  border-color: #3d8;
+  text-decoration: line-through;
+}
+
+.cal-cube-placeholder {
+  align-self: center;
+  width: min(180px, 50vw);
+  height: 110px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted, #8aa);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+}
+
+.cal-panel h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.cal-panel h3 {
+  margin: 0.5rem 0 0;
+  font-size: 1rem;
+}
+
+.cal-actions {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.cal-actions button,
+.cal-retake button {
+  min-height: 48px;
+  padding: 0.65rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--accent, #2a6);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.cal-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cal-actions button.cal-secondary,
+.cal-retake button {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.cal-tips {
+  margin: 0;
+  padding-left: 1.2rem;
+  line-height: 1.45;
+}
+
+.cal-face-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.cal-face-label {
+  margin: 0;
+  font-weight: 600;
+}
+
+.cal-cube {
+  width: min(180px, 50vw);
+  align-self: center;
+}
+
+.cal-cube-face {
+  fill: #1a2740;
+  stroke: #6a849e;
+  stroke-width: 1;
+}
+
+.cal-cube-face.hi {
+  fill: #3d8bfd;
+  stroke: #9ec5ff;
+}
+
+.cal-cube-label {
+  fill: var(--muted, #8aa);
+  font-size: 11px;
+}
+
+.cal-metric-label {
+  font-size: 0.9rem;
+  margin-bottom: 0.35rem;
+}
+
+.cal-bar {
+  position: relative;
+  height: 14px;
+  border-radius: 7px;
+  background: #1a2740;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.cal-bar-fill {
+  height: 100%;
+  background: #e6a23c;
+  transition: width 0.12s linear;
+}
+
+.cal-bar-best {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #3d8bfd;
+  transform: translateX(-1px);
+}
+
+.cal-gates {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--muted, #8aa);
+}
+
+.cal-gates .ok {
+  color: #3d8;
+  font-weight: 600;
+}
+
+.cal-progress {
+  margin: 0;
+  font-weight: 600;
+}
+
+.cal-err {
+  color: #e55;
+  margin: 0;
+}
+
+.cal-warn {
+  color: #e6a23c;
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.cal-fit {
+  display: grid;
+  gap: 0.35rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+}
+
+.cal-retake {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.cal-hist {
+  display: grid;
+  gap: 0.65rem;
+}
+
 .viewHeading {
   margin: 0 0 1rem;
   font-size: 1.25rem;
@@ -550,6 +800,25 @@ body.shutting-down::after {
   line-height: 1.35;
   text-align: right;
   width: 100%;
+}
+
+.ovSubRowDual {
+  min-height: 4.75rem;
+}
+
+.ovCellDual {
+  gap: 0.15rem;
+}
+
+.ovValRaw {
+  color: var(--dim);
+  font-weight: 400;
+  font-size: calc(var(--ov-value) * 0.92);
+}
+
+.ovValCal {
+  color: var(--fg);
+  font-weight: 600;
 }
 
 .ovBlock:focus-visible {
@@ -705,8 +974,40 @@ body.shutting-down::after {
   align-items: center;
 }
 
+.kv.kv-dual {
+  grid-template-columns: minmax(4.5rem, 1.1fr) minmax(5.5rem, 1fr) minmax(5.5rem, 1fr);
+}
+
+.kv.kv-dual .v {
+  text-align: right;
+}
+
+.kv.kv-dual-hdr {
+  min-height: 0;
+  padding-top: 0.35rem;
+  padding-bottom: 0.25rem;
+  border-bottom: none;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.kv.kv-dual-hdr .v {
+  font-weight: 600;
+}
+
 .kv .k { color: var(--dim); }
 .kv .v { font-variant-numeric: tabular-nums; font-size: var(--ov-value); }
+
+.kv .v.ovValRaw {
+  color: var(--dim);
+  font-weight: 400;
+}
+
+.kv .v.ovValCal {
+  color: var(--fg);
+  font-weight: 600;
+}
 
 .kv .du {
   display: inline-grid;

@@ -10,6 +10,7 @@
 //	POST /api/power/off — flush flight DB, shut down kingfisher, power off Pi.
 //	POST /api/compass/align — capture sensor→vehicle alignment (manual or GPS taxi).
 //	POST /api/airspeed/zero — average pitot ΔP over 15s and save as zero offset.
+//	GET/POST /api/calibrate/* — stationary calibration (accel 6-face / gyro still / mag).
 //	GET/POST/PUT/DELETE /api/howgozit/* — manual log templates and flight rows.
 //	GET  /terminal — browser shell (opt-in via config terminal.enabled).
 //	GET  /api/terminal/auth — login methods (pubkey / password).
@@ -37,6 +38,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/westphae/kingfisher/internal/calibrate"
 	"github.com/westphae/kingfisher/internal/clock"
 	"github.com/westphae/kingfisher/internal/config"
 	"github.com/westphae/kingfisher/internal/derive"
@@ -88,6 +90,8 @@ type Server struct {
 
 	requestShutdown func(powerOff bool)
 
+	cal *calibrate.Service
+
 	tpl        *template.Template
 	devWebRoot string // non-empty: serve static/templates from disk each request
 	httpSrv    *http.Server
@@ -124,6 +128,7 @@ func New(cfg *config.Holder, hub *live.Hub, st *store.Store, buf *store.Buffer, 
 		ups:             upsMon,
 		gdl90:           gdl90bc,
 		requestShutdown: requestShutdown,
+		cal:             calibrate.New(hub, cfg, reg),
 		tpl:             tpl,
 		devWebRoot:      devWebRoot,
 		up:              websocket.Upgrader{CheckOrigin: sameOriginCheck},
@@ -146,6 +151,8 @@ func (s *Server) Run(addr string, stop <-chan struct{}) error {
 	mux.HandleFunc("/api/recording", s.handleRecording)
 	mux.HandleFunc("/api/compass/align", s.handleCompassAlign)
 	mux.HandleFunc("/api/airspeed/zero", s.handleAirspeedZero)
+	mux.HandleFunc("/api/calibrate/", s.handleCalibrate)
+	mux.HandleFunc("/api/calibrate", s.handleCalibrate)
 	mux.HandleFunc("/api/howgozit/", s.handleHowgozit)
 	mux.HandleFunc("/api/howgozit", s.handleHowgozit)
 	mux.HandleFunc("/api/flights", s.handleFlights)
@@ -273,6 +280,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		config.MergeGyroTCODefaults(&nc.Calibration.GyroTCO)
 		s.cfg.Set(&nc)
 		if err := config.Save(s.cfg.Path(), &nc); err != nil {
 			log.Printf("web: config save: %v", err)

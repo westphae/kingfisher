@@ -24,6 +24,7 @@ const viewOverviewEl = document.getElementById('viewOverview');
 const viewDetailEl = document.getElementById('viewDetail');
 const viewInstrumentsEl = document.getElementById('viewInstruments');
 const viewHowgozitEl = document.getElementById('viewHowgozit');
+const viewCalibrateEl = document.getElementById('viewCalibrate');
 const detailPanelEl = document.getElementById('detailPanel');
 const detailTitleEl = document.getElementById('detailTitle');
 const detailBackEl = document.getElementById('detailBack');
@@ -106,6 +107,7 @@ function parseRoute() {
   const path = raw.startsWith('/') ? raw : '/' + raw;
   if (path === '/instruments') return { view: 'instruments', sensor: null };
   if (path === '/howgozit') return { view: 'howgozit', sensor: null };
+  if (path === '/calibrate') return { view: 'calibrate', sensor: null };
   const m = path.match(/^\/sensor\/(.+)$/);
   if (m) return { view: 'sensors', sensor: decodeURIComponent(m[1]) };
   return { view: 'sensors', sensor: null };
@@ -134,6 +136,12 @@ function applyRoute() {
   if (viewHowgozitEl) {
     viewHowgozitEl.classList.toggle('view-active', r.view === 'howgozit');
   }
+  if (viewCalibrateEl) {
+    viewCalibrateEl.classList.toggle('view-active', r.view === 'calibrate');
+  }
+  if (r.view !== 'calibrate' && window.KFCalibrate) {
+    window.KFCalibrate.hide();
+  }
 
   for (const btn of document.querySelectorAll('#bottomNav .bottomNavBtn')) {
     const nav = btn.dataset.nav;
@@ -152,6 +160,8 @@ function applyRoute() {
     renderInstruments();
   } else if (r.view === 'howgozit') {
     renderHowgozit();
+  } else if (r.view === 'calibrate') {
+    renderCalibrate();
   }
 }
 
@@ -173,6 +183,17 @@ function renderHowgozit() {
   const mod = window.KFHowgozit;
   if (!mod) {
     mount.innerHTML = '<p class="dim" style="padding:1rem">Howgozit failed to initialize.</p>';
+    return;
+  }
+  void mod.show(mount);
+}
+
+function renderCalibrate() {
+  const mount = document.getElementById('calibrateMount');
+  if (!mount) return;
+  const mod = window.KFCalibrate;
+  if (!mod) {
+    mount.innerHTML = '<p class="dim" style="padding:1rem">Calibrate failed to initialize.</p>';
     return;
   }
   void mod.show(mount);
@@ -270,15 +291,36 @@ function renderLiveValues() {
   if (!name || !panelRegions) return;
   const sm = state.devices.get(name);
   if (!sm) { panelRegions.kv.innerHTML = ''; return; }
-  const vals = KFSmooth.values(name, sm.values || {});
+  const vals = KFDisplay.withDerived(name, KFSmooth.values(name, sm.values || {}));
+  const calVals = KFDisplay.applyTumbleCal(name, vals);
   let html = '';
   const keys = KFDisplay.sortKeys(name, Object.keys(vals));
+  const anyDual = keys.some((k) => KFDisplay.channelHasTumbleCal(name, k));
+  if (anyDual) {
+    html +=
+      '<div class="kv kv-dual kv-dual-hdr">' +
+      '<div class="k"></div>' +
+      '<div class="v ovValRaw">Raw</div>' +
+      '<div class="v ovValCal">Cal</div></div>';
+  }
   for (const k of keys) {
-    const out = KFDisplay.formatValue(name, k, vals[k], vals);
-    const vCell = out.html ?? escapeHtml(String(out.text ?? ''));
     const label = escapeHtml(KFDisplay.channelLabel(name, k));
     const rowCls = KFDisplay.rowClass(name, k);
-    html += `<div class="kv${rowCls}"><div class="k">${label}</div><div class="v">${vCell}</div></div>`;
+    if (KFDisplay.channelHasTumbleCal(name, k)) {
+      const rawOut = KFDisplay.formatValue(name, k, vals[k], vals);
+      const calOut = KFDisplay.formatValue(name, k, calVals[k], calVals);
+      const rawCell = rawOut.html ?? escapeHtml(String(rawOut.text ?? ''));
+      const calCell = calOut.html ?? escapeHtml(String(calOut.text ?? ''));
+      html +=
+        `<div class="kv kv-dual${rowCls}">` +
+        `<div class="k">${label}</div>` +
+        `<div class="v ovValRaw" title="raw">${rawCell}</div>` +
+        `<div class="v ovValCal" title="calibrated">${calCell}</div></div>`;
+    } else {
+      const out = KFDisplay.formatValue(name, k, vals[k], vals);
+      const vCell = out.html ?? escapeHtml(String(out.text ?? ''));
+      html += `<div class="kv${rowCls}"><div class="k">${label}</div><div class="v">${vCell}</div></div>`;
+    }
   }
   html += KFDisplay.gpsFootnote(name);
   if (name === 'bq27441') {
@@ -2033,6 +2075,11 @@ function wireUiTaps() {
     openStatusDrawer();
   });
 
+  KFTap.bindTap(document.getElementById('moreCalibrateBtn'), () => {
+    moreSheet.close();
+    setRoute('#/calibrate');
+  });
+
   KFTap.bindTap(document.getElementById('cfgSave'), async (e) => {
     e.preventDefault();
     const cfg = settingsDlg._cfg || {};
@@ -2089,6 +2136,7 @@ function wireOverviewNav() {
 window.addEventListener('hashchange', applyRoute);
 window.addEventListener('pageshow', (ev) => {
   if (ev.persisted && state.routeView === 'howgozit') renderHowgozit();
+  if (ev.persisted && state.routeView === 'calibrate') renderCalibrate();
 });
 
 (async function init() {
