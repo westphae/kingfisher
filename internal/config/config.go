@@ -596,13 +596,76 @@ type Config struct {
 	Airspeed   Airspeed          `json:"airspeed"`
 	AHRS       AHRS              `json:"ahrs"`
 	Compass    Compass           `json:"compass"`
-	Howgozit   Howgozit          `json:"howgozit,omitempty"`
-	Terminal   Terminal          `json:"terminal,omitempty"`
-	Display    Display           `json:"display,omitempty"`
-	GDL90      GDL90             `json:"gdl90,omitempty"`
-	System     System            `json:"system,omitempty"`
-	UPS        UPS               `json:"ups,omitempty"`
-	Access     Access            `json:"access,omitempty"`
+	// Calibration holds bench tumble coeffs (Phase 2+). Raw DB samples stay
+	// uncorrected; online apply is a separate derive step.
+	Calibration Calibration `json:"calibration,omitempty"`
+	Howgozit    Howgozit    `json:"howgozit,omitempty"`
+	Terminal    Terminal    `json:"terminal,omitempty"`
+	Display     Display     `json:"display,omitempty"`
+	GDL90       GDL90       `json:"gdl90,omitempty"`
+	System      System      `json:"system,omitempty"`
+	UPS         UPS         `json:"ups,omitempty"`
+	Access      Access      `json:"access,omitempty"`
+}
+
+// Calibration stores 6-position tumble results for cabin IMU and/or pod mag,
+// plus the cabin gyro temperature shape (GyroTCO).
+type Calibration struct {
+	CabinIMU *IMUCalResult `json:"cabin_imu,omitempty"`
+	PodMag   *MagCalResult `json:"pod_mag,omitempty"`
+	// GyroTCO is Δb(T) for the cabin ICM-45686 (°/s, zero at TRefC). Always
+	// merged from defaults when absent/invalid so the UI can boldface-correct.
+	GyroTCO GyroTCO `json:"gyro_tco,omitempty"`
+}
+
+// IMUCalResult is diagonal accel scale/bias plus gyro bias from a tumble.
+// Corrected accel: a_corr[i] = AccelScale[i] * (a_raw[i] - AccelBias[i]).
+// Same shape as magkal's per-axis k,l (soft/hard iron analogs).
+//
+// Accel and gyro may be calibrated separately. AccelOffuserApplied /
+// GyroOffuserApplied gate soft constant-bias subtract per sensor; AccelScale
+// and GyroTCO Δb(T) stay software-side. GyroBias is the still mean at TempCalC;
+// GyroBiasAtRef is what was nulled onto the chip (T_ref-baked).
+type IMUCalResult struct {
+	AccelScale     [3]float64 `json:"accel_scale"`
+	AccelBias      [3]float64 `json:"accel_bias"`
+	GyroBias       [3]float64 `json:"gyro_bias"`                 // still mean at TempCalC (rad/s)
+	GyroBiasAtRef  [3]float64 `json:"gyro_bias_at_ref,omitempty"` // μ − Δb(T_cal); OFFUSER target
+	TempCalC       float64    `json:"temp_cal_c,omitempty"`       // mean die °C during six-face
+	GyroFaceRMS    [3]float64 `json:"gyro_face_rms,omitempty"`    // per-axis RMS of face means − bias
+	GyroOffuser         [3]float64 `json:"gyro_offuser,omitempty"`          // programmed OFFUSER (rad/s)
+	AccelOffuser        [3]float64 `json:"accel_offuser,omitempty"`         // programmed OFFUSER (m/s²)
+	AccelOffuserApplied bool       `json:"accel_offuser_applied,omitempty"` // accel calibbias programmed
+	GyroOffuserApplied  bool       `json:"gyro_offuser_applied,omitempty"`  // gyro calibbias programmed
+	// OffuserApplied is true when either accel or gyro OFFUSER was programmed
+	// (legacy clients). Prefer AccelOffuserApplied / GyroOffuserApplied.
+	OffuserApplied bool    `json:"offuser_applied,omitempty"`
+	FittedUTC      string  `json:"fitted_utc"`
+	AccelFittedUTC string  `json:"accel_fitted_utc,omitempty"`
+	GyroFittedUTC  string  `json:"gyro_fitted_utc,omitempty"`
+	ResidualRMS    float64    `json:"residual_rms_ms2,omitempty"` // ‖a_corr‖−g₀ RMS
+	MeanNormMS2    float64    `json:"mean_norm_ms2,omitempty"`
+	Warnings       []string   `json:"warnings,omitempty"`
+}
+
+// MagCalResult is diagonal soft-iron + hard-iron from a pod tumble.
+// Corrected: B_corr[i] = SoftIronDiag[i] * (B_raw[i] - HardIron[i]).
+type MagCalResult struct {
+	SoftIronDiag [3]float64 `json:"soft_iron_diag"`
+	HardIron     [3]float64 `json:"hard_iron_ut"`
+	FittedUTC    string     `json:"fitted_utc"`
+	ResidualRMS  float64    `json:"residual_rms_ut,omitempty"` // ‖B_corr‖ scatter
+	MeanNormUT   float64    `json:"mean_norm_ut,omitempty"`
+	Warnings     []string   `json:"warnings,omitempty"`
+}
+
+// DefaultCalDir is $HOME/kingfisher/calibration for offline JSON artifacts.
+func DefaultCalDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "calibration"
+	}
+	return filepath.Join(home, "kingfisher", "calibration")
 }
 
 // Access gates the root-equivalent endpoints (web terminal, power API) to
@@ -799,6 +862,9 @@ func Defaults() *Config {
 			DeviceShortName: defaultGDL90DeviceShort,
 			DeviceLongName:  defaultGDL90DeviceLong,
 		},
+		Calibration: Calibration{
+			GyroTCO: DefaultGyroTCO(),
+		},
 	}
 }
 
@@ -947,7 +1013,21 @@ func Load(path string) (*Config, error) {
 	MergeClockDefaults(&c.Clock)
 	MergeHowgozitDefaults(&c.Howgozit)
 	MergeGDL90Defaults(&c.GDL90)
+	MergeGyroTCODefaults(&c.Calibration.GyroTCO)
+	MigrateIMUOffuserFlags(c.Calibration.CabinIMU)
 	return c, nil
+}
+
+// MigrateIMUOffuserFlags promotes legacy OffuserApplied into the per-sensor flags.
+func MigrateIMUOffuserFlags(r *IMUCalResult) {
+	if r == nil {
+		return
+	}
+	if r.OffuserApplied && !r.AccelOffuserApplied && !r.GyroOffuserApplied {
+		r.AccelOffuserApplied = true
+		r.GyroOffuserApplied = true
+	}
+	r.OffuserApplied = r.AccelOffuserApplied || r.GyroOffuserApplied
 }
 
 // Save atomically writes JSON to path.
@@ -994,10 +1074,25 @@ func (h *Holder) Get() *Config {
 // Set replaces the live config and signals all subscribers. It does not write
 // to disk; callers should Save separately when persistence is desired.
 func (h *Holder) Set(c *Config) {
+	h.SetNotify(c, true)
+}
+
+// SetNoNotify replaces the live config without signaling reload subscribers.
+// Used when a critical section (e.g. OFFUSER programming) writes sysfs itself
+// and concurrent applyConfiguredAttrs would race on the I²C bus.
+func (h *Holder) SetNoNotify(c *Config) {
+	h.SetNotify(c, false)
+}
+
+// SetNotify replaces the live config and optionally signals reload subscribers.
+func (h *Holder) SetNotify(c *Config, notify bool) {
 	h.mu.Lock()
 	subs := h.reloads
 	h.cfg = c
 	h.mu.Unlock()
+	if !notify {
+		return
+	}
 	for _, ch := range subs {
 		select {
 		case ch <- struct{}{}:
