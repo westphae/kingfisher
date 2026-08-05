@@ -37,10 +37,19 @@ type entry struct {
 type Registry struct {
 	mu      sync.RWMutex
 	entries map[string]*entry
+	gate    *BufferGate
 }
 
 func NewRegistry() *Registry {
-	return &Registry{entries: map[string]*entry{}}
+	return &Registry{entries: map[string]*entry{}, gate: NewBufferGate()}
+}
+
+// Gate returns the buffer quiesce coordinator (never nil after NewRegistry).
+func (rg *Registry) Gate() *BufferGate {
+	if rg == nil {
+		return nil
+	}
+	return rg.gate
 }
 
 // Register a reader under its IIO name. uiName is the disambiguated label
@@ -148,6 +157,17 @@ func (rg *Registry) MaxBufferedHzFor(kernelName string) (float64, bool) {
 		return 0, false
 	}
 	return MaxBufferedHz(e.reader)
+}
+
+// ChannelAttr reads one channel attribute from the live reader.
+func (rg *Registry) ChannelAttr(device, channel, attr string) (string, error) {
+	rg.mu.RLock()
+	e := rg.entries[device]
+	rg.mu.RUnlock()
+	if e == nil {
+		return "", fmt.Errorf("registry: unknown device %q", device)
+	}
+	return e.reader.ChannelAttr(channel, attr)
 }
 
 // WriteAttr writes one attribute on the device's reader. channel may be

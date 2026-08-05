@@ -256,14 +256,35 @@ func applyConfiguredAttrs(r Reader, dev config.Device) error {
 	return firstErr
 }
 
+// iioAttrSuffixes are known IIO channel attr suffixes, longest-first, so
+// "in_anglvel_x_calibbias" splits as channel=anglvel_x (not anglvel / x_calibbias).
+var iioAttrSuffixes = []string{
+	"filter_low_pass_3db_frequency",
+	"oversampling_ratio",
+	"sampling_frequency",
+	"integration_time",
+	"calibbias",
+	"calibscale",
+	"scale",
+	"offset",
+	"raw",
+	"input",
+}
+
 // SplitIIOAttr turns "in_anglvel_filter_low_pass_3db_frequency" into
-// (channel="anglvel", attr="filter_low_pass_3db_frequency"). Keys that
-// don't start with "in_" are treated as device-level attrs (channel="").
+// (channel="anglvel", attr="filter_low_pass_3db_frequency") and
+// "in_anglvel_x_calibbias" into (channel="anglvel_x", attr="calibbias").
+// Keys that don't start with "in_" are treated as device-level attrs (channel="").
 func SplitIIOAttr(full string) (channel, attr string) {
 	if !strings.HasPrefix(full, "in_") {
 		return "", full
 	}
 	s := strings.TrimPrefix(full, "in_")
+	for _, suf := range iioAttrSuffixes {
+		if strings.HasSuffix(s, "_"+suf) {
+			return strings.TrimSuffix(s, "_"+suf), suf
+		}
+	}
 	i := strings.IndexByte(s, '_')
 	if i <= 0 {
 		return s, ""
