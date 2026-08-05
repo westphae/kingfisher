@@ -239,9 +239,12 @@ flowchart TB
 - **Persist raw only** in SQLite device tables (`icm45686_accel`, `icm45686_gyro`).
 - **Corrected stream** feeds AHRS and optional UI; clearly named (e.g. virtual
   device `icm45686` or `icm45686_corr`) so replay distinguishes raw vs corrected.
-- **Do not** write `calibbias` to hardware automatically in v1 (risk of fighting
-  on-chip RTC/APEX if enabled). Optional later: mirror persistent trim to
-  `OFFUSER` on shutdown with explicit operator enable.
+- **Six-face Accept** writes accel bias and **gyro bias corrected to
+  `calibration.gyro_tco.t_ref_c`** into `calibbias` / OFFUSER (volatile;
+  reapplied from `devices.*.attrs` at boot) via a dual-buffer quiesce. Soft UI
+  peels piecewise \(\Delta b(T)\) (knees in `gyro_tco`); constant bias subtract
+  is gated by `offuser_applied`. Do not also enable on-chip RTC/APEX bias paths
+  that would fight OFFUSER.
 
 ---
 
@@ -253,19 +256,20 @@ device.
 
 #### Step 1, Phase 1a — Temperature correction
 
-Per axis *i* at die temperature *T* (°C):
+Gyro (shipped): piecewise \(\Delta b(T)\) in `calibration.gyro_tco` (knees +
+`delta_dps`, zero at `t_ref_c`). With OFFUSER baked to \(T_\mathrm{ref}\):
 
 ```
-ω_temp_i = ω_raw_i − (b0_i + k_i × (T − T_ref))
-a_temp_i = a_raw_i − (a0_i + c_i × (T − T_ref))
+ω_temp_i = ω_raw_i − Δb_i(T)
 ```
 
-- **Coefficients** `(b0, k)` / `(a0, c)` from Phase A/B characterization; stored
-  in `config.json` (`imu_bias.icm45686.*`).
-- **Defaults:** `k=0`, `b0=0` until characterized; `T_ref` = mean temp from lab
-  run or 25°C.
-- **Units:** gyro °/s internally (convert at AHRS boundary as today); accel m/s².
-- **Missing temp:** skip Phase 1a (pass raw) or use last-known T with staleness limit.
+Accel (still planned): linear or piecewise on Z only; X/Y soak TCO is mechanical.
+
+- **Units:** table is °/s; convert to rad/s at the hub boundary.
+- **Missing temp:** skip \(\Delta b\) (pass chip-corrected only) or last-known T
+  with a staleness limit.
+- UI already applies the gyro peel on the boldface line; wire the same helper
+  into the AHRS feed when Step 1 lands.
 
 #### Step 1, Phase 1b — Inertial refinement
 

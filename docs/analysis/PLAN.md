@@ -133,28 +133,36 @@ Magnitude bias is almost certainly **scale (+ small bias)**.
 \mathbf{a}_{\text{true}} = \mathbf{S}\,(\mathbf{a}_{\text{raw}} - \mathbf{b})
 \]
 
-1. **6-position / tumble** (bench) — gold standard.
+1. **Stationary bench** — Cockpit **More → Calibrate** (`internal/calibrate`):
+   **cabin accel** = six-face diagonal \(k,l\); **cabin gyro** = one still dwell
+   (~30 s, any orientation) + \(T_\mathrm{ref}\)-baked OFFUSER; **pod mag** =
+   six-face place-and-hold. See [calibrate.md](calibrate.md).
 2. **From flights (interim):** stationary windows → fit scale so
    \(s\cdot\mathrm{median}(|a|) = g_0\); optional small bias if parked level.
-3. Persist coeffs; apply offline (and later Step-1 compensator). **DB stays raw.**
+3. Persist coeffs (`calibration.*` in config + `~/kingfisher/calibration/*.json`);
+   apply offline (and later Step-1 compensator). **DB stays raw.**
 
-**Deliverable:** `analysis/cal_accel.py`, cal JSON, before/after \|a\| plots.
+**Deliverable:** `analysis/cal_accel.py`, cal JSON, before/after \|a\| plots
+(`analyze_flights.py cal-accel`).
 
 ---
 
 ## Phase 3 — Gyro: temperature vs time stability
 
+**Status: analysis + table shipped** — see [gyro_tco.md](gyro_tco.md).
+`calibration.gyro_tco` (knees + \(\Delta b\) at \(T_\mathrm{ref}=35\) °C);
+Accept bakes OFFUSER to \(T_\mathrm{ref}\); UI boldface peels \(\Delta b(T)\).
+
 Layers (see also ICM bias doc):
 
-| Layer | Question | Method |
-|-------|----------|--------|
-| TCO | \(b(T)\) | Lab soaks (`~/kingfisher/imu_tempcal/`) + flight stationary vs `temp_c` |
-| Residual vs time | Wander after removing \(b_0+k\Delta T\)? | Long soaks at stable T; Allan variance |
-| Turn-on / warm-up | First N minutes | Cold start vs steady |
-| In-run random walk | Angle growth | Integrate corrected ω on static windows |
+| Layer | Question | Method | Result |
+|-------|----------|--------|--------|
+| TCO | \(b(T)\) | Lab soaks (`~/kingfisher/imu_tempcal/`) + desktop still | Piecewise linear, knots (−10, 10, 30) °C; mid-band X ~2–3× DS |
+| Residual vs time | Wander after removing \(b_0+k\Delta T\)? | Long still at stable T | Resid ~0.002–0.005 °/s RMS; drift ~0.001 °/s/h |
+| Turn-on / warm-up | First N minutes | Cold start vs steady | Mostly thermal track; optional gate later |
+| In-run random walk | Angle growth | Integrate corrected ω on static windows | Secondary to TCO; formal Allan optional |
 
-If residual after TCO is small → temp model + occasional ground refine.  
-If it wanders → online AHRS bias states (Layer 2), not only a richer polynomial.
+**Fork resolved:** residual after TCO is small → **temp model + occasional ground refine**. Weak Layer-2 AHRS bias can remain; do not substitute online bias for \(b(T)\). OFFUSER is constant-only — still need the table.
 
 ---
 
@@ -212,8 +220,8 @@ the limiter; BMP581 temp is a starting point only.
 
 1. Phase 0 windows — **done**
 2. Phase 1a/1b noise + parameter recommendations
-3. Phase 2 accel scale/bias
-4. Phase 3 gyro TCO + residual stability (use existing tempcal soaks)
+3. Phase 2 accel scale/bias (+ cabin OFFUSER) — **largely done**; mag six-face deferred
+4. Phase 3 gyro TCO — **done** ([gyro_tco.md](gyro_tco.md)); optional offline/AHRS feed next
 5. Phase 4 mag mount (when pod can be moved)
 6. Phase 5 offline AHRS/compass/airspeed validation → then live derive
 7. Phase 6 engine / weather / AoA / weight as parallel inputs
