@@ -6,6 +6,7 @@ Examples (from repo root; uses uv workspace — see docs/python.md):
   uv run --project analysis python scripts/analyze_flights.py health --flights-only
   uv run --project analysis python scripts/analyze_flights.py windows
   uv run --project analysis python scripts/analyze_flights.py report
+  uv run --project analysis python scripts/analyze_flights.py cal-accel --json ~/kingfisher/calibration/cabin_imu_….json
   uv run --project analysis python scripts/analyze_flights.py all
 """
 
@@ -21,6 +22,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from analysis.cal_accel import run as run_cal_accel
 from analysis.catalog import load_catalog, scan_flights_dir, write_catalog
 from analysis.health import analyze_health, write_health_report
 from analysis.report import write_ledger
@@ -172,6 +174,21 @@ def cmd_noise(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cal_accel(args: argparse.Namespace) -> int:
+    path = Path(args.json)
+    if not path.is_file():
+        print(f"cal JSON not found: {path}", file=sys.stderr)
+        return 1
+    plot_path = None
+    if args.plot is not False:
+        # --plot with optional path; default under analysis-cache
+        plot_path = args.plot if args.plot is not None else (
+            Path(args.noise_dir).parent / "cal_accel_norms.png"
+        )
+    run_cal_accel(path, plot_path=plot_path)
+    return 0
+
+
 def cmd_all(args: argparse.Namespace) -> int:
     rc = cmd_catalog(args)
     if rc:
@@ -279,6 +296,24 @@ def main() -> int:
         help="skip sessions with less stationary time",
     )
     sub.add_parser("report", help="regenerate docs/analysis/ledger.md")
+    ca = sub.add_parser(
+        "cal-accel",
+        help="Phase 2: re-fit / plot six-position accel cal JSON",
+    )
+    ca.add_argument(
+        "--json",
+        type=Path,
+        required=True,
+        help="~/kingfisher/calibration/cabin_imu_….json",
+    )
+    ca.add_argument(
+        "--plot",
+        type=Path,
+        nargs="?",
+        const=None,
+        default=False,
+        help="write before/after ‖a‖ PNG (default: <cache>/cal_accel_norms.png)",
+    )
     sub.add_parser("all", help="catalog + health(flights) + report")
 
     args = p.parse_args()
@@ -292,6 +327,8 @@ def main() -> int:
         return cmd_noise(args)
     if args.cmd == "report":
         return cmd_report(args)
+    if args.cmd == "cal-accel":
+        return cmd_cal_accel(args)
     if args.cmd == "all":
         return cmd_all(args)
     return 1
