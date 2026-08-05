@@ -39,20 +39,39 @@ const KFOverview = (function () {
 
   function renderBlock(device, sample) {
     const raw = sample?.values || {};
-    const vals = typeof KFSmooth !== 'undefined' ? KFSmooth.values(device, raw) : raw;
+    const smoothed = typeof KFSmooth !== 'undefined' ? KFSmooth.values(device, raw) : raw;
+    const vals = KFDisplay.withDerived(device, smoothed);
+    const calVals = KFDisplay.applyTumbleCal(device, vals);
     const layout = KFDisplay.overviewLayout(device, vals);
     const loc = state.deviceLocation.get(device) || inferDeviceLocation(device) || '';
     let subHtml = '';
     for (const sr of layout.subRows) {
       let cells = '';
+      let anyCal = false;
       for (const c of sr.cells) {
-        const text = KFDisplay.formatOverviewCell(device, c.key, vals[c.key], vals);
-        cells += `<span class="ovCell"><span class="ovHdr">${escapeHtml(c.header)}</span><span class="ovVal">${escapeHtml(text)}</span></span>`;
+        const rawText = KFDisplay.formatOverviewCell(device, c.key, vals[c.key], vals);
+        const dual = KFDisplay.channelHasTumbleCal(device, c.key);
+        if (dual) {
+          anyCal = true;
+          const calText = KFDisplay.formatOverviewCell(device, c.key, calVals[c.key], calVals);
+          cells +=
+            `<span class="ovCell ovCellDual">` +
+            `<span class="ovHdr">${escapeHtml(c.header)}</span>` +
+            `<span class="ovVal ovValRaw" title="raw">${escapeHtml(rawText)}</span>` +
+            `<span class="ovVal ovValCal" title="calibrated">${escapeHtml(calText)}</span>` +
+            `</span>`;
+        } else {
+          cells +=
+            `<span class="ovCell">` +
+            `<span class="ovHdr">${escapeHtml(c.header)}</span>` +
+            `<span class="ovVal">${escapeHtml(rawText)}</span>` +
+            `</span>`;
+        }
       }
       const label = sr.rowLabel
         ? `<span class="ovRowLbl">${escapeHtml(sr.rowLabel)}</span>`
         : '<span class="ovRowLbl"></span>';
-      subHtml += `<div class="ovSubRow">${label}<div class="ovCells">${cells}</div></div>`;
+      subHtml += `<div class="ovSubRow${anyCal ? ' ovSubRowDual' : ''}">${label}<div class="ovCells">${cells}</div></div>`;
     }
     if (!subHtml) {
       subHtml =

@@ -27,14 +27,17 @@ const KFDisplay = (function () {
   ];
 
   const IMU_ACCEL = ['accel_x', 'accel_y', 'accel_z'];
+  const ACCEL_TOTAL = 'accel_total';
   const IMU_GYRO = ['anglvel_x', 'anglvel_y', 'anglvel_z'];
   const IMU_MAG = ['magn_x', 'magn_y', 'magn_z'];
   const IMU_SORT = [
     ...IMU_ACCEL,
+    ACCEL_TOTAL,
     ...IMU_GYRO,
     ...IMU_MAG,
     'temp_c', 'temp',
   ];
+  const G0_MS2 = 9.80665;
 
   const AHRS_SORT = ['roll', 'pitch', 'yaw', 'g_load', 'turn_rate_deg_s', 'slip_skid'];
 
@@ -682,7 +685,39 @@ const KFDisplay = (function () {
     return `${m}m`;
   }
 
+  function accelMagnitude(values) {
+    const ax = Number(values?.accel_x);
+    const ay = Number(values?.accel_y);
+    const az = Number(values?.accel_z);
+    if (![ax, ay, az].every(Number.isFinite)) return null;
+    return Math.hypot(ax, ay, az);
+  }
+
+  /** Adds display-only derived channels (e.g. ‖a‖). Does not mutate hub samples. */
+  function withDerived(device, values) {
+    const out = { ...(values || {}) };
+    const hasAccel =
+      device === 'icm45686-accel' ||
+      device.endsWith('-accel') ||
+      (out.accel_x != null && out.accel_y != null && out.accel_z != null);
+    if (hasAccel) {
+      const m = accelMagnitude(out);
+      if (m != null) out[ACCEL_TOTAL] = m;
+    }
+    return out;
+  }
+
   function imuPatternSpec(channel) {
+    if (channel === ACCEL_TOTAL) {
+      return {
+        label: 'Acceleration Total',
+        fmt(v) {
+          const n = Number(v);
+          const g = n / G0_MS2;
+          return `${fmtAccelMS2(n)} m/s² (${g.toFixed(4)} g₀)`;
+        },
+      };
+    }
     let m = channel.match(/^accel_([xyz])$/);
     if (m) {
       return {
@@ -980,6 +1015,7 @@ const KFDisplay = (function () {
         cell(keys, values, 'accel_x', 'Ax'),
         cell(keys, values, 'accel_y', 'Ay'),
         cell(keys, values, 'accel_z', 'Az'),
+        cell(keys, values, ACCEL_TOTAL, '|a|'),
       ]));
     } else if (device.endsWith('-gyro')) {
       subRows.push(row('gyro', [
@@ -992,6 +1028,7 @@ const KFDisplay = (function () {
         cell(keys, values, 'accel_x', 'Ax'),
         cell(keys, values, 'accel_y', 'Ay'),
         cell(keys, values, 'accel_z', 'Az'),
+        cell(keys, values, ACCEL_TOTAL, '|a|'),
       ]));
       subRows.push(row('gyro', [
         cell(keys, values, 'anglvel_x', 'Gx'),
@@ -1142,6 +1179,151 @@ const KFDisplay = (function () {
     return null;
   }
 
+  // Bench tumble cal (config.calibration) — display-only; hub samples stay raw.
+  const CAL_ACCEL_CH = ['accel_x', 'accel_y', 'accel_z'];
+  const CAL_GYRO_CH = ['anglvel_x', 'anglvel_y', 'anglvel_z'];
+  const CAL_MAG_CH = ['mag_x_ut', 'mag_y_ut', 'mag_z_ut'];
+
+  function tumbleCal() {
+    try {
+      return (typeof state !== 'undefined' && state.config && state.config.calibration) || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  const DEG_TO_RAD = Math.PI / 180;
+
+  function gyroTCOTable(cal) {
+    const tco = cal && cal.gyro_tco;
+    if (!tco || !Array.isArray(tco.knees_c) || tco.knees_c.length < 2) return null;
+    const d = tco.delta_dps;
+    if (!d || !d.x || d.x.length !== tco.knees_c.length) return null;
+    return tco;
+  }
+
+  /** Δb(T) in rad/s from calibration.gyro_tco (delta_dps knees). */
+  function gyroTCODeltaRad(tco, tempC) {
+    if (!tco) return [0, 0, 0];
+    const knees = tco.knees_c;
+    const axes = [tco.delta_dps.x, tco.delta_dps.y, tco.delta_dps.z];
+    const t = Number(tempC);
+    const at = (ys) => {
+      if (!Number.isFinite(t)) return 0;
+      if (t <= knees[0]) return ys[0];
+      if (t >= knees[knees.length - 1]) return ys[ys.length - 1];
+      let i = 1;
+      while (i < knees.length && knees[i] < t) i++;
+      const t0 = knees[i - 1];
+      const t1 = knees[i];
+      const w = (t - t0) / (t1 - t0);
+      return ys[i - 1] + w * (ys[i] - ys[i - 1]);
+    };
+    return axes.map((ys) => at(ys) * DEG_TO_RAD);
+  }
+
+  function isCabinGyroDevice(device) {
+    return device === 'icm45686-gyro' || (device.startsWith('icm45686') && device.endsWith('-gyro'));
+  }
+
+  function channelHasTumbleCal(device, channel) {
+    const cal = tumbleCal();
+    if (!cal) return false;
+    if (
+      device === 'icm45686-accel' &&
+      (CAL_ACCEL_CH.includes(channel) || channel === ACCEL_TOTAL) &&
+      cal.cabin_imu
+    ) {
+      return true;
+    }
+    if (CAL_GYRO_CH.includes(channel) && isCabinGyroDevice(device)) {
+      // Boldface gyro whenever IMU cal and/or TCO table is present (table is
+      // shipped by default). Constant OFFUSER bias is not soft-subtracted again;
+      // Δb(T) still is.
+      return !!(cal.cabin_imu || gyroTCOTable(cal));
+    }
+    if (device === 'mmc5983' && CAL_MAG_CH.includes(channel) && cal.pod_mag) return true;
+    if (
+      (device.endsWith('-accel') || isIMUDevice(device)) &&
+      (CAL_ACCEL_CH.includes(channel) || channel === ACCEL_TOTAL) &&
+      cal.cabin_imu &&
+      device.startsWith('icm45686')
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  function applyTumbleCal(device, values) {
+    const cal = tumbleCal();
+    const out = { ...(values || {}) };
+    if (!cal) return out;
+    const imu = cal.cabin_imu;
+    if (imu && (device === 'icm45686-accel' || (device.startsWith('icm45686') && !device.endsWith('-gyro')))) {
+      const S = imu.accel_scale;
+      const b = imu.accel_bias;
+      const onChip =
+        imu.accel_offuser_applied != null ? !!imu.accel_offuser_applied : !!imu.offuser_applied;
+      if (S && S.length >= 3) {
+        for (let i = 0; i < 3; i++) {
+          const k = CAL_ACCEL_CH[i];
+          if (out[k] != null && Number.isFinite(Number(out[k]))) {
+            let v = Number(out[k]);
+            // Bias is programmed into OFFUSER when applied; only scale stays soft.
+            if (!onChip && b && b.length >= 3) v = v - b[i];
+            out[k] = S[i] * v;
+          }
+        }
+      }
+      const mag = accelMagnitude(out);
+      if (mag != null) out[ACCEL_TOTAL] = mag;
+    }
+    if (isCabinGyroDevice(device) && CAL_GYRO_CH.some((k) => out[k] != null)) {
+      const tco = gyroTCOTable(cal);
+      const tempC = out.temp_c;
+      const deltaT = gyroTCODeltaRad(tco, tempC);
+      const tCal =
+        imu && Number.isFinite(Number(imu.temp_cal_c))
+          ? Number(imu.temp_cal_c)
+          : tco
+            ? Number(tco.t_ref_c)
+            : tempC;
+      const deltaCal = gyroTCODeltaRad(tco, tCal);
+      const onChip =
+        imu &&
+        (imu.gyro_offuser_applied != null ? !!imu.gyro_offuser_applied : !!imu.offuser_applied);
+      const gb = imu && imu.gyro_bias;
+      for (let i = 0; i < 3; i++) {
+        const k = CAL_GYRO_CH[i];
+        if (out[k] == null || !Number.isFinite(Number(out[k]))) continue;
+        let v = Number(out[k]);
+        if (onChip) {
+          // Chip zeros bias at T_ref; soft peel Δb(T) only.
+          v -= deltaT[i];
+        } else if (gb && gb.length >= 3) {
+          // Soft constant at T_cal plus shape to current T.
+          v -= gb[i] + (deltaT[i] - deltaCal[i]);
+        } else if (tco) {
+          v -= deltaT[i];
+        }
+        out[k] = v;
+      }
+    }
+    if (cal.pod_mag && device === 'mmc5983') {
+      const L = cal.pod_mag.soft_iron_diag;
+      const H = cal.pod_mag.hard_iron_ut;
+      if (L && H && L.length >= 3 && H.length >= 3) {
+        for (let i = 0; i < 3; i++) {
+          const k = CAL_MAG_CH[i];
+          if (out[k] != null && Number.isFinite(Number(out[k]))) {
+            out[k] = L[i] * (Number(out[k]) - H[i]);
+          }
+        }
+      }
+    }
+    return out;
+  }
+
   function formatOverviewCell(device, channel, value, allValues) {
     if (value == null || (typeof value === 'number' && !Number.isFinite(value))) {
       if (device === 'bq27441' && bq27441UnlearnedField(channel, allValues)) return '—';
@@ -1202,7 +1384,7 @@ const KFDisplay = (function () {
     if (channel.match(/^anglvel_[xyz]$/)) {
       return fmtOverviewNum(value * RAD_TO_DEG, 2) + '°/s';
     }
-    if (channel.match(/^accel_[xyz]$/)) {
+    if (channel === ACCEL_TOTAL || channel.match(/^accel_[xyz]$/)) {
       return fmtOverviewNum(value, Math.abs(value) >= 10 ? 2 : Math.abs(value) >= 1 ? 3 : 4);
     }
     if (channel === 'static_pressure_pa') {
@@ -1254,5 +1436,8 @@ const KFDisplay = (function () {
     smoothGroupLabel,
     heading360,
     isHeadingChannel,
+    channelHasTumbleCal,
+    applyTumbleCal,
+    withDerived,
   };
 })();
