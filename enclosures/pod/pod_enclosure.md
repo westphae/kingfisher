@@ -4,12 +4,14 @@ Parametric CadQuery model of the under-wing air-data pod. **v2** replaces the
 v1 rectangular insert (`wing_pod_case.py` / `KingfisherPod.zip`) with a
 left/right aerodynamic clamshell that *is* the outer shell.
 
-- Printer/material: AnkerMake M5C, PETG. Halves print **mating-face down**,
-  curved outer up (may need the bed diagonal — script asserts fit).
+- Printer/material: AnkerMake M5C, PETG. Exported STLs are already **flange /
+  mating-face down**, curved outer up, and **rotated 45°** for the bed
+  diagonal (10 mm margin vs 220 mm — script asserts the print AABB).
+- Cross-section: **ellipse with flat-top chord** (not a filleted box).
 - Fasteners: M2.5 brass heat-set inserts (same pilot / depth / screw-relief
   scheme as the hub case). Left half = inserts; right half = clearance +
   counterbore. Board posts also take inserts (not self-tap pilots).
-- Outer envelope (current params): **~225 × 86 × 78 mm**.
+- Outer envelope (current params): **~205 × 86 × 77 mm** (print BB ~199 mm).
 
 ## Regenerating
 
@@ -32,6 +34,9 @@ Exports (CWD):
 Assembled frame: origin at outer nose tip on the seam / bottom. **+X aft**,
 **+Y right**, **+Z up** (flat top at `OUTER_H`). Split plane is **Y = 0**.
 
+Print STLs (`pod_left.stl` / `pod_right.stl`): drop on the bed as-exported —
+no slicer rotation needed. STEP files stay in model orientation for Fusion.
+
 Nose → aft:
 
 1. Pitot cradle (outer tube, ~100 mm) on the centerline
@@ -39,7 +44,7 @@ Nose → aft:
 3. Battery slab on centerline (50×6×70 + 1 mm/side) with Babysitter + Pro Micro
    sharing that X-span on the +Y deck
 4. BMP581 multi-hole static bay
-5. MMC5983 at the extreme aft (far from BQ27441 / LiPo)
+5. MMC5983 at the extreme aft (short axis along X; far from BQ27441 / LiPo)
 
 ## Pneumatics (decoupled)
 
