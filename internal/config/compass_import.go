@@ -8,36 +8,82 @@ import (
 	"path/filepath"
 )
 
+type magkalBestFit struct {
+	N       int         `json:"n"`
+	K       []float64   `json:"k"`
+	L       []float64   `json:"l"`
+	P       [][]float64 `json:"p"`
+	SavedAt string      `json:"savedAt"`
+}
+
+func loadMagkalBestFit() (*magkalBestFit, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "magkal", "best_fit.json"))
+	if err != nil {
+		return nil, err
+	}
+	var best magkalBestFit
+	if err := json.Unmarshal(data, &best); err != nil {
+		return nil, err
+	}
+	if best.N != 3 || len(best.K) != 3 || len(best.L) != 3 {
+		return nil, os.ErrInvalid
+	}
+	return &best, nil
+}
+
 // ImportMagkalBestFit copies k/l/P from ~/.config/magkal/best_fit.json into c when
 // calibration is empty. No-op if the file is missing or incompatible.
 func ImportMagkalBestFit(c *Compass) {
 	if c == nil || len(c.Calibration.K) == 3 {
 		return
 	}
-	dir, err := os.UserConfigDir()
+	best, err := loadMagkalBestFit()
 	if err != nil {
 		return
 	}
-	path := filepath.Join(dir, "magkal", "best_fit.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	var best struct {
-		N int         `json:"n"`
-		K []float64   `json:"k"`
-		L []float64   `json:"l"`
-		P [][]float64 `json:"p"`
-	}
-	if err := json.Unmarshal(data, &best); err != nil {
-		return
-	}
-	if best.N != 3 || len(best.K) != 3 || len(best.L) != 3 || len(best.P) != 6 {
+	if len(best.P) != 6 {
 		return
 	}
 	c.Calibration.K = append([]float64(nil), best.K...)
 	c.Calibration.L = append([]float64(nil), best.L...)
 	c.Calibration.P = cloneMatrix(best.P)
+}
+
+// SeedPodMagDisplayCal fills calibration.pod_mag from compass.calibration k/l
+// (or magkal best_fit.json) when empty, so the mmc5983 tab can show raw/cal
+// dual columns like cabin accel. Returns true if PodMag was set.
+func SeedPodMagDisplayCal(c *Config) bool {
+	if c == nil || c.Calibration.PodMag != nil {
+		return false
+	}
+	var k, l [3]float64
+	var fitted string
+	if len(c.Compass.Calibration.K) == 3 && len(c.Compass.Calibration.L) == 3 {
+		copy(k[:], c.Compass.Calibration.K)
+		copy(l[:], c.Compass.Calibration.L)
+	} else {
+		best, err := loadMagkalBestFit()
+		if err != nil {
+			return false
+		}
+		copy(k[:], best.K)
+		copy(l[:], best.L)
+		fitted = best.SavedAt
+	}
+	if fitted == "" {
+		fitted = "magkal-import"
+	}
+	c.Calibration.PodMag = &MagCalResult{
+		SoftIronDiag: k,
+		HardIron:     l,
+		FittedUTC:    fitted,
+	}
+	log.Printf("config: seeded calibration.pod_mag from magkal (display soft-iron/hard-iron)")
+	return true
 }
 
 func cloneMatrix(p [][]float64) [][]float64 {

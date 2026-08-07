@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"net"
 	"os"
@@ -1015,6 +1016,11 @@ func Load(path string) (*Config, error) {
 	MergeGDL90Defaults(&c.GDL90)
 	MergeGyroTCODefaults(&c.Calibration.GyroTCO)
 	MigrateIMUOffuserFlags(c.Calibration.CabinIMU)
+	if SeedPodMagDisplayCal(c) && path != "" {
+		if err := Save(path, c); err != nil {
+			log.Printf("config: persist seeded pod_mag: %v", err)
+		}
+	}
 	return c, nil
 }
 
