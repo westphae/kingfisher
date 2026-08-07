@@ -40,14 +40,17 @@ Print STLs (`pod_left.stl` / `pod_right.stl`): drop on the bed as-exported —
 no slicer rotation needed. Each STL is a **single solid** (AnkerMake rejects
 multi-body compounds). STEP files stay in model orientation for Fusion.
 
+**Left vs right:** only `pod_right` has the electronics deck, M2.5 insert
+posts, static bay, and USB cutout. `pod_left` is the cover (shell + pitot
+cradle bulkheads + flange inserts). A left-only print will not show sensor
+mounts — that is intentional, not a fit-check stub.
+
 Nose → aft:
 
-1. Pitot cradle (outer tube, ~100 mm) on the centerline
-2. MS4525 + 5 V boost on the +Y deck *beside* the cradle
-3. Battery slab on centerline (50×6×70 + 1 mm/side) with Babysitter + Pro Micro
-   sharing that X-span on the +Y deck
-4. BMP581 multi-hole static bay
-5. MMC5983 at the extreme aft (short axis along X; far from BQ27441 / LiPo)
+1. Lofted nose fairing; pitot cradle (outer tube, ~100 mm) on the centerline
+2. Constant midsection: MS4525 + boost beside cradle; battery slab; Babysitter
+   + Pro Micro; BMP581 multi-hole bay; mag (short axis along X)
+3. Lofted tail fairing (empty taper)
 
 ## Pneumatics (decoupled)
 
