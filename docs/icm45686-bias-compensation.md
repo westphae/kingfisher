@@ -63,21 +63,23 @@ Kingfisher already logs `temp_c` on ICM45686 IIO devices via buffered capture.
 
 | Layer | Behavior |
 |-------|----------|
-| [`icm45686-mod`](../icm45686-mod) | FIFO + `in_temp_*`; `calibbias` → `OFFUSER` |
-| [`internal/sensors`](../internal/sensors) | Publishes **raw** accel/gyro/temp to hub + flight DB |
+| [`icm45686-mod`](../icm45686-mod) | FIFO + `in_temp_*`; `calibbias` → `OFFUSER` (writable while buffered; OFFUSER shadow across ODR/FS — local OOT) |
+| [`internal/sensors`](../internal/sensors) | Publishes **raw** accel/gyro/temp to hub + flight DB; programs OFFUSER from Calibrate Accept without pausing capture |
 | [`internal/sensors/attrs.go`](../internal/sensors/attrs.go) | **`calibbias` already in `SnapshotAttrs`** |
 | [`internal/sensors/sensors.go`](../internal/sensors/sensors.go) | Full attr snapshot at **startup** → `sensor_attrs` table |
+| [`internal/calibrate`](../internal/calibrate) | Cabin accel (6-face) + cabin gyro (still) → OFFUSER + `calibration.cabin_imu` |
+| [`calibration.gyro_tco`](analysis/gyro_tco.md) | Piecewise \(\Delta b(T)\); Accept bakes OFFUSER to \(T_\mathrm{ref}\); soft UI peels \(\Delta b\) |
+| Soft display | Boldface peels \(\Delta b(T)\) / soft constant bias when OFFUSER flags say so |
 | [`internal/derive/ahrs.go`](../internal/derive/ahrs.go) | **SimpleAHRS**, no bias estimation; uses hub samples as-is |
 
 Kernel presents **two** IIO devices: `icm45686-accel` and `icm45686-gyro`. Each
 gets its own startup `sensor_attrs` snapshot (including per-axis `calibbias`).
 
-**Gap:** No Step 1 compensator (temperature or inertial); AHRS uses **SimpleAHRS**
-which subtracts gyro bias state `D1/D2/D3` but **never estimates it online**
-(unlike goflying **Kalman** variants, which slowly update `D` and `C` with
-~1-hour drift time constants). No explicit metadata row summarizing “on-chip
-offsets at boot” (scattered across `sensor_attrs` rows — sufficient if we query
-them, but we should treat boot snapshot as mandatory and document the query).
+**Gap:** No hub Step 1 compensator / virtual corrected IMU yet (soft UI peel is
+display-only); AHRS still uses **SimpleAHRS**, which subtracts gyro bias state
+`D1/D2/D3` but **never estimates it online** (unlike goflying **Kalman**
+variants). Boot OFFUSER values live in `sensor_attrs` rows — sufficient if
+queried; optional one-row metadata summary still nice-to-have.
 
 ---
 
@@ -241,10 +243,12 @@ flowchart TB
   device `icm45686` or `icm45686_corr`) so replay distinguishes raw vs corrected.
 - **Six-face Accept** writes accel bias and **gyro bias corrected to
   `calibration.gyro_tco.t_ref_c`** into `calibbias` / OFFUSER (volatile;
-  reapplied from `devices.*.attrs` at boot) via a dual-buffer quiesce. Soft UI
-  peels piecewise \(\Delta b(T)\) (knees in `gyro_tco`); constant bias subtract
-  is gated by `offuser_applied`. Do not also enable on-chip RTC/APEX bias paths
-  that would fight OFFUSER.
+  reapplied from `devices.*.attrs` at boot). The ICM-45686 driver accepts
+  `calibbias` writes while IIO buffers are live (briefly quiets the chip FIFO
+  and shadows OFFUSER across ODR/FS changes), so kingfisher does not pause
+  capture for programming. Soft UI peels piecewise \(\Delta b(T)\) (knees in
+  `gyro_tco`); constant bias subtract is gated by `offuser_applied`. Do not
+  also enable on-chip RTC/APEX bias paths that would fight OFFUSER.
 
 ---
 
@@ -435,16 +439,23 @@ Unit conversions when loading from lab fits:
 
 ## Implementation order
 
-1. **Analysis tooling** — past-log temp range + bias slope script (Phase A).
+1. **Analysis tooling** — past-log temp range + bias slope script (Phase A). **Done**
+   (`docs/analysis/gyro_tco.md`, soaks under `~/kingfisher/imu_tempcal/`).
 2. **Lab run** — execute Phase B protocol; fill Step 1a coefficients in config.
-3. **Step 1a** — temperature compensator + virtual corrected device; AHRS still
-   SimpleAHRS; verify raw DB unchanged.
-4. **Boot attr verification** — test + doc for `calibbias` snapshot.
-5. **Step 1b** — inertial refinement in same `imubias` module (GPS gates, runtime trim).
-6. **Layer 2** — AHRS provider with online `D`/`C` (likely Kalman); feed corrected
+   **Done** for gyro piecewise \(\Delta b(T)\) in `calibration.gyro_tco`.
+3. **Cabin calibrate + OFFUSER** — six-face accel / still gyro Accept, soft UI peel,
+   driver-safe `calibbias` while buffered. **Done** (see analysis [PLAN.md](analysis/PLAN.md)
+   Phase 2–3 + [calibrate.md](analysis/calibrate.md)).
+4. **Boot attr verification** — `calibbias` in startup `sensor_attrs` snapshot. **Done**
+   (`SnapshotAttrs` includes `calibbias`).
+5. **Step 1a online** — temperature compensator + virtual corrected device; AHRS still
+   SimpleAHRS; verify raw DB unchanged. Soft UI already peels \(\Delta b(T)\); hub
+   `imubias` virtual device still open.
+6. **Step 1b** — inertial refinement in same `imubias` module (GPS gates, runtime trim).
+7. **Layer 2** — AHRS provider with online `D`/`C` (likely Kalman); feed corrected
    IMU only; tune drift time constant; compare heading hold vs Step 1 alone.
-7. **Cockpit** — optional display of Step 1 trim + AHRS `D` (later).
-8. **Document** — update CLAUDE.md: raw → Step 1 → AHRS Layer 2 data flow.
+8. **Cockpit** — optional display of Step 1 trim + AHRS `D` (later).
+9. **Document** — update CLAUDE.md: raw → Step 1 → AHRS Layer 2 data flow.
 
 ---
 
@@ -476,8 +487,11 @@ Same **Step 1** pattern after ICM-45686:
 1. **Virtual device name** for Step 1 output: extend existing `icm45686` tab vs
    new `icm45686_corr`?
 2. **UI:** show raw, Step-1-corrected, or both in cockpit IMU tab during bring-up?
+   (Boldface already peels \(\Delta b(T)\) / soft constant bias on the raw tabs.)
 3. **Hot box:** exact setpoint limited by Pi 5 enclosure thermal coupling to die?
 4. **Write `OFFUSER` from software** after Step 1b trim — ever, or software-only?
+   (Ground Accept already programs OFFUSER; driver makes live sysfs writes safe.
+   Step 1b may stay software-only to avoid fighting a baked \(T_\mathrm{ref}\) trim.)
 5. **Layer 2 provider:** full Kalman vs extended SimpleAHRS — trade integration
    risk vs bias-state maturity?
 6. **Step 1b vs Layer 2 both active on ground:** ensure time constants / gates

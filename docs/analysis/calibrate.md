@@ -27,8 +27,9 @@ Six-face gyro means showed no meaningful orientation dependence (face scatter
    `calibration.gyro_tco` — see [gyro_tco.md](gyro_tco.md).
 5. UI boldface peels \(\Delta b(T)\) only after `gyro_offuser_applied`.
 
-OFFUSER programming pauses both IIO buffers and writes `calibbias` without a
-concurrent config-reload attr apply (that race corrupted registers to ~±1 rad/s).
+OFFUSER programming writes `calibbias` while capture stays live — the ICM-45686
+driver quiets the chip FIFO briefly and shadows values across ODR/FS changes.
+Accept uses `SetNoNotify` so a config save does not needlessly restart buffers.
 
 Accel and gyro Accepts merge into the same `calibration.cabin_imu` object and
 do not overwrite each other’s fields. Artifacts:
@@ -73,4 +74,6 @@ uv run --project analysis python scripts/analyze_flights.py cal-accel \
   --json ~/kingfisher/calibration/cabin_accel_….json --plot
 ```
 
-See also `analysis/cal_accel.py` and [PLAN.md](PLAN.md) Phase 2.
+See also `analysis/cal_accel.py`, [PLAN.md](PLAN.md) Phases 2–3, and
+[`../icm45686-bias-compensation.md`](../icm45686-bias-compensation.md) (driver
+OFFUSER contract).

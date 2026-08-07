@@ -1,6 +1,8 @@
 # Phase 3 — Gyro temperature vs time
 
-Status: **analysis done; table shipped** (2026-08-05). Soft UI applies \(\Delta b(T)\); six-face Accept bakes OFFUSER to \(T_\mathrm{ref}\).
+Status: **analysis done; table + live apply shipped** (2026-08-05). Soft UI
+applies \(\Delta b(T)\); **cabin gyro** still-dwell Accept bakes OFFUSER to
+\(T_\mathrm{ref}\) (accel remains a separate six-face procedure).
 
 Data:
 

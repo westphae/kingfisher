@@ -32,10 +32,11 @@ uv run --project analysis python scripts/analyze_flights.py health --flights-onl
 uv run --project analysis python scripts/analyze_flights.py windows
 uv run --project analysis python scripts/analyze_flights.py noise
 uv run --project analysis python scripts/analyze_flights.py report
-uv run --project analysis python scripts/analyze_flights.py cal-accel --json ~/kingfisher/calibration/cabin_imu_….json --plot
+uv run --project analysis python scripts/analyze_flights.py cal-accel --json ~/kingfisher/calibration/cabin_accel_….json --plot
 uv run --project analysis python scripts/analyze_flights.py windows --file 20260722T203620Z_n456t.db
 
-# Bench six-face cal UI: [calibrate.md](calibrate.md)
+# Bench cal UI (cabin accel six-face + cabin gyro still + pod mag TBD): [calibrate.md](calibrate.md)
+# Roadmap status: [PLAN.md](PLAN.md)
 
 # Legacy sampling plots (matplotlib):
 uv run --project analysis python scripts/analyze_flight_sampling.py --help
