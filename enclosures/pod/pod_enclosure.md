@@ -26,7 +26,7 @@ Exports (CWD):
 |------|------|
 | `pod_left.stl` / `.step` | Left half, print-oriented |
 | `pod_right.stl` / `.step` | Right half (electronics), print-oriented |
-| `pitot_plug.stl` / `.step` | Aft plug for the outer pitot tube |
+| `pitot_plug.stl` / `.step` | Aft plug (STL = flange on bed, stem up; STEP = model pose) |
 | `pod_assembly.step` | Assembled (model orientation) |
 
 ## Coordinate system & layout

@@ -810,14 +810,25 @@ def for_print_half(half: cq.Workplane, side: int) -> cq.Workplane:
     return p
 
 
-def _print_bb_ok(name: str, solid: cq.Workplane) -> None:
+def for_print_plug(plug: cq.Workplane) -> cq.Workplane:
+    """
+    Flange flat on the bed, stem up.  Model plug is built along +X (flange at
+    x=0); -90° about Y maps that to +Z so it isn't printed on its side.
+    """
+    p = plug.rotate((0, 0, 0), (0, 1, 0), -90)
+    bb = p.val().BoundingBox()
+    return p.translate((-bb.xmin, -bb.ymin, -bb.zmin))
+
+
+def _print_bb_ok(name: str, solid: cq.Workplane, check_bed: bool = True) -> None:
     bb = solid.val().BoundingBox()
     print(
-        f"{name} print BB: {bb.xlen:.1f} x {bb.ylen:.1f} x {bb.zlen:.1f} mm "
-        f"(bed limit {BED_LIMIT:.0f})"
+        f"{name} print BB: {bb.xlen:.1f} x {bb.ylen:.1f} x {bb.zlen:.1f} mm"
+        + (f" (bed limit {BED_LIMIT:.0f})" if check_bed else "")
     )
-    assert bb.xlen <= BED_LIMIT + 0.05, f"{name} X {bb.xlen:.1f} > bed limit"
-    assert bb.ylen <= BED_LIMIT + 0.05, f"{name} Y {bb.ylen:.1f} > bed limit"
+    if check_bed:
+        assert bb.xlen <= BED_LIMIT + 0.05, f"{name} X {bb.xlen:.1f} > bed limit"
+        assert bb.ylen <= BED_LIMIT + 0.05, f"{name} Y {bb.ylen:.1f} > bed limit"
     assert bb.zmin > -0.05, f"{name} not sitting on bed (zmin={bb.zmin})"
 
 
@@ -829,16 +840,21 @@ if __name__ == "__main__":
 
     right_print = for_print_half(right, +1)
     left_print = for_print_half(left, -1)
+    plug_print = for_print_plug(plug)
     _print_bb_ok("pod_right", right_print)
     _print_bb_ok("pod_left", left_print)
+    _print_bb_ok("pitot_plug", plug_print, check_bed=False)
+    assert abs(plug_print.val().BoundingBox().zlen - (PLUG_FLANGE_T + PLUG_LEN)) < 0.2, (
+        "pitot_plug should stand flange-down with stem height FLANGE_T+PLUG_LEN"
+    )
 
     tol = 0.05
     cq.exporters.export(right_print, "pod_right.stl", tolerance=tol)
     cq.exporters.export(left_print, "pod_left.stl", tolerance=tol)
-    cq.exporters.export(plug, "pitot_plug.stl", tolerance=tol)
+    cq.exporters.export(plug_print, "pitot_plug.stl", tolerance=tol)
     cq.exporters.export(right, "pod_right.step")
     cq.exporters.export(left, "pod_left.step")
-    cq.exporters.export(plug, "pitot_plug.step")
+    cq.exporters.export(plug, "pitot_plug.step")  # model orientation for Fusion
 
     # Assembly STEP: left + right + plug at cradle aft (flange at PLUG_X0)
     asm = right.union(left)
