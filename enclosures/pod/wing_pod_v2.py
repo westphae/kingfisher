@@ -40,23 +40,25 @@ import cadquery as cq
 # =============================================================================
 
 # --- shell / aero -----------------------------------------------------------
-# Midsection: flat top (fairing mate), flat L/R sides, curved bottom.
-# Nose + tail are lofted fairings (not blunt plates).  NOT a full ellipse —
-# that wasted volume around thin boards.
+# Skinny rounded pod.  Cross-section is a tall ellipse with a flat-top chord
+# for the wing fairing; nose/tail are multi-station ogive lofts (rounded, not
+# pyramidal).  Section is *asymmetric* about the seam: thin left cover, wider
+# right half for boards — total width ~50 mm instead of a fat symmetric box.
 WALL = 2.5
-BOTTOM_R = 12.0  # bottom corner radius on the midsection
-BOTTOM_ARC_SEGS = 16
 FLANGE_W = 6.0  # mating-face flange width (into each half)
 GASKET_W = 1.6
 GASKET_D = 0.9
 SHELL_SCREW_INSET = 3.0  # flange screw centres from outer skin
-NOSE_FAIR_LEN = 30.0  # tip -> full midsection
-TAIL_FAIR_LEN = 18.0  # full midsection -> aft tip (keep short for bed diagonal)
+NOSE_FAIR_LEN = 28.0  # tip -> full midsection
+TAIL_FAIR_LEN = 20.0  # full midsection -> aft tip
+OGIVE_STATIONS = 5  # loft stations in each fairing (smoothness)
 
-# Outer envelope (derived length prints below).  Tall for 70 mm battery on Z.
-# Width: battery on centerline + BABY_W (33) on the +Y deck + walls.
-OUTER_W = 84.0  # Y, left-right (boards live in the +Y half)
+# Extents from the clamshell seam (y=0).  Right holds BABY_W=33 on the deck.
+LEFT_EXTENT = 10.0   # -Y cover side (battery half + wall + margin)
+RIGHT_EXTENT = 42.0  # +Y electronics side (fits BABY_W=33 on deck)
+OUTER_W = LEFT_EXTENT + RIGHT_EXTENT  # ~52 mm overall
 OUTER_H = 77.0  # Z, bottom -> flat top (battery pocket 72 + walls)
+SECTION_YC = 0.5 * (RIGHT_EXTENT - LEFT_EXTENT)  # ellipse centre offset toward +Y
 
 # --- M2.5 heat-set inserts (same family as pi5_aviation_case.py) ------------
 INSERT_OD = 3.47
@@ -156,10 +158,12 @@ BED_MARGIN = 10.0  # keep toolpaths inside (skirt/brim + slicer keepout)
 # =============================================================================
 # DERIVED LAYOUT  (x = 0 at outer nose tip, +X aft)
 # =============================================================================
-HALF_W = OUTER_W / 2
-INNER_W = OUTER_W - 2 * WALL
+HALF_W = RIGHT_EXTENT  # used where "outer +Y skin" is needed (USB, static holes)
 INNER_H = OUTER_H - 2 * WALL
 CRADLE_R = OUTER_TUBE_OD / 2 + CRADLE_CLEAR
+SECTION_RY = 0.5 * OUTER_W  # ellipse semi-axis Y
+SECTION_RZ = 0.5 * OUTER_H  # ellipse semi-axis Z
+TIP_R = CRADLE_R + WALL + 1.5
 # Packing note (not modeled): INNER_TUBE_N segments + (N-1) O-rings ≈ OUTER_TUBE_LEN.
 CRADLE_LEN = OUTER_TUBE_LEN
 PLUG_X0 = NOSE_EXTENSION + CRADLE_LEN  # aft face of outer tube / plug flange seat
@@ -194,7 +198,7 @@ BATT_Z0 = (OUTER_H - BATT_POCKET_Z) / 2
 
 # Electronics sit on a deck in the +Y half, clear of the battery slot
 DECK_Y0 = BATT_POCKET_Y / 2 + 1.0
-DECK_Y1 = HALF_W - WALL
+DECK_Y1 = RIGHT_EXTENT - WALL
 DECK_Z = WALL + STANDOFF_DECK_Z
 
 # Board Y placements (board-local origin = corner; world y = DECK_Y0 + y0)
@@ -342,104 +346,125 @@ def x_cylinder(r: float, length: float, x0: float, y: float, z: float) -> cq.Wor
     )
 
 
-def _mid_profile_pts(inset: float = 0.0) -> list[tuple[float, float]]:
-    """
-    Right-half midsection path (y, z): flat top, flat outer side, curved bottom.
-    `inset` shrinks the profile for the interior cavity.
-    """
-    y1 = HALF_W - inset
-    z0, z1 = inset, OUTER_H - inset
-    r = min(BOTTOM_R, max(2.0, y1 - 0.8), (z1 - z0) * 0.4)
-    pts: list[tuple[float, float]] = [(0.0, z1), (y1, z1), (y1, z0 + r)]
-    cx, cz = y1 - r, z0 + r
-    for i in range(1, BOTTOM_ARC_SEGS + 1):
-        ang = (math.pi / 2) * i / BOTTOM_ARC_SEGS
-        pts.append((cx + r * math.cos(ang), cz - r * math.sin(ang)))
-    pts[-1] = (0.0, z0)
-    return pts
+def _ogive_scale(t: float) -> float:
+    """Smooth 0→1 fairing scale (cosine)."""
+    t = max(0.0, min(1.0, t))
+    return 0.5 - 0.5 * math.cos(math.pi * t)
 
 
-def _full_profile_seq(pts: list[tuple[float, float]]) -> list[tuple[float, float]]:
-    """Mirror a right-half path into a closed full cross-section sequence."""
-    seq = list(pts)
-    for y, z in reversed(pts[1:-1]):
-        seq.append((-y, z))
-    return seq
-
-
-def _extrude_full_profile(pts: list[tuple[float, float]], length: float, x0: float) -> cq.Workplane:
-    wp = cq.Workplane("YZ").moveTo(pts[0][0], pts[0][1])
-    for y, z in pts[1:]:
-        wp = wp.lineTo(y, z)
-    right = wp.close().extrude(length).translate((x0, 0, 0))
-    return right.union(right.mirror("XZ"))
-
-
-def _loft_fairing(
-    x_mid: float,
-    x_tip: float,
-    tip_ry: float,
-    tip_rz: float,
-    tip_cz: float,
-    inset: float = 0.0,
-) -> cq.Workplane:
-    """Loft the mid profile at x_mid down to a tip ellipse at x_tip."""
-    seq = _full_profile_seq(_mid_profile_pts(inset))
-    s = cq.Workplane("YZ").workplane(offset=x_mid).moveTo(seq[0][0], seq[0][1])
-    for y, z in seq[1:]:
-        s = s.lineTo(y, z)
-    s = (
-        s.close()
-        .workplane(offset=(x_tip - x_mid))
-        .center(0, tip_cz)
-        .ellipse(max(tip_ry, 1.5), max(tip_rz, 1.5))
-        .loft(ruled=False)
+def _flat_top(solid: cq.Workplane, z_top: float) -> cq.Workplane:
+    cut = (
+        cq.Workplane("XY")
+        .box(OUTER_L + 20, OUTER_W + 40, 30, centered=(False, True, False))
+        .translate((-10, SECTION_YC, z_top))
     )
-    return s
+    return solid.cut(cut)
+
+
+def _ellipse_mid(inset: float, x0: float, length: float) -> cq.Workplane:
+    ry = SECTION_RY - inset
+    rz = SECTION_RZ - inset
+    zc = OUTER_H / 2
+    return (
+        cq.Workplane("YZ")
+        .center(SECTION_YC, zc)
+        .ellipse(max(ry, 3.0), max(rz, 3.0))
+        .extrude(length)
+        .translate((x0, 0, 0))
+    )
+
+
+def _loft_ogive_nose(inset: float, tip_r: float) -> cq.Workplane:
+    """Rounded nose: tip circle at x=inset → mid ellipse at NOSE_FAIR_LEN."""
+    ry = SECTION_RY - inset
+    rz = SECTION_RZ - inset
+    zc_mid = OUTER_H / 2
+    tip_r = max(tip_r, 2.5)
+    tip_zc = PITOT_AXIS_Z
+    n = OGIVE_STATIONS
+    s = (
+        cq.Workplane("YZ")
+        .workplane(offset=inset)
+        .center(SECTION_YC, tip_zc)
+        .circle(tip_r)
+    )
+    prev_x, prev_zc = inset, tip_zc
+    for i in range(1, n):
+        t = i / (n - 1)
+        sc = _ogive_scale(t)
+        x = inset + (NOSE_FAIR_LEN - inset) * t
+        zc = tip_zc + (zc_mid - tip_zc) * sc
+        s = (
+            s.workplane(offset=x - prev_x)
+            .center(0, zc - prev_zc)
+            .ellipse(
+                max(tip_r + (ry - tip_r) * sc, 2.0),
+                max(tip_r + (rz - tip_r) * sc, 2.0),
+            )
+        )
+        prev_x, prev_zc = x, zc
+    return s.loft(ruled=False)
+
+
+def _loft_ogive_tail(inset: float, tip_r: float) -> cq.Workplane:
+    """Rounded tail: mid ellipse at MID_END_X → tip circle at OUTER_L-inset."""
+    ry = SECTION_RY - inset
+    rz = SECTION_RZ - inset
+    zc_mid = OUTER_H / 2
+    tip_r = max(tip_r, 2.5)
+    tip_zc = zc_mid
+    x_tip = OUTER_L - inset
+    n = OGIVE_STATIONS
+    s = (
+        cq.Workplane("YZ")
+        .workplane(offset=MID_END_X)
+        .center(SECTION_YC, zc_mid)
+        .ellipse(max(ry, 3.0), max(rz, 3.0))
+    )
+    prev_x, prev_zc = MID_END_X, zc_mid
+    for i in range(1, n):
+        t = i / (n - 1)
+        sc = _ogive_scale(t)
+        x = MID_END_X + (x_tip - MID_END_X) * t
+        zc = zc_mid + (tip_zc - zc_mid) * sc
+        if i == n - 1:
+            s = s.workplane(offset=x - prev_x).center(0, zc - prev_zc).circle(tip_r)
+        else:
+            s = (
+                s.workplane(offset=x - prev_x)
+                .center(0, zc - prev_zc)
+                .ellipse(
+                    max(ry + (tip_r - ry) * sc, 2.0),
+                    max(rz + (tip_r - rz) * sc, 2.0),
+                )
+            )
+        prev_x, prev_zc = x, zc
+    return s.loft(ruled=False)
 
 
 def full_body_solid(inset: float = 0.0) -> cq.Workplane:
-    """
-    Closed faired body: constant midsection + nose/tail lofts.
-    Flat top / flat sides / curved bottom in the midsection.
-    """
-    tip_r = CRADLE_R + WALL + 2.5 - inset * 0.5
-    tip_r = max(tip_r, 3.0)
+    """Skinny elliptical midsection + rounded ogive nose/tail; flat top chord."""
+    tip_r = max(TIP_R - 0.35 * inset, 2.5)
     body_x0 = NOSE_FAIR_LEN - 1.0
     body_len = (MID_END_X + 1.0) - body_x0
-    mid = _extrude_full_profile(_mid_profile_pts(inset), body_len, body_x0)
-    nose = _loft_fairing(
-        NOSE_FAIR_LEN, inset, tip_r, tip_r, PITOT_AXIS_Z, inset=inset
-    )
-    tail = _loft_fairing(
-        MID_END_X,
-        OUTER_L - inset,
-        tip_r * 0.7,
-        tip_r * 0.7,
-        OUTER_H / 2,
-        inset=inset,
-    )
-    full = mid.union(nose).union(tail)
-    # Enforce flat top (loft blends can overshoot slightly)
-    top_cut = (
-        cq.Workplane("XY")
-        .box(OUTER_L + 10, OUTER_W + 10, 20, centered=(False, True, False))
-        .translate((-5, 0, OUTER_H - inset))
-    )
-    return full.cut(top_cut)
+    mid = _ellipse_mid(inset, body_x0, body_len)
+    nose = _loft_ogive_nose(inset, tip_r)
+    tail = _loft_ogive_tail(inset, tip_r * 0.75)
+    return _flat_top(mid.union(nose).union(tail), OUTER_H - inset)
 
 
 def _keep_half(side: int) -> cq.Workplane:
+    """Bisect at the seam.  Right = +Y (boards); left = -Y (cover)."""
     if side > 0:
         return (
             cq.Workplane("XY")
             .transformed(offset=(-1, 0, -1))
-            .box(OUTER_L + 2, HALF_W + 2, OUTER_H + 2, centered=(False, False, False))
+            .box(OUTER_L + 2, RIGHT_EXTENT + 2, OUTER_H + 2, centered=(False, False, False))
         )
     return (
         cq.Workplane("XY")
-        .transformed(offset=(-1, -(HALF_W + 2), -1))
-        .box(OUTER_L + 2, HALF_W + 2, OUTER_H + 2, centered=(False, False, False))
+        .transformed(offset=(-1, -(LEFT_EXTENT + 2), -1))
+        .box(OUTER_L + 2, LEFT_EXTENT + 2, OUTER_H + 2, centered=(False, False, False))
     )
 
 
@@ -521,21 +546,22 @@ def add_pitot_cradle(body: cq.Workplane, side: int) -> cq.Workplane:
         x_cylinder(CRADLE_R + 0.2, 8.0, PLUG_X0 - 1.0, 0.0, PITOT_AXIS_Z)
     )
 
-    # Internal bulkheads only — stop short of the outer skin so nothing ribs
-    # the exterior.  y extent is interior only (HALF_W - WALL - clearance).
-    y_inner = HALF_W - WALL - 0.4
+    # Internal bulkheads only — stop short of the outer skin (no exterior ribs).
     for x in (NOSE_FAIR_LEN + 8.0, PLUG_X0 - 12.0):
         if side > 0:
+            y_span = RIGHT_EXTENT - WALL - 0.4
             plate = (
                 cq.Workplane("XY")
                 .transformed(offset=(x, 0.0, WALL))
-                .box(3.0, y_inner, OUTER_H - 2 * WALL, centered=(False, False, False))
+                .box(3.0, y_span, OUTER_H - 2 * WALL, centered=(False, False, False))
             )
         else:
+            y_span = LEFT_EXTENT - WALL - 0.4
             plate = (
                 cq.Workplane("XY")
-                .transformed(offset=(x, -y_inner, WALL))
-                .box(3.0, y_inner, OUTER_H - 2 * WALL, centered=(False, False, False))
+                .transformed(offset=(x, -y_span, WALL))
+                .box(3.0, max(y_span, 1.0), OUTER_H - 2 * WALL,
+                     centered=(False, False, False))
             )
         body = body.union(plate)
         body = body.cut(x_cylinder(CRADLE_R, 5.0, x - 1.0, 0.0, PITOT_AXIS_Z))
