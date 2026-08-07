@@ -39,9 +39,10 @@ import cadquery as cq
 
 # --- shell / aero -----------------------------------------------------------
 WALL = 2.5
-FLAT_TOP_CHAMFER = 1.0  # soft break from flat top into side wall
-BOTTOM_R = 14.0  # bottom rounding (keep < OUTER_W/2 - 1)
-EDGE_FILLET = 1.2  # lengthwise outer edges where legal
+# Cross-section is a half-ellipse with a flat-top chord (fairing mate), not a
+# filleted box.  FLAT_TOP_FRAC is the fraction of HALF_W that stays flat.
+FLAT_TOP_FRAC = 0.42
+PROFILE_SEGMENTS = 36  # ellipse polyline resolution
 FLANGE_W = 6.0  # mating-face flange width (into each half)
 GASKET_W = 1.6
 GASKET_D = 0.9
@@ -51,7 +52,7 @@ SHELL_SCREW_INSET = 3.0  # flange screw centres from outer skin
 # Width must fit battery pocket on centerline + BABY_W (33) on the +Y deck:
 #   HALF_W >= BATT_POCKET_Y/2 + 1 + BABY_W + WALL  →  OUTER_W >= ~86
 OUTER_W = 86.0  # Y, left-right (boards live in the +Y half)
-OUTER_H = 78.0  # Z, bottom -> flat top (battery pocket 72 + walls)
+OUTER_H = 77.0  # Z, bottom -> flat top (battery pocket 72 + walls)
 
 # --- M2.5 heat-set inserts (same family as pi5_aviation_case.py) ------------
 INSERT_OD = 3.47
@@ -83,7 +84,7 @@ ORING_T = 2.5  # axial thickness between inner segments (>~2)
 ORING_ID = 7.0  # < 8 mm so it seals on the Prandtl shaft
 CRADLE_CLEAR = 0.15  # print clearance on OUTER_TUBE_OD
 PITOT_AXIS_Z = 28.0  # cradle axis height from outer bottom
-NOSE_EXTENSION = 4.0  # solid nose ahead of tube mouth
+NOSE_EXTENSION = 2.0  # solid nose ahead of tube mouth
 
 # Aft plug (prints separately; RTV into outer tube)
 PLUG_LEN = 14.0
@@ -133,7 +134,7 @@ MS_HOLE_INSET = 2.54
 MS_HOLE_FLIP = False
 
 # Multi-hole static bay (BMP581 only)
-BAY_WALL = 2.5
+BAY_WALL = 2.0
 STATIC_HOLE_D = 1.6
 STATIC_HOLE_ROWS = 2
 STATIC_HOLE_COLS = 5
@@ -143,8 +144,9 @@ STATIC_HOLE_PITCH_Z = 4.5
 # USB-C window (Pro Micro)
 USBC_W, USBC_H = 12.0, 7.0
 
-# Printer bed (diagonal OK)
+# Printer bed — halves export already flange-down and rotated 45° for diagonal
 BED = 220.0
+BED_MARGIN = 10.0  # keep toolpaths inside (skirt/brim + slicer keepout)
 
 # =============================================================================
 # DERIVED LAYOUT  (x = 0 at outer nose tip, +X aft)
@@ -161,23 +163,24 @@ NOSE_BULKHEAD_X = PLUG_X0 + PLUG_FLANGE_T + 1.0
 # Electronics in the +Y bay.  MS/Boost sit *beside* the pitot cradle (under the
 # tube in Z) to reclaim length; battery X-range is shared with the Babysitter;
 # mag stays at the extreme aft, far from BQ27441 / LiPo.
-DECK_X0 = NOSE_EXTENSION + 6.0
+DECK_X0 = NOSE_EXTENSION + 4.0
 MS_X0 = DECK_X0
-BOOST_X0 = MS_X0 + MS_L + 2.5
-BATT_X0 = max(NOSE_BULKHEAD_X + 1.0, BOOST_X0 + BOOST_L + 2.5)
+BOOST_X0 = MS_X0 + MS_L + 2.0
+BATT_X0 = max(NOSE_BULKHEAD_X + 0.5, BOOST_X0 + BOOST_L + 2.0)
 # Babysitter + Pro Micro share the battery's X-span on the +Y deck (battery
-# is on the centerline).  Mag stays aft of the static bay.
+# is on the centerline).  Mag is aft of the static bay, short axis along X.
 BABY_X0 = BATT_X0
-PM_X0 = BABY_X0 + BABY_L + 0.5
+PM_X0 = BABY_X0 + BABY_L + 0.4
 assert PM_X0 + PM_L <= BATT_X0 + BATT_POCKET_X + 0.6, (
     "Pro Micro does not fit in battery X-span; widen pack or shorten Baby gap"
 )
-BAY_X0 = max(PM_X0 + PM_L, BATT_X0 + BATT_POCKET_X) + 2.0
-BMP_X0 = BAY_X0 + BAY_WALL + 3.0
-BAY_X1 = BMP_X0 + BMP581_L + 5.0 + BAY_WALL
-MAG_X0 = BAY_X1 + 1.5
-AFT_MARGIN = 3.5
-OUTER_L = MAG_X0 + MAG_L + AFT_MARGIN
+BAY_X0 = max(PM_X0 + PM_L, BATT_X0 + BATT_POCKET_X) + 1.5
+BMP_X0 = BAY_X0 + BAY_WALL + 2.0
+BAY_X1 = BMP_X0 + BMP581_L + 3.0 + BAY_WALL
+# Mag footprint swapped: 7.6 along X, 19 along Y (still far aft of BQ27441)
+MAG_X0 = BAY_X1 + 1.0
+AFT_MARGIN = 2.0
+OUTER_L = MAG_X0 + MAG_W + AFT_MARGIN  # MAG_W is the X extent when rotated
 
 BATT_Y0 = -BATT_POCKET_Y / 2
 BATT_Z0 = (OUTER_H - BATT_POCKET_Z) / 2
@@ -250,9 +253,9 @@ BOARDS = {
         x0=MAG_X0,
         y0=MAG_Y0,
         z0=DECK_Z,
-        xl=MAG_L,
-        yl=MAG_W,
-        holes=[(INSET, MAG_W / 2)],
+        xl=MAG_W,  # short axis along X (saves body length)
+        yl=MAG_L,
+        holes=[(MAG_W / 2, INSET)],  # hole opposite Qwiic; Qwiic faces +Y
     ),
 }
 
@@ -267,15 +270,16 @@ for fx in _flange_xs:
     FLANGE_SCREWS.append((fx, OUTER_H - SHELL_SCREW_INSET))
     FLANGE_SCREWS.append((fx, SHELL_SCREW_INSET))
 
-# Half printed mating-face down: bed footprint ≈ OUTER_L x OUTER_H.
-# At 45° on a square bed, axis-aligned BB side is (L+H)/sqrt(2).
+# Half printed flange-down then rotated 45°: AABB side ≈ (L+H)/sqrt(2).
 BED_BB = (OUTER_L + OUTER_H) / math.sqrt(2)
+BED_LIMIT = BED - BED_MARGIN
 print(
     f"OUTER  L x W x H = {OUTER_L:.1f} x {OUTER_W:.1f} x {OUTER_H:.1f} mm"
 )
 print(
-    f"half bed BB @45deg ~{BED_BB:.0f} mm (bed {BED:.0f}; "
-    f"{'OK diagonal' if BED_BB <= BED + 1 else 'TOO LONG'})"
+    f"half bed BB @45deg ~{BED_BB:.1f} mm (limit {BED_LIMIT:.0f} = "
+    f"{BED:.0f}-{BED_MARGIN:.0f} margin; "
+    f"{'OK' if BED_BB <= BED_LIMIT else 'TOO LONG'})"
 )
 print(
     f"pitot cradle: OD={OUTER_TUBE_OD} ID={OUTER_TUBE_ID} L={CRADLE_LEN}; "
@@ -286,11 +290,13 @@ print(
     f"MS4525 barb tubing: tip Ø{MS_BARB_TIP_D} / shoulder Ø{MS_BARB_SHOULDER_D}; "
     f"datasheet 3/32\" ID (~2.38). Plug {PROBE_TUBE_OD} mm -> ~{MS_TUBE_OD} mm OD line."
 )
-assert BED_BB <= BED + 2.0, f"half footprint {BED_BB:.1f} exceeds {BED} bed even diagonal"
+assert BED_BB <= BED_LIMIT, (
+    f"half footprint {BED_BB:.1f} exceeds bed limit {BED_LIMIT:.1f}; shorten OUTER_L"
+)
 assert PITOT_AXIS_Z - CRADLE_R > WALL + 1.0, "pitot cradle too low"
 assert PITOT_AXIS_Z + CRADLE_R < OUTER_H - WALL - 1.0, "pitot cradle too high"
-assert BATT_Z0 > WALL, "battery pocket intersects floor"
-assert BATT_Z0 + BATT_POCKET_Z < OUTER_H - WALL, "battery pocket intersects top"
+assert BATT_Z0 >= WALL - 0.05, "battery pocket intersects floor"
+assert BATT_Z0 + BATT_POCKET_Z <= OUTER_H - WALL + 0.05, "battery pocket intersects top"
 assert DECK_Y1 - DECK_Y0 >= max(b["yl"] for b in BOARDS.values()) + 1.0, (
     "electronics deck too narrow for boards — widen OUTER_W"
 )
@@ -329,69 +335,91 @@ def x_cylinder(r: float, length: float, x0: float, y: float, z: float) -> cq.Wor
     )
 
 
-def half_body_solid(side: int) -> cq.Workplane:
+def _ellipse_profile_pts(
+    a: float, b: float, flat_y: float, z_top: float, z_bot: float, n: int
+) -> list[tuple[float, float]]:
     """
-    Right (side=+1) or left (side=-1) outer solid: flat top, rounded bottom,
-    vertical seam at y=0.  Built as a full rounded blank then bisected.
+    Right-half outer path in (y, z): flat top chord, then ellipse to bottom seam.
+    Ellipse centred on y=0, z=(z_top+z_bot)/2 with semi-axes a, b.
     """
-    r = min(BOTTOM_R, HALF_W - 0.5, OUTER_H / 2 - 1)
-    blank = (
-        cq.Workplane("XY")
-        .box(OUTER_L, OUTER_W, OUTER_H, centered=(False, True, False))
-    )
-    # Round the two bottom long edges and the bottom nose/tail a bit via fillet
-    try:
-        blank = blank.edges("<Z").fillet(r)
-    except Exception:
-        pass
-    try:
-        blank = blank.edges("|Z and >Y").fillet(EDGE_FILLET)
-        blank = blank.edges("|Z and <Y").fillet(EDGE_FILLET)
-    except Exception:
-        pass
-    # Soften flat-top side break
-    try:
-        blank = blank.edges(">Z and |X").fillet(FLAT_TOP_CHAMFER)
-    except Exception:
-        pass
+    cy = 0.5 * (z_top + z_bot)
+    flat_y = min(flat_y, a * 0.95)
+    theta0 = math.asin(max(0.0, min(0.999, flat_y / a)))
+    pts: list[tuple[float, float]] = [(0.0, z_top), (flat_y, z_top)]
+    for i in range(1, n + 1):
+        th = theta0 + (math.pi - theta0) * i / n
+        pts.append((a * math.sin(th), cy + b * math.cos(th)))
+    pts[-1] = (0.0, z_bot)
+    return pts
 
-    # Keep one half (include a thin overlap past y=0 so the seam isn't open)
-    keep = (
-        cq.Workplane("XY")
-        .transformed(offset=(-1, 0, -1))
-        .box(OUTER_L + 2, HALF_W + 1, OUTER_H + 2, centered=(False, False, False))
-    )
-    if side < 0:
+
+def _extrude_profile(pts: list[tuple[float, float]], length: float) -> cq.Workplane:
+    wp = cq.Workplane("YZ").moveTo(pts[0][0], pts[0][1])
+    for y, z in pts[1:]:
+        wp = wp.lineTo(y, z)
+    return wp.close().extrude(length)
+
+
+def full_body_solid() -> cq.Workplane:
+    """Closed aero body: elliptical cross-section with flat top chord."""
+    a, b = HALF_W, OUTER_H / 2
+    flat_y = a * FLAT_TOP_FRAC
+    pts = _ellipse_profile_pts(a, b, flat_y, OUTER_H, 0.0, PROFILE_SEGMENTS)
+    right = _extrude_profile(pts, OUTER_L)
+    return right.union(right.mirror("XZ"))
+
+
+def half_body_solid(side: int) -> cq.Workplane:
+    """Right (side=+1) or left (side=-1) outer solid, seam at y=0."""
+    full = full_body_solid()
+    if side > 0:
         keep = (
             cq.Workplane("XY")
-            .transformed(offset=(-1, -(HALF_W + 1), -1))
-            .box(OUTER_L + 2, HALF_W + 1, OUTER_H + 2, centered=(False, False, False))
+            .transformed(offset=(-1, 0, -1))
+            .box(OUTER_L + 2, HALF_W + 2, OUTER_H + 2, centered=(False, False, False))
         )
-    return blank.intersect(keep)
+    else:
+        keep = (
+            cq.Workplane("XY")
+            .transformed(offset=(-1, -(HALF_W + 2), -1))
+            .box(OUTER_L + 2, HALF_W + 2, OUTER_H + 2, centered=(False, False, False))
+        )
+    return full.intersect(keep)
 
 
 def hollow_half(side: int) -> cq.Workplane:
-    """Shell half with wall thickness, open at the mating face (y=0)."""
-    solid = half_body_solid(side)
-    # Interior pocket: leave WALL on outer skin, floor, top; open to seam
-    # Pocket extends past y=0 so the mating face is fully open for the flange.
+    """Elliptical shell half, open at the mating face, with flange + gasket."""
+    # Outer / inner profiles (inner inset by WALL on the ellipse axes)
+    a, b = HALF_W, OUTER_H / 2
+    flat_y = a * FLAT_TOP_FRAC
+    outer_pts = _ellipse_profile_pts(a, b, flat_y, OUTER_H, 0.0, PROFILE_SEGMENTS)
+    outer_r = _extrude_profile(outer_pts, OUTER_L)
+
+    ai, bi = max(a - WALL, 8.0), max(b - WALL, 8.0)
+    flat_i = max(1.0, flat_y - 0.35 * WALL)
+    z_top_i, z_bot_i = OUTER_H - WALL, WALL
+    inner_pts = _ellipse_profile_pts(ai, bi, flat_i, z_top_i, z_bot_i, PROFILE_SEGMENTS)
+    # Nose/tail keep WALL thickness: inner stops short in X
+    inner_r = _extrude_profile(inner_pts, OUTER_L - 2 * WALL).translate((WALL, 0, 0))
+    outer = outer_r.union(outer_r.mirror("XZ"))
+    inner = inner_r.union(inner_r.mirror("XZ"))
+    hollow = outer.cut(inner)
+
     if side > 0:
-        pocket = (
+        keep = (
             cq.Workplane("XY")
-            .transformed(offset=(WALL, -1.0, WALL))
-            .box(OUTER_L - 2 * WALL, HALF_W - WALL + 1.0, OUTER_H - 2 * WALL,
-                 centered=(False, False, False))
+            .transformed(offset=(-1, 0, -1))
+            .box(OUTER_L + 2, HALF_W + 2, OUTER_H + 2, centered=(False, False, False))
         )
     else:
-        pocket = (
+        keep = (
             cq.Workplane("XY")
-            .transformed(offset=(WALL, -(HALF_W - WALL), WALL))
-            .box(OUTER_L - 2 * WALL, HALF_W - WALL + 1.0, OUTER_H - 2 * WALL,
-                 centered=(False, False, False))
+            .transformed(offset=(-1, -(HALF_W + 2), -1))
+            .box(OUTER_L + 2, HALF_W + 2, OUTER_H + 2, centered=(False, False, False))
         )
-    body = solid.cut(pocket)
+    body = hollow.intersect(keep)
 
-    # Mating flange: thicken seam band to FLANGE_W
+    # Mating flange rim (screw land) along the open seam
     if side > 0:
         flange = (
             cq.Workplane("XY")
@@ -399,7 +427,6 @@ def hollow_half(side: int) -> cq.Workplane:
             .box(OUTER_L - 2 * WALL, FLANGE_W, OUTER_H - 2 * WALL,
                  centered=(False, False, False))
         )
-        # Hollow the flange interior so only a rim remains
         flange_cut = (
             cq.Workplane("XY")
             .transformed(offset=(WALL + 1.0, 0, WALL + 1.0))
@@ -763,16 +790,35 @@ def build_plug() -> cq.Workplane:
 
 def for_print_half(half: cq.Workplane, side: int) -> cq.Workplane:
     """
-    Mating face down on the bed, curved outer up.
-    Right (+Y): rotate so +Y -> +Z.  Left (-Y): rotate so -Y -> +Z.
+    Print orientation:
+      1) flange / mating face (y=0) on the bed, curved outer up
+      2) rotate 45° about Z so the half lies on the bed diagonal
+      3) translate to the first octant (min corner at origin)
     """
-    # Rotate ±90 deg about X: (x,y,z) -> (x, -z, y) for +90
+    # Right: +90° about X → (x,y,z)->(x,-z,y); y=0 → z=0, y>0 → z>0 (curve up).
+    # Left:  -90° about X → (x,y,z)->(x, z,-y); y=0 → z=0, y<0 → z>0.
+    # (Earlier exports had these signs swapped — flange ended up on top.)
     if side > 0:
-        p = half.rotate((0, 0, 0), (1, 0, 0), -90)
-    else:
         p = half.rotate((0, 0, 0), (1, 0, 0), 90)
+    else:
+        p = half.rotate((0, 0, 0), (1, 0, 0), -90)
     bb = p.val().BoundingBox()
-    return p.translate((-bb.xmin, -bb.ymin, -bb.zmin))
+    p = p.translate((-bb.xmin, -bb.ymin, -bb.zmin))
+    p = p.rotate((0, 0, 0), (0, 0, 1), 45)
+    bb = p.val().BoundingBox()
+    p = p.translate((-bb.xmin, -bb.ymin, -bb.zmin))
+    return p
+
+
+def _print_bb_ok(name: str, solid: cq.Workplane) -> None:
+    bb = solid.val().BoundingBox()
+    print(
+        f"{name} print BB: {bb.xlen:.1f} x {bb.ylen:.1f} x {bb.zlen:.1f} mm "
+        f"(bed limit {BED_LIMIT:.0f})"
+    )
+    assert bb.xlen <= BED_LIMIT + 0.05, f"{name} X {bb.xlen:.1f} > bed limit"
+    assert bb.ylen <= BED_LIMIT + 0.05, f"{name} Y {bb.ylen:.1f} > bed limit"
+    assert bb.zmin > -0.05, f"{name} not sitting on bed (zmin={bb.zmin})"
 
 
 # =============================================================================
@@ -783,6 +829,8 @@ if __name__ == "__main__":
 
     right_print = for_print_half(right, +1)
     left_print = for_print_half(left, -1)
+    _print_bb_ok("pod_right", right_print)
+    _print_bb_ok("pod_left", left_print)
 
     tol = 0.05
     cq.exporters.export(right_print, "pod_right.stl", tolerance=tol)
@@ -794,7 +842,6 @@ if __name__ == "__main__":
 
     # Assembly STEP: left + right + plug at cradle aft (flange at PLUG_X0)
     asm = right.union(left)
-    # plug local: flange at x=0, stem +X; YZ centres at 0 → shift to pitot axis
     plug_placed = build_plug().translate((PLUG_X0, 0.0, PITOT_AXIS_Z))
     try:
         asm = asm.union(plug_placed)
