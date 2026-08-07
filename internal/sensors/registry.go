@@ -37,19 +37,10 @@ type entry struct {
 type Registry struct {
 	mu      sync.RWMutex
 	entries map[string]*entry
-	gate    *BufferGate
 }
 
 func NewRegistry() *Registry {
-	return &Registry{entries: map[string]*entry{}, gate: NewBufferGate()}
-}
-
-// Gate returns the buffer quiesce coordinator (never nil after NewRegistry).
-func (rg *Registry) Gate() *BufferGate {
-	if rg == nil {
-		return nil
-	}
-	return rg.gate
+	return &Registry{entries: map[string]*entry{}}
 }
 
 // Register a reader under its IIO name. uiName is the disambiguated label

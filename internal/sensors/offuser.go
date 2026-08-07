@@ -9,6 +9,12 @@ import (
 	"github.com/westphae/kingfisher/internal/config"
 )
 
+// Cabin ICM-45686 IIO device names (shared chip).
+const (
+	CabinIMUGyro  = "icm45686-gyro"
+	CabinIMUAccel = "icm45686-accel"
+)
+
 // NewOffuserFromMean returns the OFFUSER value that zeros a still reading.
 // IIO/ICM45686 treat calibbias as an additive trim (out ≈ intrinsic + OFFUSER),
 // so when the published still mean is μ under the current trim:
@@ -42,22 +48,25 @@ func GyroStillMeanAtRef(tco config.GyroTCO, gyroBiasAtCal [3]float64, tempCalC f
 
 // ApplyCabinAccelOffuser programs accel calibbias from a six-face fit and merges
 // accel fields into calibration.cabin_imu (preserving gyro cal).
-func ApplyCabinAccelOffuser(ctx context.Context, gate *BufferGate, reg *Registry, holder *config.Holder, fit *config.IMUCalResult) error {
-	return applyCabinOffuser(ctx, gate, reg, holder, fit, true, false)
+func ApplyCabinAccelOffuser(ctx context.Context, reg *Registry, holder *config.Holder, fit *config.IMUCalResult) error {
+	return applyCabinOffuser(ctx, reg, holder, fit, true, false)
 }
 
 // ApplyCabinGyroOffuser programs T_ref-baked gyro calibbias from a still fit and
 // merges gyro fields into calibration.cabin_imu (preserving accel cal).
-func ApplyCabinGyroOffuser(ctx context.Context, gate *BufferGate, reg *Registry, holder *config.Holder, fit *config.IMUCalResult) error {
-	return applyCabinOffuser(ctx, gate, reg, holder, fit, false, true)
+func ApplyCabinGyroOffuser(ctx context.Context, reg *Registry, holder *config.Holder, fit *config.IMUCalResult) error {
+	return applyCabinOffuser(ctx, reg, holder, fit, false, true)
 }
 
 // ApplyCabinIMUOffuser programs both accel and gyro (legacy combined Accept).
-func ApplyCabinIMUOffuser(ctx context.Context, gate *BufferGate, reg *Registry, holder *config.Holder, fit *config.IMUCalResult) error {
-	return applyCabinOffuser(ctx, gate, reg, holder, fit, true, true)
+func ApplyCabinIMUOffuser(ctx context.Context, reg *Registry, holder *config.Holder, fit *config.IMUCalResult) error {
+	return applyCabinOffuser(ctx, reg, holder, fit, true, true)
 }
 
-func applyCabinOffuser(ctx context.Context, gate *BufferGate, reg *Registry, holder *config.Holder, fit *config.IMUCalResult, doAccel, doGyro bool) error {
+func applyCabinOffuser(ctx context.Context, reg *Registry, holder *config.Holder, fit *config.IMUCalResult, doAccel, doGyro bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if fit == nil {
 		return fmt.Errorf("sensors: nil IMU cal fit")
 	}
@@ -70,69 +79,65 @@ func applyCabinOffuser(ctx context.Context, gate *BufferGate, reg *Registry, hol
 	if !doAccel && !doGyro {
 		return fmt.Errorf("sensors: nothing to program")
 	}
-	return gate.WithPaused(ctx, CabinIMUPair(), func() error {
-		cur := holder.Get()
-		tco := cur.Calibration.GyroTCO
-		config.MergeGyroTCODefaults(&tco)
 
-		merged := mergeIMUCal(cur.Calibration.CabinIMU, fit, doAccel, doGyro)
+	cur := holder.Get()
+	tco := cur.Calibration.GyroTCO
+	config.MergeGyroTCODefaults(&tco)
 
-		var gyroOff, accelOff [3]float64
-		if doGyro {
-			gyroAtRef := GyroStillMeanAtRef(tco, merged.GyroBias, merged.TempCalC)
-			merged.GyroBiasAtRef = gyroAtRef
-			for i, axis := range []string{"x", "y", "z"} {
-				oldG, err := readCalibbias(reg, CabinIMUGyro, "anglvel_"+axis)
-				if err != nil {
-					return err
-				}
-				gyroOff[i] = NewOffuserFromMean(oldG, gyroAtRef[i])
-				if err := writeCalibbias(reg, CabinIMUGyro, "anglvel_"+axis, gyroOff[i]); err != nil {
-					return err
-				}
+	merged := mergeIMUCal(cur.Calibration.CabinIMU, fit, doAccel, doGyro)
+
+	var gyroOff, accelOff [3]float64
+	if doGyro {
+		gyroAtRef := GyroStillMeanAtRef(tco, merged.GyroBias, merged.TempCalC)
+		merged.GyroBiasAtRef = gyroAtRef
+		for i, axis := range []string{"x", "y", "z"} {
+			oldG, err := readCalibbias(reg, CabinIMUGyro, "anglvel_"+axis)
+			if err != nil {
+				return err
 			}
-			merged.GyroOffuser = gyroOff
-			merged.GyroOffuserApplied = true
-		}
-		if doAccel {
-			for i, axis := range []string{"x", "y", "z"} {
-				oldA, err := readCalibbias(reg, CabinIMUAccel, "accel_"+axis)
-				if err != nil {
-					return err
-				}
-				accelOff[i] = NewOffuserFromMean(oldA, merged.AccelBias[i])
-				if err := writeCalibbias(reg, CabinIMUAccel, "accel_"+axis, accelOff[i]); err != nil {
-					return err
-				}
+			gyroOff[i] = NewOffuserFromMean(oldG, gyroAtRef[i])
+			if err := writeCalibbias(reg, CabinIMUGyro, "anglvel_"+axis, gyroOff[i]); err != nil {
+				return err
 			}
-			merged.AccelOffuser = accelOff
-			merged.AccelOffuserApplied = true
 		}
-		merged.OffuserApplied = merged.AccelOffuserApplied || merged.GyroOffuserApplied
+		merged.GyroOffuser = gyroOff
+		merged.GyroOffuserApplied = true
+	}
+	if doAccel {
+		for i, axis := range []string{"x", "y", "z"} {
+			oldA, err := readCalibbias(reg, CabinIMUAccel, "accel_"+axis)
+			if err != nil {
+				return err
+			}
+			accelOff[i] = NewOffuserFromMean(oldA, merged.AccelBias[i])
+			if err := writeCalibbias(reg, CabinIMUAccel, "accel_"+axis, accelOff[i]); err != nil {
+				return err
+			}
+		}
+		merged.AccelOffuser = accelOff
+		merged.AccelOffuserApplied = true
+	}
+	merged.OffuserApplied = merged.AccelOffuserApplied || merged.GyroOffuserApplied
 
-		// Copy programmed values back onto caller's fit for the artifact.
-		*fit = *merged
+	*fit = *merged
 
-		cp := *cur
-		cp.Devices = copyDeviceMap(cur.Devices)
-		cp.Calibration = cur.Calibration
-		cp.Calibration.GyroTCO = tco
-		cp.Calibration.CabinIMU = merged
-		if doGyro {
-			mergeCalibbiasAttrs(&cp, CabinIMUGyro, "anglvel", gyroOff)
-		}
-		if doAccel {
-			mergeCalibbiasAttrs(&cp, CabinIMUAccel, "accel", accelOff)
-		}
-		// Do not signal reload here: paused buffer loops would race
-		// applyConfiguredAttrs against these calibbias writes and corrupt
-		// OFFUSER over I²C. Resume refreshes from holder and applies once.
-		holder.SetNoNotify(&cp)
-		return config.Save(holder.Path(), &cp)
-	})
+	cp := *cur
+	cp.Devices = copyDeviceMap(cur.Devices)
+	cp.Calibration = cur.Calibration
+	cp.Calibration.GyroTCO = tco
+	cp.Calibration.CabinIMU = merged
+	if doGyro {
+		mergeCalibbiasAttrs(&cp, CabinIMUGyro, "anglvel", gyroOff)
+	}
+	if doAccel {
+		mergeCalibbiasAttrs(&cp, CabinIMUAccel, "accel", accelOff)
+	}
+	// Chip already holds the new OFFUSER; avoid a capture restart that would
+	// re-hit ODR/scale for an unchanged streaming setup.
+	holder.SetNoNotify(&cp)
+	return config.Save(holder.Path(), &cp)
 }
 
-// mergeIMUCal overlays accel and/or gyro fields from src onto a copy of prev.
 func mergeIMUCal(prev, src *config.IMUCalResult, doAccel, doGyro bool) *config.IMUCalResult {
 	var out config.IMUCalResult
 	if prev != nil {
@@ -150,7 +155,6 @@ func mergeIMUCal(prev, src *config.IMUCalResult, doAccel, doGyro bool) *config.I
 		if src.FittedUTC != "" {
 			out.FittedUTC = src.FittedUTC
 		}
-		// Accel-only warnings replace previous accel-ish warnings; keep simple.
 		if len(src.Warnings) > 0 {
 			out.Warnings = append([]string{}, src.Warnings...)
 		}
@@ -218,13 +222,17 @@ func copyDeviceMap(in map[string]config.Device) map[string]config.Device {
 
 func copyDevice(d config.Device) config.Device {
 	out := d
-	if len(d.Attrs) > 0 {
+	if d.UseBuffer != nil {
+		ub := *d.UseBuffer
+		out.UseBuffer = &ub
+	}
+	if d.Attrs != nil {
 		out.Attrs = make(map[string]string, len(d.Attrs))
 		for k, v := range d.Attrs {
 			out.Attrs[k] = v
 		}
 	}
-	if len(d.Channels) > 0 {
+	if d.Channels != nil {
 		out.Channels = make(map[string]config.Channel, len(d.Channels))
 		for k, v := range d.Channels {
 			out.Channels[k] = v

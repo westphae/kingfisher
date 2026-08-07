@@ -201,7 +201,7 @@ func Run(ctx context.Context, holder *config.Holder, readers []Reader, hub *live
 		if reg != nil {
 			reg.Register(a.r, a.name, location.Hub)
 		}
-		if err := applyConfiguredAttrs(a.r, cfg.DeviceOrDefault(a.r.Name(), 10)); err != nil {
+		if err := applyConfiguredAttrs(a.r.Name(), a.r, cfg.DeviceOrDefault(a.r.Name(), 10)); err != nil {
 			log.Printf("sensors: %s attrs: %v", a.name, err)
 		}
 		// Snapshot once before any data ticks so the DB has the "as flown"
@@ -229,31 +229,68 @@ func Run(ctx context.Context, holder *config.Holder, readers []Reader, hub *live
 	wg.Wait()
 }
 
-func applyConfiguredAttrs(r Reader, dev config.Device) error {
+// applyConfiguredAttrs programs device attrs. Calibbias is applied last so
+// ODR/scale writes (which can soft-reset OFFUSER on some chips) do not leave
+// a zero trim; the ICM-45686 driver also shadows/restores OFFUSER itself.
+func applyConfiguredAttrs(device string, r Reader, dev config.Device) error {
 	if len(dev.Attrs) == 0 && len(dev.Channels) == 0 {
 		return nil
 	}
-	var firstErr error
-	set := func(k, v string) {
-		ch, attr := SplitIIOAttr(k)
-		if err := r.SetChannelAttr(ch, attr, v); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("setattr %s=%s: %w", k, v, err)
-		}
-	}
-	// ODR before UI LPF: filter values are absolute Hz derived from current ODR.
-	if v, ok := dev.Attrs["sampling_frequency"]; ok {
-		set("sampling_frequency", v)
-	}
-	for k, v := range dev.Attrs {
-		if k == "sampling_frequency" {
-			continue
-		}
-		set(k, v)
+	firstErr := applyNonCalibbiasAttrs(r, dev.Attrs)
+	if err := programCalibbiasAttrs(r, device, extractCalibbias(dev.Attrs)); err != nil && firstErr == nil {
+		firstErr = err
 	}
 	if err := r.ReloadScale(); err != nil && firstErr == nil {
 		firstErr = fmt.Errorf("reload scale: %w", err)
 	}
 	return firstErr
+}
+
+// deviceCaptureEqual reports whether a and b describe the same buffered/polled
+// capture setup. Unrelated config edits (display smoothing, GPS, …) must not
+// restart IIO capture.
+func deviceCaptureEqual(a, b config.Device) bool {
+	if a.Enabled != b.Enabled || a.SampleHz != b.SampleHz {
+		return false
+	}
+	if !boolPtrEqual(a.UseBuffer, b.UseBuffer) {
+		return false
+	}
+	if !stringMapEqual(a.Attrs, b.Attrs) {
+		return false
+	}
+	if len(a.Channels) != len(b.Channels) {
+		return false
+	}
+	for k, va := range a.Channels {
+		vb, ok := b.Channels[k]
+		if !ok || va.Column != vb.Column {
+			return false
+		}
+	}
+	return true
+}
+
+func boolPtrEqual(a, b *bool) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+func stringMapEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, va := range a {
+		if vb, ok := b[k]; !ok || va != vb {
+			return false
+		}
+	}
+	return true
 }
 
 // iioAttrSuffixes are known IIO channel attr suffixes, longest-first, so
@@ -347,6 +384,9 @@ func runOne(ctx context.Context, r Reader, name string, holder *config.Holder, h
 				dev = newDev
 				continue
 			}
+			if deviceCaptureEqual(dev, newDev) {
+				continue
+			}
 			if !dev.Enabled {
 				log.Printf("sensors: %s enabled by config reload — resuming", name)
 				// The pause branch advanced dev.SampleHz without touching
@@ -367,7 +407,7 @@ func runOne(ctx context.Context, r Reader, name string, holder *config.Holder, h
 				t.Reset(interval)
 				log.Printf("sensors: %s rate -> %g Hz", name, newDev.SampleHz)
 			}
-			if err := applyConfiguredAttrs(r, newDev); err != nil {
+			if err := applyConfiguredAttrs(name, r, newDev); err != nil {
 				log.Printf("sensors: %s reapply attrs: %v", name, err)
 			}
 			prevAttrs = logAttrDiff(r, st, reg, name, prevAttrs)

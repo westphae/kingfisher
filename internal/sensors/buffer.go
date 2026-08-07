@@ -144,12 +144,6 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		return
 	}
 
-	var ctl *bufferCtl
-	if reg != nil && reg.Gate() != nil {
-		ctl = reg.Gate().register(name)
-		defer reg.Gate().unregister(name)
-	}
-
 	paused := !dev.Enabled
 
 	publishHz := clampBufferedHz(r, dev.SampleHz)
@@ -270,7 +264,7 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 			_ = iobuf.Close()
 			iobuf = nil
 		}
-		if err := applyConfiguredAttrs(r, newDev); err != nil {
+		if err := applyConfiguredAttrs(name, r, newDev); err != nil {
 			log.Printf("sensors: %s reapply attrs: %v", name, err)
 		}
 		publishHz = clampBufferedHz(r, newDev.SampleHz)
@@ -363,6 +357,10 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 			dev = newDev
 			return
 		}
+		if deviceCaptureEqual(dev, newDev) {
+			// Display-only / unrelated config saves still notify Subscribers.
+			return
+		}
 		if !dev.Enabled {
 			log.Printf("sensors: %s enabled by config reload — resuming buffered capture", name)
 		}
@@ -378,46 +376,6 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		colMap = buildColumnMap(filterDataChannels(chans), dev.Channels)
 	}
 
-	// handlePause closes the buffer for a BufferGate.WithPaused critical
-	// section (OFFUSER programming). Do not apply attrs on reload while
-	// paused — that races the critical section's own calibbias writes and
-	// has been observed to corrupt GYRO_*_OFFUSER to ~±1 rad/s garbage.
-	// On resume, refresh device config from the holder and apply once.
-	handlePause := func(op *pauseOp) {
-		if iobuf != nil {
-			_ = iobuf.Close()
-			iobuf = nil
-		}
-		close(op.paused)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-reload:
-				if holder != nil {
-					dev = holder.Get().DeviceOrDefault(r.Name(), 10)
-					colMap = buildColumnMap(filterDataChannels(chans), dev.Channels)
-				}
-			case <-op.resume:
-				if holder != nil {
-					dev = holder.Get().DeviceOrDefault(r.Name(), 10)
-				}
-				if dev.Enabled {
-					if restartCapture(dev) {
-						prevAttrs = logAttrDiff(r, st, reg, name, prevAttrs)
-						colMap = buildColumnMap(filterDataChannels(chans), dev.Channels)
-					}
-				}
-				return
-			}
-		}
-	}
-
-	var pauseReq <-chan *pauseOp
-	if ctl != nil {
-		pauseReq = ctl.req
-	}
-
 	for {
 		if !dev.Enabled || iobuf == nil {
 			select {
@@ -425,8 +383,6 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 				return
 			case <-reload:
 				applyReload()
-			case op := <-pauseReq:
-				handlePause(op)
 			}
 			continue
 		}
@@ -435,11 +391,6 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 			return
 		case <-reload:
 			applyReload()
-			if iobuf == nil {
-				continue
-			}
-		case op := <-pauseReq:
-			handlePause(op)
 			if iobuf == nil {
 				continue
 			}

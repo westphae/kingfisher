@@ -28,7 +28,7 @@ func PersistAccel(holder *config.Holder, reg *sensors.Registry, fit *config.IMUC
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := sensors.ApplyCabinAccelOffuser(ctx, reg.Gate(), reg, holder, fit); err != nil {
+	if err := sensors.ApplyCabinAccelOffuser(ctx, reg, holder, fit); err != nil {
 		return err
 	}
 	return writeArtifact(Artifact{
@@ -46,7 +46,7 @@ func PersistGyro(holder *config.Holder, reg *sensors.Registry, fit *config.IMUCa
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := sensors.ApplyCabinGyroOffuser(ctx, reg.Gate(), reg, holder, fit); err != nil {
+	if err := sensors.ApplyCabinGyroOffuser(ctx, reg, holder, fit); err != nil {
 		return err
 	}
 	return writeArtifact(Artifact{
@@ -64,7 +64,7 @@ func PersistIMU(holder *config.Holder, reg *sensors.Registry, fit *config.IMUCal
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := sensors.ApplyCabinIMUOffuser(ctx, reg.Gate(), reg, holder, fit); err != nil {
+	if err := sensors.ApplyCabinIMUOffuser(ctx, reg, holder, fit); err != nil {
 		return err
 	}
 	return writeArtifact(Artifact{
