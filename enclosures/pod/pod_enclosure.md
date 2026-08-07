@@ -7,11 +7,13 @@ left/right aerodynamic clamshell that *is* the outer shell.
 - Printer/material: AnkerMake M5C, PETG. Exported STLs are already **flange /
   mating-face down**, curved outer up, and **rotated 45°** for the bed
   diagonal (10 mm margin vs 220 mm — script asserts the print AABB).
-- Cross-section: **ellipse with flat-top chord** (not a filleted box).
+- Shape: **flat top**, **flat L/R sides**, **curved bottom**; **lofted nose
+  and tail fairings** (not blunt end plates). Not a full ellipse.
+- Asymmetry: **board mounts / static bay / USB are on `pod_right` only**;
+  `pod_left` is the cover (pitot cradle + flange inserts).
 - Fasteners: M2.5 brass heat-set inserts (same pilot / depth / screw-relief
   scheme as the hub case). Left half = inserts; right half = clearance +
   counterbore. Board posts also take inserts (not self-tap pilots).
-- Outer envelope (current params): **~205 × 86 × 77 mm** (print BB ~199 mm).
 
 ## Regenerating
 

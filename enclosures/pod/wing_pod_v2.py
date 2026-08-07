@@ -3,8 +3,10 @@
 #  WING-MOUNTED AIR-DATA POD  v2  — left/right aerodynamic clamshell
 #
 #  Printed PETG halves (flat mating face on the bed, curved outer up) that mate
-#  into a sealed aero shell.  Flat top deck mates a *separate* wing fairing
-#  later; pod↔fairing latch is deferred.
+#  into a sealed aero shell.  Midsection: flat top (wing fairing mate), flat
+#  L/R sides, curved bottom.  Nose + tail are lofted fairings (not blunt
+#  plates).  Electronics / board posts live on the RIGHT half only; left is
+#  the cover.  Pod↔fairing latch is deferred.
 #
 #  Boards (Qwiic era — rearrangeable via BOARDS dict):
 #    SparkFun Pro Micro ESP32-C3, Battery Babysitter (BQ27441), MMC5983MA,
@@ -38,20 +40,22 @@ import cadquery as cq
 # =============================================================================
 
 # --- shell / aero -----------------------------------------------------------
+# Midsection: flat top (fairing mate), flat L/R sides, curved bottom.
+# Nose + tail are lofted fairings (not blunt plates).  NOT a full ellipse —
+# that wasted volume around thin boards.
 WALL = 2.5
-# Cross-section is a half-ellipse with a flat-top chord (fairing mate), not a
-# filleted box.  FLAT_TOP_FRAC is the fraction of HALF_W that stays flat.
-FLAT_TOP_FRAC = 0.42
-PROFILE_SEGMENTS = 36  # ellipse polyline resolution
+BOTTOM_R = 12.0  # bottom corner radius on the midsection
+BOTTOM_ARC_SEGS = 16
 FLANGE_W = 6.0  # mating-face flange width (into each half)
 GASKET_W = 1.6
 GASKET_D = 0.9
 SHELL_SCREW_INSET = 3.0  # flange screw centres from outer skin
+NOSE_FAIR_LEN = 30.0  # tip -> full midsection
+TAIL_FAIR_LEN = 18.0  # full midsection -> aft tip (keep short for bed diagonal)
 
-# Outer envelope (derived length prints below).  Tall blade for 70 mm battery.
-# Width must fit battery pocket on centerline + BABY_W (33) on the +Y deck:
-#   HALF_W >= BATT_POCKET_Y/2 + 1 + BABY_W + WALL  →  OUTER_W >= ~86
-OUTER_W = 86.0  # Y, left-right (boards live in the +Y half)
+# Outer envelope (derived length prints below).  Tall for 70 mm battery on Z.
+# Width: battery on centerline + BABY_W (33) on the +Y deck + walls.
+OUTER_W = 84.0  # Y, left-right (boards live in the +Y half)
 OUTER_H = 77.0  # Z, bottom -> flat top (battery pocket 72 + walls)
 
 # --- M2.5 heat-set inserts (same family as pi5_aviation_case.py) ------------
@@ -84,7 +88,8 @@ ORING_T = 2.5  # axial thickness between inner segments (>~2)
 ORING_ID = 7.0  # < 8 mm so it seals on the Prandtl shaft
 CRADLE_CLEAR = 0.15  # print clearance on OUTER_TUBE_OD
 PITOT_AXIS_Z = 28.0  # cradle axis height from outer bottom
-NOSE_EXTENSION = 2.0  # solid nose ahead of tube mouth
+# Tube mouth is at the faired nose tip (x=0); cradle runs aft from there.
+NOSE_EXTENSION = 0.0
 
 # Aft plug (prints separately; RTV into outer tube)
 PLUG_LEN = 14.0
@@ -160,27 +165,29 @@ CRADLE_LEN = OUTER_TUBE_LEN
 PLUG_X0 = NOSE_EXTENSION + CRADLE_LEN  # aft face of outer tube / plug flange seat
 NOSE_BULKHEAD_X = PLUG_X0 + PLUG_FLANGE_T + 1.0
 
-# Electronics in the +Y bay.  MS/Boost sit *beside* the pitot cradle (under the
-# tube in Z) to reclaim length; battery X-range is shared with the Babysitter;
-# mag stays at the extreme aft, far from BQ27441 / LiPo.
-DECK_X0 = NOSE_EXTENSION + 4.0
+# Electronics in the +Y bay on the RIGHT half only (left half is the cover).
+# MS/Boost sit beside the pitot cradle; battery X-span shared with Babysitter
+# + Pro Micro; mag aft of static bay but still in the constant midsection so
+# the tail fairing can taper cleanly.
+DECK_X0 = max(4.0, NOSE_FAIR_LEN * 0.35)
 MS_X0 = DECK_X0
 BOOST_X0 = MS_X0 + MS_L + 2.0
 BATT_X0 = max(NOSE_BULKHEAD_X + 0.5, BOOST_X0 + BOOST_L + 2.0)
-# Babysitter + Pro Micro share the battery's X-span on the +Y deck (battery
-# is on the centerline).  Mag is aft of the static bay, short axis along X.
 BABY_X0 = BATT_X0
 PM_X0 = BABY_X0 + BABY_L + 0.4
 assert PM_X0 + PM_L <= BATT_X0 + BATT_POCKET_X + 0.6, (
     "Pro Micro does not fit in battery X-span; widen pack or shorten Baby gap"
 )
-BAY_X0 = max(PM_X0 + PM_L, BATT_X0 + BATT_POCKET_X) + 1.5
-BMP_X0 = BAY_X0 + BAY_WALL + 2.0
-BAY_X1 = BMP_X0 + BMP581_L + 3.0 + BAY_WALL
-# Mag footprint swapped: 7.6 along X, 19 along Y (still far aft of BQ27441)
-MAG_X0 = BAY_X1 + 1.0
-AFT_MARGIN = 2.0
-OUTER_L = MAG_X0 + MAG_W + AFT_MARGIN  # MAG_W is the X extent when rotated
+BAY_X0 = max(PM_X0 + PM_L, BATT_X0 + BATT_POCKET_X) + 1.0
+BMP_X0 = BAY_X0 + BAY_WALL + 1.5
+BAY_X1 = BMP_X0 + BMP581_L + 2.5 + BAY_WALL
+MAG_X0 = BAY_X1 + 0.8
+# Constant midsection ends after mag; tail fairing is empty taper aft of that.
+MID_END_X = MAG_X0 + MAG_W + 1.0
+OUTER_L = MID_END_X + TAIL_FAIR_LEN
+# Flange / screws only where the section is constant (not in the fairings)
+FLANGE_X0 = NOSE_FAIR_LEN + 2.0
+FLANGE_X1 = MID_END_X - 2.0
 
 BATT_Y0 = -BATT_POCKET_Y / 2
 BATT_Z0 = (OUTER_H - BATT_POCKET_Z) / 2
@@ -261,8 +268,8 @@ BOARDS = {
 
 # Clamshell flange screws (world X, Z); left half gets inserts, right clearance
 _flange_xs = []
-x = NOSE_EXTENSION + 12.0
-while x < OUTER_L - 10.0:
+x = FLANGE_X0 + 8.0
+while x < FLANGE_X1 - 8.0:
     _flange_xs.append(x)
     x += 28.0
 FLANGE_SCREWS = []
@@ -335,116 +342,140 @@ def x_cylinder(r: float, length: float, x0: float, y: float, z: float) -> cq.Wor
     )
 
 
-def _ellipse_profile_pts(
-    a: float, b: float, flat_y: float, z_top: float, z_bot: float, n: int
-) -> list[tuple[float, float]]:
+def _mid_profile_pts(inset: float = 0.0) -> list[tuple[float, float]]:
     """
-    Right-half outer path in (y, z): flat top chord, then ellipse to bottom seam.
-    Ellipse centred on y=0, z=(z_top+z_bot)/2 with semi-axes a, b.
+    Right-half midsection path (y, z): flat top, flat outer side, curved bottom.
+    `inset` shrinks the profile for the interior cavity.
     """
-    cy = 0.5 * (z_top + z_bot)
-    flat_y = min(flat_y, a * 0.95)
-    theta0 = math.asin(max(0.0, min(0.999, flat_y / a)))
-    pts: list[tuple[float, float]] = [(0.0, z_top), (flat_y, z_top)]
-    for i in range(1, n + 1):
-        th = theta0 + (math.pi - theta0) * i / n
-        pts.append((a * math.sin(th), cy + b * math.cos(th)))
-    pts[-1] = (0.0, z_bot)
+    y1 = HALF_W - inset
+    z0, z1 = inset, OUTER_H - inset
+    r = min(BOTTOM_R, max(2.0, y1 - 0.8), (z1 - z0) * 0.4)
+    pts: list[tuple[float, float]] = [(0.0, z1), (y1, z1), (y1, z0 + r)]
+    cx, cz = y1 - r, z0 + r
+    for i in range(1, BOTTOM_ARC_SEGS + 1):
+        ang = (math.pi / 2) * i / BOTTOM_ARC_SEGS
+        pts.append((cx + r * math.cos(ang), cz - r * math.sin(ang)))
+    pts[-1] = (0.0, z0)
     return pts
 
 
-def _extrude_profile(pts: list[tuple[float, float]], length: float) -> cq.Workplane:
+def _full_profile_seq(pts: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Mirror a right-half path into a closed full cross-section sequence."""
+    seq = list(pts)
+    for y, z in reversed(pts[1:-1]):
+        seq.append((-y, z))
+    return seq
+
+
+def _extrude_full_profile(pts: list[tuple[float, float]], length: float, x0: float) -> cq.Workplane:
     wp = cq.Workplane("YZ").moveTo(pts[0][0], pts[0][1])
     for y, z in pts[1:]:
         wp = wp.lineTo(y, z)
-    return wp.close().extrude(length)
-
-
-def full_body_solid() -> cq.Workplane:
-    """Closed aero body: elliptical cross-section with flat top chord."""
-    a, b = HALF_W, OUTER_H / 2
-    flat_y = a * FLAT_TOP_FRAC
-    pts = _ellipse_profile_pts(a, b, flat_y, OUTER_H, 0.0, PROFILE_SEGMENTS)
-    right = _extrude_profile(pts, OUTER_L)
+    right = wp.close().extrude(length).translate((x0, 0, 0))
     return right.union(right.mirror("XZ"))
 
 
-def half_body_solid(side: int) -> cq.Workplane:
-    """Right (side=+1) or left (side=-1) outer solid, seam at y=0."""
-    full = full_body_solid()
+def _loft_fairing(
+    x_mid: float,
+    x_tip: float,
+    tip_ry: float,
+    tip_rz: float,
+    tip_cz: float,
+    inset: float = 0.0,
+) -> cq.Workplane:
+    """Loft the mid profile at x_mid down to a tip ellipse at x_tip."""
+    seq = _full_profile_seq(_mid_profile_pts(inset))
+    s = cq.Workplane("YZ").workplane(offset=x_mid).moveTo(seq[0][0], seq[0][1])
+    for y, z in seq[1:]:
+        s = s.lineTo(y, z)
+    s = (
+        s.close()
+        .workplane(offset=(x_tip - x_mid))
+        .center(0, tip_cz)
+        .ellipse(max(tip_ry, 1.5), max(tip_rz, 1.5))
+        .loft(ruled=False)
+    )
+    return s
+
+
+def full_body_solid(inset: float = 0.0) -> cq.Workplane:
+    """
+    Closed faired body: constant midsection + nose/tail lofts.
+    Flat top / flat sides / curved bottom in the midsection.
+    """
+    tip_r = CRADLE_R + WALL + 2.5 - inset * 0.5
+    tip_r = max(tip_r, 3.0)
+    body_x0 = NOSE_FAIR_LEN - 1.0
+    body_len = (MID_END_X + 1.0) - body_x0
+    mid = _extrude_full_profile(_mid_profile_pts(inset), body_len, body_x0)
+    nose = _loft_fairing(
+        NOSE_FAIR_LEN, inset, tip_r, tip_r, PITOT_AXIS_Z, inset=inset
+    )
+    tail = _loft_fairing(
+        MID_END_X,
+        OUTER_L - inset,
+        tip_r * 0.7,
+        tip_r * 0.7,
+        OUTER_H / 2,
+        inset=inset,
+    )
+    full = mid.union(nose).union(tail)
+    # Enforce flat top (loft blends can overshoot slightly)
+    top_cut = (
+        cq.Workplane("XY")
+        .box(OUTER_L + 10, OUTER_W + 10, 20, centered=(False, True, False))
+        .translate((-5, 0, OUTER_H - inset))
+    )
+    return full.cut(top_cut)
+
+
+def _keep_half(side: int) -> cq.Workplane:
     if side > 0:
-        keep = (
+        return (
             cq.Workplane("XY")
             .transformed(offset=(-1, 0, -1))
             .box(OUTER_L + 2, HALF_W + 2, OUTER_H + 2, centered=(False, False, False))
         )
-    else:
-        keep = (
-            cq.Workplane("XY")
-            .transformed(offset=(-1, -(HALF_W + 2), -1))
-            .box(OUTER_L + 2, HALF_W + 2, OUTER_H + 2, centered=(False, False, False))
-        )
-    return full.intersect(keep)
+    return (
+        cq.Workplane("XY")
+        .transformed(offset=(-1, -(HALF_W + 2), -1))
+        .box(OUTER_L + 2, HALF_W + 2, OUTER_H + 2, centered=(False, False, False))
+    )
 
 
 def hollow_half(side: int) -> cq.Workplane:
-    """Elliptical shell half, open at the mating face, with flange + gasket."""
-    # Outer / inner profiles (inner inset by WALL on the ellipse axes)
-    a, b = HALF_W, OUTER_H / 2
-    flat_y = a * FLAT_TOP_FRAC
-    outer_pts = _ellipse_profile_pts(a, b, flat_y, OUTER_H, 0.0, PROFILE_SEGMENTS)
-    outer_r = _extrude_profile(outer_pts, OUTER_L)
-
-    ai, bi = max(a - WALL, 8.0), max(b - WALL, 8.0)
-    flat_i = max(1.0, flat_y - 0.35 * WALL)
-    z_top_i, z_bot_i = OUTER_H - WALL, WALL
-    inner_pts = _ellipse_profile_pts(ai, bi, flat_i, z_top_i, z_bot_i, PROFILE_SEGMENTS)
-    # Nose/tail keep WALL thickness: inner stops short in X
-    inner_r = _extrude_profile(inner_pts, OUTER_L - 2 * WALL).translate((WALL, 0, 0))
-    outer = outer_r.union(outer_r.mirror("XZ"))
-    inner = inner_r.union(inner_r.mirror("XZ"))
+    """Faired shell half, open at the mating face, with flange + gasket."""
+    outer = full_body_solid(inset=0.0)
+    inner = full_body_solid(inset=WALL)
     hollow = outer.cut(inner)
+    body = hollow.intersect(_keep_half(side))
 
-    if side > 0:
-        keep = (
-            cq.Workplane("XY")
-            .transformed(offset=(-1, 0, -1))
-            .box(OUTER_L + 2, HALF_W + 2, OUTER_H + 2, centered=(False, False, False))
-        )
-    else:
-        keep = (
-            cq.Workplane("XY")
-            .transformed(offset=(-1, -(HALF_W + 2), -1))
-            .box(OUTER_L + 2, HALF_W + 2, OUTER_H + 2, centered=(False, False, False))
-        )
-    body = hollow.intersect(keep)
-
-    # Mating flange rim (screw land) along the open seam
+    # Mating flange only along the constant midsection (not in nose/tail tapers)
+    fx0, fx1 = FLANGE_X0, FLANGE_X1
+    flen = fx1 - fx0
     if side > 0:
         flange = (
             cq.Workplane("XY")
-            .transformed(offset=(WALL, 0, WALL))
-            .box(OUTER_L - 2 * WALL, FLANGE_W, OUTER_H - 2 * WALL,
-                 centered=(False, False, False))
+            .transformed(offset=(fx0, 0, WALL))
+            .box(flen, FLANGE_W, OUTER_H - 2 * WALL, centered=(False, False, False))
         )
         flange_cut = (
             cq.Workplane("XY")
-            .transformed(offset=(WALL + 1.0, 0, WALL + 1.0))
-            .box(OUTER_L - 2 * WALL - 2.0, FLANGE_W + 0.1, OUTER_H - 2 * WALL - 2.0,
+            .transformed(offset=(fx0 + 1.0, 0, WALL + 1.0))
+            .box(flen - 2.0, FLANGE_W + 0.1, OUTER_H - 2 * WALL - 2.0,
                  centered=(False, False, False))
         )
         flange = flange.cut(flange_cut)
     else:
         flange = (
             cq.Workplane("XY")
-            .transformed(offset=(WALL, -FLANGE_W, WALL))
-            .box(OUTER_L - 2 * WALL, FLANGE_W, OUTER_H - 2 * WALL,
-                 centered=(False, False, False))
+            .transformed(offset=(fx0, -FLANGE_W, WALL))
+            .box(flen, FLANGE_W, OUTER_H - 2 * WALL, centered=(False, False, False))
         )
         flange_cut = (
             cq.Workplane("XY")
-            .transformed(offset=(WALL + 1.0, -FLANGE_W - 0.1, WALL + 1.0))
-            .box(OUTER_L - 2 * WALL - 2.0, FLANGE_W + 0.1, OUTER_H - 2 * WALL - 2.0,
+            .transformed(offset=(fx0 + 1.0, -FLANGE_W - 0.1, WALL + 1.0))
+            .box(flen - 2.0, FLANGE_W + 0.1, OUTER_H - 2 * WALL - 2.0,
                  centered=(False, False, False))
         )
         flange = flange.cut(flange_cut)
@@ -454,29 +485,25 @@ def hollow_half(side: int) -> cq.Workplane:
     if side > 0:
         groove = (
             cq.Workplane("XY")
-            .transformed(offset=(WALL + 3.0, -0.05, WALL + 3.0))
-            .box(OUTER_L - 2 * WALL - 6.0, GASKET_D + 0.1, GASKET_W,
-                 centered=(False, False, False))
+            .transformed(offset=(fx0 + 2.0, -0.05, WALL + 3.0))
+            .box(flen - 4.0, GASKET_D + 0.1, GASKET_W, centered=(False, False, False))
         )
         groove2 = (
             cq.Workplane("XY")
             .transformed(
-                offset=(WALL + 3.0, -0.05, OUTER_H - WALL - 3.0 - GASKET_W)
+                offset=(fx0 + 2.0, -0.05, OUTER_H - WALL - 3.0 - GASKET_W)
             )
-            .box(OUTER_L - 2 * WALL - 6.0, GASKET_D + 0.1, GASKET_W,
-                 centered=(False, False, False))
+            .box(flen - 4.0, GASKET_D + 0.1, GASKET_W, centered=(False, False, False))
         )
         groove3 = (
             cq.Workplane("XY")
-            .transformed(offset=(WALL + 3.0, -0.05, WALL + 3.0))
+            .transformed(offset=(fx0 + 2.0, -0.05, WALL + 3.0))
             .box(GASKET_W, GASKET_D + 0.1, OUTER_H - 2 * WALL - 6.0,
                  centered=(False, False, False))
         )
         groove4 = (
             cq.Workplane("XY")
-            .transformed(
-                offset=(OUTER_L - WALL - 3.0 - GASKET_W, -0.05, WALL + 3.0)
-            )
+            .transformed(offset=(fx1 - 2.0 - GASKET_W, -0.05, WALL + 3.0))
             .box(GASKET_W, GASKET_D + 0.1, OUTER_H - 2 * WALL - 6.0,
                  centered=(False, False, False))
         )
@@ -486,56 +513,32 @@ def hollow_half(side: int) -> cq.Workplane:
 
 
 def add_pitot_cradle(body: cq.Workplane, side: int) -> cq.Workplane:
-    """Semicylindrical clamp bore for OUTER_TUBE + nose mouth."""
-    # Full cylinder cut — each half only contains its side, so this becomes a groove
-    bore = x_cylinder(
-        CRADLE_R,
-        CRADLE_LEN + 1.0,
-        NOSE_EXTENSION - 0.5,
-        0.0,
-        PITOT_AXIS_Z,
-    )
+    """Semicylindrical clamp bore for OUTER_TUBE + nose mouth + internal bulkheads."""
+    bore = x_cylinder(CRADLE_R, CRADLE_LEN + 2.0, -1.0, 0.0, PITOT_AXIS_Z)
     body = body.cut(bore)
-    # Open the nose mouth through the front wall
-    mouth = x_cylinder(
-        CRADLE_R,
-        NOSE_EXTENSION + 2.0,
-        -1.0,
-        0.0,
-        PITOT_AXIS_Z,
+    # Aft access for the plug
+    body = body.cut(
+        x_cylinder(CRADLE_R + 0.2, 8.0, PLUG_X0 - 1.0, 0.0, PITOT_AXIS_Z)
     )
-    body = body.cut(mouth)
-    # Aft bulkhead bore for plug access / tube seating
-    aft = x_cylinder(
-        CRADLE_R + 0.2,
-        8.0,
-        PLUG_X0 - 1.0,
-        0.0,
-        PITOT_AXIS_Z,
-    )
-    body = body.cut(aft)
 
-    # Reinforcing bulkheads around the tube — plates that clearly overlap the
-    # shell wall (a floating ring Boolean-unions into a *separate* solid, which
-    # AnkerMake / many slicers refuse to load).
-    for x in (NOSE_EXTENSION + 15.0, NOSE_EXTENSION + CRADLE_LEN - 15.0):
+    # Internal bulkheads only — stop short of the outer skin so nothing ribs
+    # the exterior.  y extent is interior only (HALF_W - WALL - clearance).
+    y_inner = HALF_W - WALL - 0.4
+    for x in (NOSE_FAIR_LEN + 8.0, PLUG_X0 - 12.0):
         if side > 0:
             plate = (
                 cq.Workplane("XY")
                 .transformed(offset=(x, 0.0, WALL))
-                .box(3.0, HALF_W - 0.5, OUTER_H - 2 * WALL, centered=(False, False, False))
+                .box(3.0, y_inner, OUTER_H - 2 * WALL, centered=(False, False, False))
             )
         else:
             plate = (
                 cq.Workplane("XY")
-                .transformed(offset=(x, -(HALF_W - 0.5), WALL))
-                .box(3.0, HALF_W - 0.5, OUTER_H - 2 * WALL, centered=(False, False, False))
+                .transformed(offset=(x, -y_inner, WALL))
+                .box(3.0, y_inner, OUTER_H - 2 * WALL, centered=(False, False, False))
             )
         body = body.union(plate)
-        # Re-open the cradle bore through the plate
-        body = body.cut(
-            x_cylinder(CRADLE_R, 5.0, x - 1.0, 0.0, PITOT_AXIS_Z)
-        )
+        body = body.cut(x_cylinder(CRADLE_R, 5.0, x - 1.0, 0.0, PITOT_AXIS_Z))
     return body
 
 
