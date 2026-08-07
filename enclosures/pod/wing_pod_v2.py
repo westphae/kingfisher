@@ -51,7 +51,7 @@ GASKET_D = 0.9
 SHELL_SCREW_INSET = 3.0  # flange screw centres from outer skin
 NOSE_FAIR_LEN = 28.0  # tip -> full midsection
 TAIL_FAIR_LEN = 20.0  # full midsection -> aft tip
-OGIVE_STATIONS = 5  # loft stations in each fairing (smoothness)
+OGIVE_STATIONS = 8  # loft stations in each fairing (smoothness)
 
 # Extents from the clamshell seam (y=0).  Right holds BABY_W=33 on the deck.
 LEFT_EXTENT = 10.0   # -Y cover side (battery half + wall + margin)
@@ -59,6 +59,9 @@ RIGHT_EXTENT = 42.0  # +Y electronics side (fits BABY_W=33 on deck)
 OUTER_W = LEFT_EXTENT + RIGHT_EXTENT  # ~52 mm overall
 OUTER_H = 77.0  # Z, bottom -> flat top (battery pocket 72 + walls)
 SECTION_YC = 0.5 * (RIGHT_EXTENT - LEFT_EXTENT)  # ellipse centre offset toward +Y
+# Nose/tail tip centre in Y.  Ideal is the seam (0) so both halves get a tip;
+# exact 0.0 breaks OCCT mid∪ogive fuse.  ~4 mm still reaches well into -Y.
+TIP_YC = 4.0
 
 # --- M2.5 heat-set inserts (same family as pi5_aviation_case.py) ------------
 INSERT_OD = 3.47
@@ -316,6 +319,17 @@ assert DECK_Y1 - DECK_Y0 >= max(b["yl"] for b in BOARDS.values()) + 1.0, (
 # =============================================================================
 # HELPERS
 # =============================================================================
+def _union_if_solid(body: cq.Workplane, part: cq.Workplane) -> cq.Workplane:
+    """Union only when intersect/clip left a real solid (skip empty scraps)."""
+    try:
+        solids = part.val().Solids()
+    except Exception:
+        return body
+    if not solids or sum(s.Volume() for s in solids) < 1e-3:
+        return body
+    return body.union(part)
+
+
 def insert_post(x: float, y: float, z0: float, h: float, d: float = BOARD_POST_D) -> cq.Workplane:
     """Post with heat-set insert pilot + screw-relief bore from the top."""
     post = (
@@ -375,43 +389,46 @@ def _ellipse_mid(inset: float, x0: float, length: float) -> cq.Workplane:
 
 
 def _loft_ogive_nose(inset: float, tip_r: float) -> cq.Workplane:
-    """Rounded nose: tip circle at x=inset → mid ellipse at NOSE_FAIR_LEN."""
+    """Rounded nose: tip circle near seam (TIP_YC) → mid ellipse at SECTION_YC."""
     ry = SECTION_RY - inset
     rz = SECTION_RZ - inset
     zc_mid = OUTER_H / 2
     tip_r = max(tip_r, 2.5)
+    tip_yc = TIP_YC
     tip_zc = PITOT_AXIS_Z
     n = OGIVE_STATIONS
     s = (
         cq.Workplane("YZ")
         .workplane(offset=inset)
-        .center(SECTION_YC, tip_zc)
+        .center(tip_yc, tip_zc)
         .circle(tip_r)
     )
-    prev_x, prev_zc = inset, tip_zc
+    prev_x, prev_yc, prev_zc = inset, tip_yc, tip_zc
     for i in range(1, n):
         t = i / (n - 1)
         sc = _ogive_scale(t)
         x = inset + (NOSE_FAIR_LEN - inset) * t
+        yc = tip_yc + (SECTION_YC - tip_yc) * sc
         zc = tip_zc + (zc_mid - tip_zc) * sc
         s = (
             s.workplane(offset=x - prev_x)
-            .center(0, zc - prev_zc)
+            .center(yc - prev_yc, zc - prev_zc)
             .ellipse(
                 max(tip_r + (ry - tip_r) * sc, 2.0),
                 max(tip_r + (rz - tip_r) * sc, 2.0),
             )
         )
-        prev_x, prev_zc = x, zc
+        prev_x, prev_yc, prev_zc = x, yc, zc
     return s.loft(ruled=False)
 
 
 def _loft_ogive_tail(inset: float, tip_r: float) -> cq.Workplane:
-    """Rounded tail: mid ellipse at MID_END_X → tip circle at OUTER_L-inset."""
+    """Rounded tail: mid ellipse at MID_END_X → tip circle near seam (TIP_YC)."""
     ry = SECTION_RY - inset
     rz = SECTION_RZ - inset
     zc_mid = OUTER_H / 2
     tip_r = max(tip_r, 2.5)
+    tip_yc = TIP_YC
     tip_zc = zc_mid
     x_tip = OUTER_L - inset
     n = OGIVE_STATIONS
@@ -421,24 +438,29 @@ def _loft_ogive_tail(inset: float, tip_r: float) -> cq.Workplane:
         .center(SECTION_YC, zc_mid)
         .ellipse(max(ry, 3.0), max(rz, 3.0))
     )
-    prev_x, prev_zc = MID_END_X, zc_mid
+    prev_x, prev_yc, prev_zc = MID_END_X, SECTION_YC, zc_mid
     for i in range(1, n):
         t = i / (n - 1)
         sc = _ogive_scale(t)
         x = MID_END_X + (x_tip - MID_END_X) * t
+        yc = SECTION_YC + (tip_yc - SECTION_YC) * sc
         zc = zc_mid + (tip_zc - zc_mid) * sc
         if i == n - 1:
-            s = s.workplane(offset=x - prev_x).center(0, zc - prev_zc).circle(tip_r)
+            s = (
+                s.workplane(offset=x - prev_x)
+                .center(yc - prev_yc, zc - prev_zc)
+                .circle(tip_r)
+            )
         else:
             s = (
                 s.workplane(offset=x - prev_x)
-                .center(0, zc - prev_zc)
+                .center(yc - prev_yc, zc - prev_zc)
                 .ellipse(
                     max(ry + (tip_r - ry) * sc, 2.0),
                     max(rz + (tip_r - rz) * sc, 2.0),
                 )
             )
-        prev_x, prev_zc = x, zc
+        prev_x, prev_yc, prev_zc = x, yc, zc
     return s.loft(ruled=False)
 
 
@@ -504,6 +526,9 @@ def hollow_half(side: int) -> cq.Workplane:
                  centered=(False, False, False))
         )
         flange = flange.cut(flange_cut)
+    # Clip flange to outer envelope so rectangular blanks don't poke out of
+    # the faired nose/tail (looked like stray tabs at the fairing junctions).
+    flange = flange.intersect(outer)
     body = body.union(flange)
 
     # Gasket groove on the right-half mating face only (O-cord / silicone).
@@ -546,7 +571,9 @@ def add_pitot_cradle(body: cq.Workplane, side: int) -> cq.Workplane:
         x_cylinder(CRADLE_R + 0.2, 8.0, PLUG_X0 - 1.0, 0.0, PITOT_AXIS_Z)
     )
 
-    # Internal bulkheads only — stop short of the outer skin (no exterior ribs).
+    # Internal bulkheads — rectangular blanks poke through the curved skin unless
+    # clipped to the outer envelope (same lesson as the mating flange).
+    outer = full_body_solid(inset=0.0)
     for x in (NOSE_FAIR_LEN + 8.0, PLUG_X0 - 12.0):
         if side > 0:
             y_span = RIGHT_EXTENT - WALL - 0.4
@@ -563,6 +590,7 @@ def add_pitot_cradle(body: cq.Workplane, side: int) -> cq.Workplane:
                 .box(3.0, max(y_span, 1.0), OUTER_H - 2 * WALL,
                      centered=(False, False, False))
             )
+        plate = plate.intersect(outer)
         body = body.union(plate)
         body = body.cut(x_cylinder(CRADLE_R, 5.0, x - 1.0, 0.0, PITOT_AXIS_Z))
     return body
@@ -632,8 +660,11 @@ def add_electronics_deck(body: cq.Workplane) -> cq.Workplane:
             centered=(False, False, False),
         )
     )
+    # Deck blank is rectangular; clip to outer so it can't poke the curved skin.
+    deck = deck.intersect(full_body_solid(inset=0.0))
     body = body.union(deck)
 
+    outer_env = full_body_solid(inset=0.0)
     for name, b in BOARDS.items():
         bx = b["x0"]
         # y is offset within the electronics bay
@@ -642,7 +673,8 @@ def add_electronics_deck(body: cq.Workplane) -> cq.Workplane:
         if b["holes"]:
             for (hx, hy) in b["holes"]:
                 post = insert_post(bx + hx, by + hy, bz, BOARD_POST_H, BOARD_POST_D)
-                body = body.union(post)
+                # Posts near the +Y skin can poke through the ellipse — clip.
+                body = _union_if_solid(body, post.intersect(outer_env))
         else:
             # Castellated Pro Micro: corner pads (clamp with foam later)
             for (px, py) in (
@@ -656,8 +688,9 @@ def add_electronics_deck(body: cq.Workplane) -> cq.Workplane:
                     .transformed(offset=(px, py, bz))
                     .circle(2.2)
                     .extrude(3.0)
+                    .intersect(outer_env)
                 )
-                body = body.union(pad)
+                body = _union_if_solid(body, pad)
         # Locating nubs
         for (nx, ny) in (
             (bx - 1.0, by - 1.0),
@@ -671,8 +704,9 @@ def add_electronics_deck(body: cq.Workplane) -> cq.Workplane:
                     .transformed(offset=(nx, ny, bz))
                     .circle(1.3)
                     .extrude(BOARD_POST_H + PCB_T + 0.4)
+                    .intersect(outer_env)
                 )
-                body = body.union(nub)
+                body = _union_if_solid(body, nub)
     return body
 
 
