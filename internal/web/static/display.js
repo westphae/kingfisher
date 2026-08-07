@@ -28,6 +28,7 @@ const KFDisplay = (function () {
 
   const IMU_ACCEL = ['accel_x', 'accel_y', 'accel_z'];
   const ACCEL_TOTAL = 'accel_total';
+  const MAG_TOTAL = 'mag_total';
   const IMU_GYRO = ['anglvel_x', 'anglvel_y', 'anglvel_z'];
   const IMU_MAG = ['magn_x', 'magn_y', 'magn_z'];
   const IMU_SORT = [
@@ -70,7 +71,7 @@ const KFDisplay = (function () {
   const POD_DEVICE_SORT = {
     bmp581: ['static_pressure_pa', 'static_temp_c'],
     bmp280: ['pressure_pa', 'temp_c'],
-    mmc5983: ['mag_x_ut', 'mag_y_ut', 'mag_z_ut'],
+    mmc5983: ['mag_x_ut', 'mag_y_ut', 'mag_z_ut', MAG_TOTAL],
     ms4525: ['airspeed_dp_pa', 'airspeed_temp_c'],
     bq27441: [
       'battery_voltage_v',
@@ -130,7 +131,7 @@ const KFDisplay = (function () {
     bmp581: [{ id: 'default', channels: ['static_pressure_pa', 'static_temp_c'] }],
     ms4525: [{ id: 'default', channels: ['airspeed_dp_pa', 'airspeed_temp_c'] }],
     bq27441: [{ id: 'default', channels: ['battery_voltage_v', 'battery_soc_pct', 'battery_time_remain_s'] }],
-    mmc5983: [{ id: 'default', channels: ['mag_x_ut', 'mag_y_ut', 'mag_z_ut'] }],
+    mmc5983: [{ id: 'default', channels: ['mag_x_ut', 'mag_y_ut', 'mag_z_ut'] }], // mag_total is derived
   };
 
   /** Overview block title overrides (device id unchanged in routes/WS). */
@@ -397,6 +398,10 @@ const KFDisplay = (function () {
     },
     mag_z_ut: {
       label: 'Magnetic field Z',
+      fmt(v) { return `${fmtMicroT(v)} µT`; },
+    },
+    mag_total: {
+      label: 'Magnetic field Total',
       fmt(v) { return `${fmtMicroT(v)} µT`; },
     },
     // Derived pressure altitude
@@ -693,7 +698,15 @@ const KFDisplay = (function () {
     return Math.hypot(ax, ay, az);
   }
 
-  /** Adds display-only derived channels (e.g. ‖a‖). Does not mutate hub samples. */
+  function magMagnitudeUT(values) {
+    const mx = Number(values?.mag_x_ut ?? values?.magn_x);
+    const my = Number(values?.mag_y_ut ?? values?.magn_y);
+    const mz = Number(values?.mag_z_ut ?? values?.magn_z);
+    if (![mx, my, mz].every(Number.isFinite)) return null;
+    return Math.hypot(mx, my, mz);
+  }
+
+  /** Adds display-only derived channels (e.g. ‖a‖, ‖B‖). Does not mutate hub samples. */
   function withDerived(device, values) {
     const out = { ...(values || {}) };
     const hasAccel =
@@ -703,6 +716,14 @@ const KFDisplay = (function () {
     if (hasAccel) {
       const m = accelMagnitude(out);
       if (m != null) out[ACCEL_TOTAL] = m;
+    }
+    const hasMag =
+      device === 'mmc5983' ||
+      (out.mag_x_ut != null && out.mag_y_ut != null && out.mag_z_ut != null) ||
+      (out.magn_x != null && out.magn_y != null && out.magn_z != null);
+    if (hasMag) {
+      const m = magMagnitudeUT(out);
+      if (m != null) out[MAG_TOTAL] = m;
     }
     return out;
   }
@@ -977,6 +998,7 @@ const KFDisplay = (function () {
         cell(keys, values, 'mag_x_ut', 'X'),
         cell(keys, values, 'mag_y_ut', 'Y'),
         cell(keys, values, 'mag_z_ut', 'Z'),
+        cell(keys, values, MAG_TOTAL, '|B|'),
       ]));
     } else if (device === 'bmp581') {
       subRows.push(row('', [
@@ -1242,7 +1264,13 @@ const KFDisplay = (function () {
       // Δb(T) still is.
       return !!(cal.cabin_imu || gyroTCOTable(cal));
     }
-    if (device === 'mmc5983' && CAL_MAG_CH.includes(channel) && cal.pod_mag) return true;
+    if (
+      device === 'mmc5983' &&
+      (CAL_MAG_CH.includes(channel) || channel === MAG_TOTAL) &&
+      cal.pod_mag
+    ) {
+      return true;
+    }
     if (
       (device.endsWith('-accel') || isIMUDevice(device)) &&
       (CAL_ACCEL_CH.includes(channel) || channel === ACCEL_TOTAL) &&
@@ -1320,6 +1348,8 @@ const KFDisplay = (function () {
           }
         }
       }
+      const m = magMagnitudeUT(out);
+      if (m != null) out[MAG_TOTAL] = m;
     }
     return out;
   }
@@ -1370,13 +1400,16 @@ const KFDisplay = (function () {
     if (isHeadingChannel(channel)) return fmtOverviewNum(heading360(value), 0) + '°';
     if (channel === 'ias_kt' || channel === 'tas_kt') return fmtOverviewNum(value, 0) + ' kt';
     if (channel.endsWith('_ft')) return fmtOverviewNum(value, 0) + ' ft';
-    if (channel === 'field_f_nt') {
-      const n = Number(value);
-      if (n >= 1000) return fmtOverviewNum(n / 1000, 1) + 'k nT';
-      return fmtOverviewNum(n, 0) + ' nT';
+    if (channel === 'field_f_nt' || channel === 'field_h_nt' ||
+        channel === 'field_x_nt' || channel === 'field_y_nt' || channel === 'field_z_nt') {
+      // Stored as nT; show µT to match the dedicated geo / compass tabs.
+      return fmtOverviewNum(Number(value) / 1000, 2) + ' µT';
     }
     if (channel === 'declination' || channel === 'inclination') {
       return fmtOverviewNum(value, 1) + '°';
+    }
+    if (channel === MAG_TOTAL) {
+      return fmtOverviewNum(value, 2) + ' µT';
     }
     if (channel.endsWith('_ut') || channel.startsWith('magn_')) {
       return fmtOverviewNum(value, 2);
