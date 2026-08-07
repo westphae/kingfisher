@@ -515,31 +515,27 @@ def add_pitot_cradle(body: cq.Workplane, side: int) -> cq.Workplane:
     )
     body = body.cut(aft)
 
-    # Reinforcing cradle bosses around the tube (both halves)
+    # Reinforcing bulkheads around the tube — plates that clearly overlap the
+    # shell wall (a floating ring Boolean-unions into a *separate* solid, which
+    # AnkerMake / many slicers refuse to load).
     for x in (NOSE_EXTENSION + 15.0, NOSE_EXTENSION + CRADLE_LEN - 15.0):
-        rib = (
-            cq.Workplane("YZ")
-            .workplane(offset=x)
-            .center(0, PITOT_AXIS_Z)
-            .circle(CRADLE_R + 4.0)
-            .circle(CRADLE_R + 0.05)
-            .extrude(3.0)
-        )
-        # Keep only this half
         if side > 0:
-            clip = (
+            plate = (
                 cq.Workplane("XY")
-                .transformed(offset=(x - 1, 0, 0))
-                .box(5, HALF_W, OUTER_H, centered=(False, False, False))
+                .transformed(offset=(x, 0.0, WALL))
+                .box(3.0, HALF_W - 0.5, OUTER_H - 2 * WALL, centered=(False, False, False))
             )
         else:
-            clip = (
+            plate = (
                 cq.Workplane("XY")
-                .transformed(offset=(x - 1, -HALF_W, 0))
-                .box(5, HALF_W, OUTER_H, centered=(False, False, False))
+                .transformed(offset=(x, -(HALF_W - 0.5), WALL))
+                .box(3.0, HALF_W - 0.5, OUTER_H - 2 * WALL, centered=(False, False, False))
             )
-        rib = rib.intersect(clip)
-        body = body.union(rib)
+        body = body.union(plate)
+        # Re-open the cradle bore through the plate
+        body = body.cut(
+            x_cylinder(CRADLE_R, 5.0, x - 1.0, 0.0, PITOT_AXIS_Z)
+        )
     return body
 
 
@@ -788,6 +784,36 @@ def build_plug() -> cq.Workplane:
     return body
 
 
+def as_single_solid(wp: cq.Workplane, name: str = "part") -> cq.Workplane:
+    """
+    Collapse a Compound to one Solid for slicer-friendly STLs.
+    AnkerMake Studio (and others) reject or silently fail on multi-body STLs.
+    """
+    solids = wp.val().Solids()
+    if not solids:
+        raise RuntimeError(f"{name}: no solids to export")
+    if len(solids) == 1:
+        return cq.Workplane(solids[0])
+
+    out = solids[0]
+    for s in solids[1:]:
+        out = out.fuse(s)
+    out = out.clean()
+    fused = out.Solids()
+    if len(fused) == 1:
+        return cq.Workplane(fused[0])
+
+    # Still disconnected — keep the main body, drop scraps (with a warning).
+    fused = sorted(fused, key=lambda s: s.Volume(), reverse=True)
+    main, scraps = fused[0], fused[1:]
+    scrap_vol = sum(s.Volume() for s in scraps)
+    print(
+        f"WARNING {name}: dropping {len(scraps)} disconnected solid(s) "
+        f"(total {scrap_vol:.1f} mm^3); fix unions if that is unexpected"
+    )
+    return cq.Workplane(main)
+
+
 def for_print_half(half: cq.Workplane, side: int) -> cq.Workplane:
     """
     Print orientation:
@@ -834,13 +860,18 @@ def _print_bb_ok(name: str, solid: cq.Workplane, check_bed: bool = True) -> None
 
 # =============================================================================
 if __name__ == "__main__":
-    right = build_right()
-    left = build_left()
-    plug = build_plug()
+    right = as_single_solid(build_right(), "pod_right")
+    left = as_single_solid(build_left(), "pod_left")
+    plug = as_single_solid(build_plug(), "pitot_plug")
 
     right_print = for_print_half(right, +1)
     left_print = for_print_half(left, -1)
     plug_print = for_print_plug(plug)
+
+    assert len(right_print.val().Solids()) == 1, "pod_right print must be one solid"
+    assert len(left_print.val().Solids()) == 1, "pod_left print must be one solid"
+    assert len(plug_print.val().Solids()) == 1, "pitot_plug print must be one solid"
+
     _print_bb_ok("pod_right", right_print)
     _print_bb_ok("pod_left", left_print)
     _print_bb_ok("pitot_plug", plug_print, check_bed=False)
@@ -848,10 +879,11 @@ if __name__ == "__main__":
         "pitot_plug should stand flange-down with stem height FLANGE_T+PLUG_LEN"
     )
 
-    tol = 0.05
-    cq.exporters.export(right_print, "pod_right.stl", tolerance=tol)
-    cq.exporters.export(left_print, "pod_left.stl", tolerance=tol)
-    cq.exporters.export(plug_print, "pitot_plug.stl", tolerance=tol)
+    # Slightly tighter tessellation than OCCT defaults — fewer mystery importer rejects
+    tol, ang = 0.05, 0.08
+    cq.exporters.export(right_print, "pod_right.stl", tolerance=tol, angularTolerance=ang)
+    cq.exporters.export(left_print, "pod_left.stl", tolerance=tol, angularTolerance=ang)
+    cq.exporters.export(plug_print, "pitot_plug.stl", tolerance=tol, angularTolerance=ang)
     cq.exporters.export(right, "pod_right.step")
     cq.exporters.export(left, "pod_left.step")
     cq.exporters.export(plug, "pitot_plug.step")  # model orientation for Fusion

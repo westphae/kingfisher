@@ -35,7 +35,8 @@ Assembled frame: origin at outer nose tip on the seam / bottom. **+X aft**,
 **+Y right**, **+Z up** (flat top at `OUTER_H`). Split plane is **Y = 0**.
 
 Print STLs (`pod_left.stl` / `pod_right.stl`): drop on the bed as-exported —
-no slicer rotation needed. STEP files stay in model orientation for Fusion.
+no slicer rotation needed. Each STL is a **single solid** (AnkerMake rejects
+multi-body compounds). STEP files stay in model orientation for Fusion.
 
 Nose → aft:
 
