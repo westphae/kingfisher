@@ -7,8 +7,10 @@ left/right aerodynamic clamshell that *is* the outer shell.
 - Printer/material: AnkerMake M5C, PETG. Exported STLs are already **flange /
   mating-face down**, curved outer up, and **rotated 45°** for the bed
   diagonal (10 mm margin vs 220 mm — script asserts the print AABB).
-- Shape: **flat top**, **flat L/R sides**, **curved bottom**; **lofted nose
-  and tail fairings** (not blunt end plates). Not a full ellipse.
+- Shape: **skinny tall ellipse** (~52 mm wide) with a **flat top chord** for
+  the wing fairing; **rounded ogive nose and tail** (multi-station loft, not
+  pyramidal). Section is asymmetric about the seam (thin left cover, wider
+  right electronics bay).
 - Asymmetry: **board mounts / static bay / USB are on `pod_right` only**;
   `pod_left` is the cover (pitot cradle + flange inserts).
 - Fasteners: M2.5 brass heat-set inserts (same pilot / depth / screw-relief
