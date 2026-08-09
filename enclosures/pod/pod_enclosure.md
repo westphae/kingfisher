@@ -4,6 +4,14 @@ Parametric CadQuery model of the under-wing air-data pod. **v2** replaces the
 v1 rectangular insert (`wing_pod_case.py` / `KingfisherPod.zip`) with a
 left/right aerodynamic clamshell that *is* the outer shell.
 
+**Non-negotiables:** see [`REQUIREMENTS.md`](REQUIREMENTS.md). After every
+geometry change, regenerate and run the validator (must exit 0):
+
+```bash
+cd enclosures/pod && uv run --project .. python wing_pod_v2.py
+cd enclosures/pod && uv run --project .. python validate_pod.py
+```
+
 - Printer/material: AnkerMake M5C, PETG. Exported STLs are already **flange /
   mating-face down**, curved outer up, and **rotated 45°** for the bed
   diagonal (10 mm margin vs 220 mm — script asserts the print AABB).
@@ -27,7 +35,9 @@ left/right aerodynamic clamshell that *is* the outer shell.
 
 ```bash
 uv sync --all-packages   # from repo root
-cd enclosures/pod && uv run --project .. python wing_pod_v2.py
+cd enclosures/pod && uv run --project .. python wing_pod_v2.py   # also runs validate
+cd enclosures/pod && uv run --project .. python validate_pod.py  # or re-check alone
+# STL-only (fast):  uv run --project .. python validate_pod.py --stl-only
 ```
 
 Exports (CWD):
