@@ -12,9 +12,10 @@ cd enclosures/pod && uv run --project .. python wing_pod_v2.py
 cd enclosures/pod && uv run --project .. python validate_pod.py
 ```
 
-- Printer/material: AnkerMake M5C, PETG. Exported STLs are already **flange /
-  mating-face down**, curved outer up, and **rotated 45°** for the bed
-  diagonal (10 mm margin vs 220 mm — script asserts the print AABB).
+- Printer/material: AnkerMake M5C, PETG. Slice recipe (supports, PETG starting
+  points): [`PRINT_RECIPE.md`](PRINT_RECIPE.md). Exported STLs are already
+  **flange / mating-face down**, curved outer up, and **rotated 45°** for the
+  bed diagonal (10 mm margin vs 220 mm — script asserts the print AABB).
 - Shape: **skinny tall ellipse** (~220 × 52 × 77 mm) chopped to a **flat top**
   (wing-fairing mate, square edge) and **flat bottom** (stands upright) with a
   **radiused bottom edge** for aero; **rounded ogive nose and tail**
@@ -46,8 +47,7 @@ Exports (CWD):
 |------|------|
 | `pod_left.stl` / `.step` | Left half, print-oriented |
 | `pod_right.stl` / `.step` | Right half (electronics), print-oriented |
-| `pitot_plug.stl` / `.step` | Aft plug (STL = flange on bed, stem up; STEP = model pose) |
-| `pod_assembly.step` | Assembled (model orientation) |
+| `pod_assembly.step` | Assembled (model orientation) + SUN-B placeholder |
 | `pod_v2_*_*.png` | Shape previews — **unique name per revision** |
 
 ## Coordinate system & layout
@@ -66,7 +66,7 @@ mounts — that is intentional, not a fit-check stub.
 
 Nose → aft:
 
-1. Lofted nose fairing; pitot cradle (outer tube, ~100 mm) on the centerline
+1. Lofted nose fairing; **ESA SUN-B** cradle on the centerline (tip protrudes)
 2. Constant midsection: MS4525 + boost beside cradle; battery slab; Babysitter
    + Pro Micro; BMP581 multi-hole bay; mag (short axis along X)
 3. Lofted tail fairing (empty taper)
@@ -75,34 +75,32 @@ Nose → aft:
 
 | Line | Source | Destination |
 |------|--------|-------------|
-| Total | Prandtl 4 mm fitting via plug | MS4525 `+` (barb tubing) |
-| Static (airspeed) | Prandtl static via plug | MS4525 `−` |
+| Total | SUN-B **aft** barb (pitot) | 6 mm hose → COTS reducer → MS4525 `+` |
+| Static (airspeed) | SUN-B **middle** barb | 6 mm hose → COTS reducer → MS4525 `−` |
+| TE | SUN-B **forward** barb | Capped / unused (Prandtl) |
 | Static (baro) | Pod multi-hole side bay | BMP581 only |
-| Optional | Plug `static2` port | Tee test into BMP581 bay |
 
-No protruding nipples — probe lines enter through the printed plug; sensor
-side uses through-bores / short jumpers onto MS4525 barbs.
+Mount SUN with **barbs up** (ESA water tip). Hose escapes into the right half
+toward the MS4525.
 
-### MS4525 tubing size
+### Tubing sizes
 
-TE/Holybro MS4525DO: **1/8″ barbed ports mate with 3/32″ ID tubing**
-(~2.38 mm ID). v1 calipers on the Holybro carrier: tip Ø**2.1**, shoulder
-Ø**3.5**, barb spacing **4.3** mm. The plug steps **4.0 mm** probe-side bore
-→ **~3.5 mm OD** sensor-side line (tune `PROBE_BORE` / `MS_BORE`).
+- SUN-B barbs: **6 mm ID** silicone (stem OD ≈ 5.96 mm).
+- TE/Holybro MS4525DO: **1/8″ barbed ports mate with 3/32″ ID tubing**
+  (~2.38 mm ID). v1 calipers: tip Ø**2.1**, shoulder Ø**3.5**, spacing **4.3** mm.
+- Step 6 mm → MS size with a **COTS reducer** (short hop of tiny tubing onto
+  the sensor). Do not rely on nested hose alone.
 
-## Pitot mount (SUN replacement)
+## Pitot mount (ESA SUN-B)
 
-Tubes-in-tube (purchased metal + printed plug):
+Calipers: [`SUN_B_CALIPERS.md`](SUN_B_CALIPERS.md). Printed L/R cradle only
+(no tubes-in-tube, no RTV plug):
 
-- Outer tube: ID ≈ 10.2, OD ≈ 12 (VERIFY stock), length 100 mm — clamped in
-  the printed L/R cradle
-- Three inner tubes: OD 10 / ID 8, with thick O-rings (T ≳ 2 mm, ID ≲ 8 mm)
-  between segments sealing on the Prandtl 8 mm shaft
-- Printed aft plug: RTV into the outer tube; flange seats at the cradle aft
-  face; ports for total, static, and optional static2
-
-Primary flight load is the ~60 cm Prandtl cantilever — do not skip the metal
-outer tube.
+- Tip Ø8.93 protrudes **24.75 mm** past pod nose; Ø10.65 shoulder at `x=0`
+- Stepped clamp for smooth / thread / matte barrel; upward barb bay
+- Aft blind recess (Ø6.03 × 7.06) seats on a printed locating boss
+- Primary flight load is the Prandtl cantilever into the brass SUN — cradle
+  clamps and locates, it does not invent shaft seals
 
 ## Battery
 

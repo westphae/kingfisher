@@ -8,7 +8,7 @@ alwaysApply: false
 
 When editing anything under `enclosures/pod/`:
 
-1. **Read** [`enclosures/pod/REQUIREMENTS.md`](enclosures/pod/REQUIREMENTS.md) first (non-negotiables). Use [`pod_enclosure.md`](enclosures/pod/pod_enclosure.md) for layout/pneumatics detail.
+1. **Read** [`enclosures/pod/REQUIREMENTS.md`](enclosures/pod/REQUIREMENTS.md) first (non-negotiables). Use [`pod_enclosure.md`](enclosures/pod/pod_enclosure.md) for layout/pneumatics detail and [`PRINT_RECIPE.md`](enclosures/pod/PRINT_RECIPE.md) for AnkerMake/PETG slice settings (supports are not in the STL).
 2. **Prefer param tweaks** over inventing a new midsection family. Midsection must stay the **same construction ellipse** as the ogive end-stations (no rectangular mid that butts into the freestream).
 3. **Interior blanks** (flange, bulkheads, deck, posts, nubs) must be `intersect`ed with `full_body_solid(0)` before union — they must not poke through the outer skin.
 4. After geometry changes, regenerate and validate before calling anything print-ready:
@@ -20,5 +20,5 @@ cd enclosures/pod && uv run --project .. python validate_pod.py
 
 5. **Do not** claim STLs are AnkerMake-ready unless `validate_pod.py` exits 0 (watertight single-solid mesh + geometry checks).
 6. Preview PNGs: use a **unique filename per shape revision** (e.g. `pod_v2_220x52x77_flats.png`). Never reuse a stale cached name like `pod_v2_shape.png`.
-7. Print contracts: flange-down, 45° diagonal baked into STL export; M2.5 heat-set (no self-tap); boards/USB/static bay on `pod_right` only.
+7. Print contracts: flange-down, 45° diagonal baked into STL export; M2.5 heat-set (no self-tap); boards/USB/static bay on `pod_right` only. Pitot is **ESA SUN-B** (`SUN_B_CALIPERS.md`) — not tubes-in-tube / printed plug.
 8. Enclosure-only work continues on **`master`** (no PR) unless the user asks otherwise.

@@ -34,21 +34,24 @@ cd enclosures/pod && uv run --project .. python validate_pod.py
 
 | ID | Requirement |
 |----|-------------|
-| P1 | Each of `pod_left.stl`, `pod_right.stl`, `pitot_plug.stl` is a **single solid**. |
+| P1 | Each of `pod_left.stl`, `pod_right.stl` is a **single solid**. |
 | P2 | Each STL is **watertight** (zero boundary edges after tessellation). |
 | P3 | Tessellation tight enough for P2 (`tol≤0.03`, `ang≤0.05` as of 2026-08). Looser settings have produced open meshes AnkerMake rejects. |
 | P4 | Body halves export **flange/mating-face down**, curved outer up, **rotated 45°** for bed diagonal; print AABB ≤ 210 mm (220−10 margin). |
-| P5 | Pitot plug STL stands **flange on bed, stem up**. |
+| P5 | SUN-B tip protrudes one tip-length past pod nose; cradle clears upward barbs and locates aft recess boss. |
 | P6 | No self-tap board pilots — **M2.5 heat-set** inserts + screw relief (hub-case scheme). |
+
+Slicer settings (supports, PETG starting points) live in
+[`PRINT_RECIPE.md`](PRINT_RECIPE.md) — not in the STLs.
 
 ## Layout & pneumatics (do not silently change)
 
 | ID | Requirement |
 |----|-------------|
 | L1 | Battery pocket **50 × 6 × 70 mm** (X×Y×Z) + **1 mm/side**; Y thin across seam; Z = height. |
-| L2 | Pitot: tubes-in-tube (outer ~10.2 ID; 3× OD10/ID8 inners + O-rings); printed aft plug. |
-| L3 | Prandtl total/static → MS4525 ±; multi-hole bay → BMP581 only; plug optional `static2`. |
-| L4 | MS4525: datasheet 3/32″ ID (~2.38 mm); v1 barbs tip Ø2.1 / shoulder Ø3.5. |
+| L2 | Pitot: **ESA SUN-B** clamp (dims in `SUN_B_CALIPERS.md`); tip protrudes; no tubes-in-tube / printed plug. |
+| L3 | SUN aft barb → pitot → MS4525 `+`; middle → static → MS4525 `−`; forward TE capped; multi-hole bay → BMP581 only. |
+| L4 | SUN barbs: **6 mm ID** hose → COTS reducer → MS4525 3/32″ ID (~2.38 mm); v1 barbs tip Ø2.1 / shoulder Ø3.5. |
 
 ## Process for agents
 
