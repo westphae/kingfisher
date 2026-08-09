@@ -40,10 +40,11 @@ import cadquery as cq
 # =============================================================================
 
 # --- shell / aero -----------------------------------------------------------
-# Skinny rounded pod.  Cross-section is a tall ellipse with a flat-top chord
-# for the wing fairing; nose/tail are multi-station ogive lofts (rounded, not
-# pyramidal).  Section is *asymmetric* about the seam: thin left cover, wider
-# right half for boards — total width ~50 mm instead of a fat symmetric box.
+# Skinny rounded pod.  Construction cross-section is a tall ellipse, then
+# chopped to a flat top (wing-fairing mate, square edge) and flat bottom
+# (stands upright on the bench) with a radiused bottom edge for aero.
+# Nose/tail are multi-station ogive lofts.  Section is *asymmetric* about the
+# seam: thin left cover, wider right half for boards — total width ~52 mm.
 WALL = 2.5
 FLANGE_W = 6.0  # mating-face flange width (into each half)
 GASKET_W = 1.6
@@ -52,12 +53,17 @@ SHELL_SCREW_INSET = 3.0  # flange screw centres from outer skin
 NOSE_FAIR_LEN = 28.0  # tip -> full midsection
 TAIL_FAIR_LEN = 20.0  # full midsection -> aft tip
 OGIVE_STATIONS = 8  # loft stations in each fairing (smoothness)
+# Construction ellipse overshoots the final flats so the chords have real width
+# (cutting at the ellipse apex left a vanishing flat top).
+TOP_CHOP = 10.0  # mm of ellipse above OUTER_H before the flat-top cut
+BOTTOM_CHOP = 10.0  # mm of ellipse below z=0 before the flat-bottom cut
+BOTTOM_EDGE_R = 8.0  # outer fillet on flat-bottom ↔ side (top stays square)
 
 # Extents from the clamshell seam (y=0).  Right holds BABY_W=33 on the deck.
 LEFT_EXTENT = 10.0   # -Y cover side (battery half + wall + margin)
 RIGHT_EXTENT = 42.0  # +Y electronics side (fits BABY_W=33 on deck)
 OUTER_W = LEFT_EXTENT + RIGHT_EXTENT  # ~52 mm overall
-OUTER_H = 77.0  # Z, bottom -> flat top (battery pocket 72 + walls)
+OUTER_H = 77.0  # Z, flat bottom -> flat top (battery pocket 72 + walls)
 SECTION_YC = 0.5 * (RIGHT_EXTENT - LEFT_EXTENT)  # ellipse centre offset toward +Y
 # Nose/tail tip centre in Y.  Ideal is the seam (0) so both halves get a tip;
 # exact 0.0 breaks OCCT mid∪ogive fuse.  ~4 mm still reaches well into -Y.
@@ -165,8 +171,15 @@ HALF_W = RIGHT_EXTENT  # used where "outer +Y skin" is needed (USB, static holes
 INNER_H = OUTER_H - 2 * WALL
 CRADLE_R = OUTER_TUBE_OD / 2 + CRADLE_CLEAR
 SECTION_RY = 0.5 * OUTER_W  # ellipse semi-axis Y
-SECTION_RZ = 0.5 * OUTER_H  # ellipse semi-axis Z
+# Construction ellipse is taller than OUTER_H so flat chops leave real chords.
+SECTION_RZ = 0.5 * OUTER_H + max(TOP_CHOP, BOTTOM_CHOP)
+SECTION_ZC = 0.5 * OUTER_H + 0.5 * (TOP_CHOP - BOTTOM_CHOP)
 TIP_R = CRADLE_R + WALL + 1.5
+# Flat chord half-width at the top/bottom cuts (for sanity prints / asserts).
+_flat_t = (OUTER_H - SECTION_ZC) / SECTION_RZ
+_flat_b = (0.0 - SECTION_ZC) / SECTION_RZ
+FLAT_TOP_HALF_W = SECTION_RY * math.sqrt(max(0.0, 1.0 - _flat_t * _flat_t))
+FLAT_BOT_HALF_W = SECTION_RY * math.sqrt(max(0.0, 1.0 - _flat_b * _flat_b))
 # Packing note (not modeled): INNER_TUBE_N segments + (N-1) O-rings ≈ OUTER_TUBE_LEN.
 CRADLE_LEN = OUTER_TUBE_LEN
 PLUG_X0 = NOSE_EXTENSION + CRADLE_LEN  # aft face of outer tube / plug flange seat
@@ -291,6 +304,13 @@ print(
     f"OUTER  L x W x H = {OUTER_L:.1f} x {OUTER_W:.1f} x {OUTER_H:.1f} mm"
 )
 print(
+    f"flats: top/bottom chords ~{2 * FLAT_TOP_HALF_W:.1f} mm "
+    f"(top square-edge; bottom R={BOTTOM_EDGE_R}); "
+    f"mid≡ogive ellipse so junction has no freestream step"
+)
+assert BOTTOM_EDGE_R < 0.5 * OUTER_W - 2.0, "BOTTOM_EDGE_R too large for body width"
+assert TOP_CHOP >= 4.0 and BOTTOM_CHOP >= 4.0, "chops too small for fairing flat chords"
+print(
     f"half bed BB @45deg ~{BED_BB:.1f} mm (limit {BED_LIMIT:.0f} = "
     f"{BED:.0f}-{BED_MARGIN:.0f} margin; "
     f"{'OK' if BED_BB <= BED_LIMIT else 'TOO LONG'})"
@@ -366,37 +386,106 @@ def _ogive_scale(t: float) -> float:
     return 0.5 - 0.5 * math.cos(math.pi * t)
 
 
-def _flat_top(solid: cq.Workplane, z_top: float) -> cq.Workplane:
-    cut = (
+def _flat_caps(solid: cq.Workplane, inset: float) -> cq.Workplane:
+    """Chop construction ellipse to flat top (square) + flat bottom."""
+    z_top = OUTER_H - inset
+    z_bot = inset
+    top_cut = (
         cq.Workplane("XY")
-        .box(OUTER_L + 20, OUTER_W + 40, 30, centered=(False, True, False))
-        .translate((-10, SECTION_YC, z_top))
+        .box(OUTER_L + 40, OUTER_W + 40, 40, centered=(False, True, False))
+        .translate((-20, SECTION_YC, z_top))
     )
-    return solid.cut(cut)
+    bot_cut = (
+        cq.Workplane("XY")
+        .box(OUTER_L + 40, OUTER_W + 40, 40, centered=(False, True, False))
+        .translate((-20, SECTION_YC, z_bot - 40))
+    )
+    return solid.cut(top_cut).cut(bot_cut)
 
 
 def _ellipse_mid(inset: float, x0: float, length: float) -> cq.Workplane:
-    ry = SECTION_RY - inset
-    rz = SECTION_RZ - inset
-    zc = OUTER_H / 2
+    """
+    Constant midsection = same construction ellipse the ogives end on.
+    Must match the fairing end-station or the mid's square face sticks into
+    the freestream (high-drag step at the nose/tail junction).
+    """
+    ry = max(SECTION_RY - inset, 3.0)
+    rz = max(SECTION_RZ - inset, 3.0)
     return (
         cq.Workplane("YZ")
-        .center(SECTION_YC, zc)
-        .ellipse(max(ry, 3.0), max(rz, 3.0))
+        .center(SECTION_YC, SECTION_ZC)
+        .ellipse(ry, rz)
         .extrude(length)
         .translate((x0, 0, 0))
     )
 
 
+def _bottom_chord_half_w(inset: float) -> float:
+    """Half-width of the flat-bottom chord after _flat_caps at z=inset."""
+    ry = max(SECTION_RY - inset, 1.0)
+    rz = max(SECTION_RZ - inset, 1.0)
+    factor = (inset - SECTION_ZC) / rz
+    return ry * math.sqrt(max(0.0, 1.0 - factor * factor))
+
+
+def _round_bottom_chord(solid: cq.Workplane, inset: float) -> cq.Workplane:
+    """
+    Radius flat-bottom ↔ ellipse edges along the midsection (top stays square).
+
+    Applied after flat caps.  Uses (corner box − keep cylinder) at each bottom
+    chord end — edge-fillet is unreliable on the lofted body.
+    """
+    r = BOTTOM_EDGE_R - inset
+    if r < 0.5:
+        return solid
+    half = _bottom_chord_half_w(inset)
+    if half <= r + 0.75:
+        print(f"WARNING bottom R={r:.1f} skipped (chord half-width {half:.1f})")
+        return solid
+    z0 = inset
+    x0 = NOSE_FAIR_LEN - 0.5
+    length = (MID_END_X + 0.5) - x0
+    for y_edge, inward in (
+        (SECTION_YC - half, +1.0),
+        (SECTION_YC + half, -1.0),
+    ):
+        y_ax = y_edge + inward * r
+        z_ax = z0 + r
+        keep = (
+            cq.Workplane("YZ")
+            .workplane(offset=x0)
+            .center(y_ax, z_ax)
+            .circle(r)
+            .extrude(length)
+        )
+        # Outboard of the chord end × below z0+r — the sharp corner wedge.
+        outboard = -inward
+        y_lo = min(y_edge, y_edge + outboard * r) - 0.05
+        y_hi = max(y_edge, y_edge + outboard * r) + 0.05
+        corner = (
+            cq.Workplane("XY")
+            .transformed(offset=(x0 - 0.05, y_lo, z0 - 0.05))
+            .box(length + 0.1, y_hi - y_lo, r + 0.1, centered=(False, False, False))
+        )
+        solid = solid.cut(corner.cut(keep))
+    return solid
+
+
 def _loft_ogive_nose(inset: float, tip_r: float) -> cq.Workplane:
-    """Rounded nose: tip circle near seam (TIP_YC) → mid ellipse at SECTION_YC."""
-    ry = SECTION_RY - inset
-    rz = SECTION_RZ - inset
-    zc_mid = OUTER_H / 2
+    """
+    Rounded nose: tip → full mid ellipse at NOSE_FAIR_LEN, then hold that
+    ellipse a few mm into the midspan so the junction is a volume overlap
+    (no freestream-facing mid butt face).
+    """
+    ry = max(SECTION_RY - inset, 3.0)
+    rz = max(SECTION_RZ - inset, 3.0)
+    zc_mid = SECTION_ZC
     tip_r = max(tip_r, 2.5)
     tip_yc = TIP_YC
     tip_zc = PITOT_AXIS_Z
     n = OGIVE_STATIONS
+    x_full = NOSE_FAIR_LEN
+    x_hold = NOSE_FAIR_LEN + 2.5  # into mid
     s = (
         cq.Workplane("YZ")
         .workplane(offset=inset)
@@ -407,7 +496,7 @@ def _loft_ogive_nose(inset: float, tip_r: float) -> cq.Workplane:
     for i in range(1, n):
         t = i / (n - 1)
         sc = _ogive_scale(t)
-        x = inset + (NOSE_FAIR_LEN - inset) * t
+        x = inset + (x_full - inset) * t
         yc = tip_yc + (SECTION_YC - tip_yc) * sc
         zc = tip_zc + (zc_mid - tip_zc) * sc
         s = (
@@ -419,26 +508,43 @@ def _loft_ogive_nose(inset: float, tip_r: float) -> cq.Workplane:
             )
         )
         prev_x, prev_yc, prev_zc = x, yc, zc
+    # Constant full section through the mid overlap.
+    s = (
+        s.workplane(offset=x_hold - prev_x)
+        .center(SECTION_YC - prev_yc, zc_mid - prev_zc)
+        .ellipse(ry, rz)
+    )
     return s.loft(ruled=False)
 
 
 def _loft_ogive_tail(inset: float, tip_r: float) -> cq.Workplane:
-    """Rounded tail: mid ellipse at MID_END_X → tip circle near seam (TIP_YC)."""
-    ry = SECTION_RY - inset
-    rz = SECTION_RZ - inset
-    zc_mid = OUTER_H / 2
+    """
+    Rounded tail: hold full mid ellipse from MID_END_X-2.5, then taper to tip.
+    Hold avoids an aft-facing rectangular mid butt into the wake.
+    """
+    ry = max(SECTION_RY - inset, 3.0)
+    rz = max(SECTION_RZ - inset, 3.0)
+    zc_mid = SECTION_ZC
     tip_r = max(tip_r, 2.5)
     tip_yc = TIP_YC
     tip_zc = zc_mid
+    x_hold = MID_END_X - 2.5
     x_tip = OUTER_L - inset
     n = OGIVE_STATIONS
     s = (
         cq.Workplane("YZ")
-        .workplane(offset=MID_END_X)
+        .workplane(offset=x_hold)
         .center(SECTION_YC, zc_mid)
-        .ellipse(max(ry, 3.0), max(rz, 3.0))
+        .ellipse(ry, rz)
     )
-    prev_x, prev_yc, prev_zc = MID_END_X, SECTION_YC, zc_mid
+    prev_x, prev_yc, prev_zc = x_hold, SECTION_YC, zc_mid
+    # Station at MID_END_X (still full), then taper.
+    s = (
+        s.workplane(offset=MID_END_X - prev_x)
+        .center(0, 0)
+        .ellipse(ry, rz)
+    )
+    prev_x = MID_END_X
     for i in range(1, n):
         t = i / (n - 1)
         sc = _ogive_scale(t)
@@ -465,14 +571,22 @@ def _loft_ogive_tail(inset: float, tip_r: float) -> cq.Workplane:
 
 
 def full_body_solid(inset: float = 0.0) -> cq.Workplane:
-    """Skinny elliptical midsection + rounded ogive nose/tail; flat top chord."""
+    """
+    Mid + ogive nose/tail share one construction ellipse, then flat-chopped
+    together so the fairing junction has no rectangular step into the flow.
+    Bottom chord gets an aero radius; top flat stays square for the fairing mate.
+    """
     tip_r = max(TIP_R - 0.35 * inset, 2.5)
-    body_x0 = NOSE_FAIR_LEN - 1.0
-    body_len = (MID_END_X + 1.0) - body_x0
+    # Mid begins at the fairing junction; ogives hold full section into the mid.
+    body_x0 = NOSE_FAIR_LEN
+    body_len = MID_END_X - body_x0
     mid = _ellipse_mid(inset, body_x0, body_len)
     nose = _loft_ogive_nose(inset, tip_r)
     tail = _loft_ogive_tail(inset, tip_r * 0.75)
-    return _flat_top(mid.union(nose).union(tail), OUTER_H - inset)
+    body = mid.union(nose).union(tail)
+    body = _flat_caps(body, inset)
+    body = _round_bottom_chord(body, inset)
+    return body
 
 
 def _keep_half(side: int) -> cq.Workplane:
@@ -716,6 +830,9 @@ def add_static_bay(body: cq.Workplane) -> cq.Workplane:
     bay_y1 = DECK_Y1
     bay_z0 = DECK_Z
     bay_z1 = min(OUTER_H - WALL - 1.0, DECK_Z + 28.0)
+    # Rectangular bay blanks poke the curved +Y skin near the bottom chord —
+    # clip to outer before union (same lesson as flange / deck / posts).
+    outer_env = full_body_solid(inset=0.0)
 
     # Three interior walls ( +X, -X, and a lid shelf); +Y uses outer skin
     for (x0, y0, sx, sy) in (
@@ -727,8 +844,9 @@ def add_static_bay(body: cq.Workplane) -> cq.Workplane:
             cq.Workplane("XY")
             .transformed(offset=(x0, y0, bay_z0))
             .box(sx, sy, bay_z1 - bay_z0, centered=(False, False, False))
+            .intersect(outer_env)
         )
-        body = body.union(wall)
+        body = _union_if_solid(body, wall)
 
     # Cable notch on -X wall
     notch = (
@@ -921,6 +1039,27 @@ def _print_bb_ok(name: str, solid: cq.Workplane, check_bed: bool = True) -> None
     assert bb.zmin > -0.05, f"{name} not sitting on bed (zmin={bb.zmin})"
 
 
+def _stl_boundary_edges(path: str, ndigits: int = 5) -> tuple[int, int]:
+    """Return (triangle_count, boundary_edge_count) for a binary STL."""
+    import struct
+    from collections import Counter
+
+    data = open(path, "rb").read()
+    n = struct.unpack_from("<I", data, 80)[0]
+    edges: Counter[tuple] = Counter()
+    for i in range(n):
+        off = 84 + i * 50
+        vals = struct.unpack_from("<12f", data, off)
+        verts = [
+            tuple(round(vals[3 + 3 * k + j], ndigits) for j in range(3))
+            for k in range(3)
+        ]
+        for a, b in ((0, 1), (1, 2), (2, 0)):
+            edges[tuple(sorted((verts[a], verts[b])))] += 1
+    boundary = sum(1 for c in edges.values() if c == 1)
+    return n, boundary
+
+
 # =============================================================================
 if __name__ == "__main__":
     right = as_single_solid(build_right(), "pod_right")
@@ -942,11 +1081,20 @@ if __name__ == "__main__":
         "pitot_plug should stand flange-down with stem height FLANGE_T+PLUG_LEN"
     )
 
-    # Slightly tighter tessellation than OCCT defaults — fewer mystery importer rejects
-    tol, ang = 0.05, 0.08
-    cq.exporters.export(right_print, "pod_right.stl", tolerance=tol, angularTolerance=ang)
-    cq.exporters.export(left_print, "pod_left.stl", tolerance=tol, angularTolerance=ang)
-    cq.exporters.export(plug_print, "pitot_plug.stl", tolerance=tol, angularTolerance=ang)
+    # Tighter tessellation — looser settings left open edges on pod_left that
+    # AnkerMake rejects as corrupt.  Assert watertight after write.
+    tol, ang = 0.03, 0.05
+    for name, solid in (
+        ("pod_right.stl", right_print),
+        ("pod_left.stl", left_print),
+        ("pitot_plug.stl", plug_print),
+    ):
+        cq.exporters.export(solid, name, tolerance=tol, angularTolerance=ang)
+        n_tri, n_bound = _stl_boundary_edges(name)
+        print(f"{name}: {n_tri} tris, {n_bound} boundary edges")
+        assert n_bound == 0, f"{name} not watertight ({n_bound} boundary edges)"
+        assert n_tri > 100, f"{name} suspiciously few triangles ({n_tri})"
+
     cq.exporters.export(right, "pod_right.step")
     cq.exporters.export(left, "pod_left.step")
     cq.exporters.export(plug, "pitot_plug.step")  # model orientation for Fusion

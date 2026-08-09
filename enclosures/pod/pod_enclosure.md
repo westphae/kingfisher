@@ -7,17 +7,21 @@ left/right aerodynamic clamshell that *is* the outer shell.
 - Printer/material: AnkerMake M5C, PETG. Exported STLs are already **flange /
   mating-face down**, curved outer up, and **rotated 45°** for the bed
   diagonal (10 mm margin vs 220 mm — script asserts the print AABB).
-- Shape: **skinny tall ellipse** (~220 × 52 × 77 mm) with a **flat top chord**
-  for the wing fairing; **rounded ogive nose and tail** (multi-station loft,
-  tip centres near the seam so both halves get a tip). Section is asymmetric
-  about the seam (thin left cover, wider right electronics bay).
+- Shape: **skinny tall ellipse** (~220 × 52 × 77 mm) chopped to a **flat top**
+  (wing-fairing mate, square edge) and **flat bottom** (stands upright) with a
+  **radiused bottom edge** for aero; **rounded ogive nose and tail**
+  (multi-station loft, tip centres near the seam). Midsection uses the *same*
+  ellipse as the fairing end-stations (held through a short overlap) so there
+  is no rectangular freestream-facing step at the junction. Section is
+  asymmetric about the seam (thin left cover, wider right electronics bay).
 - Asymmetry: **board mounts / static bay / USB are on `pod_right` only**;
   `pod_left` is the cover (pitot cradle + flange inserts).
 - Fasteners: M2.5 brass heat-set inserts (same pilot / depth / screw-relief
   scheme as the hub case). Left half = inserts; right half = clearance +
   counterbore. Board posts also take inserts (not self-tap pilots).
-- Internal blanks (flange, bulkheads, deck, posts) are **intersected with the
-  outer envelope** so rectangular stock cannot poke through the curved skin.
+- Internal blanks (flange, bulkheads, deck, posts, static-bay walls) are
+  **intersected with the outer envelope** so rectangular stock cannot poke
+  through the curved skin.
 
 ## Regenerating
 
@@ -34,7 +38,7 @@ Exports (CWD):
 | `pod_right.stl` / `.step` | Right half (electronics), print-oriented |
 | `pitot_plug.stl` / `.step` | Aft plug (STL = flange on bed, stem up; STEP = model pose) |
 | `pod_assembly.step` | Assembled (model orientation) |
-| `pod_v2_220x52x77_ogive.png` | Shape preview (unique name — do not reuse `pod_v2_shape.png`) |
+| `pod_v2_*_*.png` | Shape previews — **unique name per revision** |
 
 ## Coordinate system & layout
 
