@@ -1108,3 +1108,16 @@ if __name__ == "__main__":
         print(f"assembly plug union skipped: {exc}")
     cq.exporters.export(asm, "pod_assembly.step")
     print("exported pod_left/right + pitot_plug STL/STEP + pod_assembly.step")
+
+    # Full requirements gate (STL + geometry).  See REQUIREMENTS.md / validate_pod.py.
+    from validate_pod import validate_all
+
+    result = validate_all(stl_only=False)
+    for line in result.notes:
+        print(line)
+    if not result.passed:
+        raise SystemExit(
+            f"validate_pod failed ({len(result.failures)} check(s)) — "
+            "STLs are NOT print-ready"
+        )
+    print("validate_pod: all checks passed")
