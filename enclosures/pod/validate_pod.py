@@ -16,7 +16,7 @@ from collections import Counter
 from pathlib import Path
 
 POD_DIR = Path(__file__).resolve().parent
-STL_FILES = ("pod_right.stl", "pod_left.stl", "pitot_plug.stl")
+STL_FILES = ("pod_right.stl", "pod_left.stl")
 
 # Tolerances (mm / mm²)
 EXTRA_OUTSIDE_MAX = 50.0  # right half may have tiny static-bay scraps; left must be ~0
@@ -216,14 +216,20 @@ def check_geometry(r: CheckResult) -> None:
                 f"P4 {name} print BB {bb.xlen:.1f}×{bb.ylen:.1f}×{bb.zlen:.1f}"
             )
 
-    plug = pod.as_single_solid(pod.build_plug(), "pitot_plug")
-    pp = pod.for_print_plug(plug)
-    zlen = pp.val().BoundingBox().zlen
-    expect = pod.PLUG_FLANGE_T + pod.PLUG_LEN
-    if abs(zlen - expect) > 0.2:
-        r.fail(f"P5 plug print height {zlen:.1f} ≠ FLANGE_T+PLUG_LEN {expect:.1f}")
+    # L2 — SUN-B cradle stations present and tip protrudes past pod nose.
+    if abs(pod.SUN_AFT_X - (pod.SUN_TOTAL_LEN - pod.SUN_TIP_LEN)) > 0.05:
+        r.fail("L2 SUN aft station math inconsistent")
     else:
-        r.ok(f"P5 plug print height {zlen:.1f}")
+        r.ok(
+            f"L2 SUN-B cradle aft @ {pod.SUN_AFT_X:.1f}, "
+            f"barbs @ {pod.SUN_BARB_TE_X:.0f}/{pod.SUN_BARB_STATIC_X:.0f}/{pod.SUN_BARB_PITOT_X:.0f}"
+        )
+    sun = pod.build_sun_placeholder()
+    sbb = sun.val().BoundingBox()
+    if sbb.xmin > -pod.SUN_TIP_LEN + 0.5:
+        r.fail(f"L2 SUN tip xmin={sbb.xmin:.1f} (want ≈ {-pod.SUN_TIP_LEN})")
+    else:
+        r.ok(f"L2 SUN tip protrudes to x={sbb.xmin:.1f}")
 
 
 def validate_all(*, stl_only: bool = False, directory: Path = POD_DIR) -> CheckResult:

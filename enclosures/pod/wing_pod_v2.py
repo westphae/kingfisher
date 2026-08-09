@@ -13,15 +13,15 @@
 #    BMP581, Qwiic 5V Boost, Holybro MS4525DO, LiPo ~50 x 6 x 70 mm.
 #
 #  Air data (pneumatically decoupled):
-#    Prandtl total  -> MS4525 +
-#    Prandtl static  -> MS4525 -
+#    Prandtl total  -> SUN-B aft barb -> 6 mm hose -> COTS reducer -> MS4525 +
+#    Prandtl static -> SUN-B middle barb -> same path -> MS4525 -
+#    SUN-B forward (TE) barb capped / unused
 #    Pod multi-hole static bay -> BMP581 only
-#    Optional 2nd static port in the pitot plug for a BMP581 tee test.
 #
-#  Pitot mount (SUN-adaptor replacement): tubes-in-tube
-#    outer tube (ID ~10.2) full mount length; 3x inner tubes (OD 10 / ID 8)
-#    with thick O-rings between segments sealing on the 8 mm Prandtl shaft;
-#    printed aft plug (RTV) adapts 4 mm probe lines -> MS4525 barb tubing.
+#  Pitot mount: ESA SUN-B adapter (see SUN_B_CALIPERS.md).  Tip protrudes
+#  one tip-length past the pod nose; Ø10.65 shoulder sits at x=0.  Printed
+#  L/R cradle clamps the body, clears upward barbs, and locates the aft
+#  blind recess on a boss.
 #
 #  Fasteners: M2.5 brass heat-set inserts (hub-case lessons: pilot = OD -
 #  melt allowance, depth = insert length + extra, screw-relief bore below).
@@ -86,44 +86,32 @@ BOSS_D = 7.0
 BOARD_POST_D = 7.0
 BOARD_POST_H = INS_DEPTH + SCREW_RELIEF_EXTRA + SCREW_RELIEF_FLOOR + 1.0
 
-# --- pitot tubes-in-tube (purchased metal + printed plug) -------------------
-# Outer tube sits in the printed cradle (both halves).  Inner tubes + O-rings
-# are loose parts; the script only models the cradle bore and the aft plug.
-OUTER_TUBE_ID = 10.2
-OUTER_TUBE_OD = 12.0  # VERIFY vs your tube stock
-OUTER_TUBE_LEN = 100.0  # matches ~100 mm Prandtl mount section
-INNER_TUBE_OD = 10.0
-INNER_TUBE_ID = 8.0
-INNER_TUBE_N = 3
-ORING_T = 2.5  # axial thickness between inner segments (>~2)
-ORING_ID = 7.0  # < 8 mm so it seals on the Prandtl shaft
-CRADLE_CLEAR = 0.15  # print clearance on OUTER_TUBE_OD
+# --- ESA SUN-B pitot mount (calipers: SUN_B_CALIPERS.md, 2026-08-09) --------
+# Pod nose tip x=0 is the tip→Ø10.65 shoulder.  Tip protrudes -X by SUN_TIP_LEN.
+SUN_TIP_OD = 8.93
+SUN_SMOOTH_OD = 10.65
+SUN_THREAD_MAJOR = 11.76
+SUN_BARREL_OD = 11.71
+SUN_TIP_LEN = 24.75
+SUN_SMOOTH_LEN = 27.50
+SUN_THREAD_LEN = 25.37
+SUN_TOTAL_LEN = 124.03
+# Barb stations measured from SUN nose; subtract SUN_TIP_LEN for pod X.
+SUN_BARB_TE_FROM_NOSE = 85.0
+SUN_BARB_STATIC_FROM_NOSE = 100.0
+SUN_BARB_PITOT_FROM_NOSE = 114.0
+SUN_BARB_STEM_OD = 5.96
+SUN_BARB_ABOVE_BARREL = 16.08  # barrel OD top → barb tip
+SUN_RECESS_D = 6.03
+SUN_RECESS_DEPTH = 7.06
+CRADLE_CLEAR = 0.20  # print clearance on metal ODs
 PITOT_AXIS_Z = 28.0  # cradle axis height from outer bottom
-# Tube mouth is at the faired nose tip (x=0); cradle runs aft from there.
-NOSE_EXTENSION = 0.0
-
-# Aft plug (prints separately; RTV into outer tube)
-PLUG_LEN = 14.0
-PLUG_OD = OUTER_TUBE_ID - 0.25  # slip + RTV
-PLUG_FLANGE_OD = OUTER_TUBE_OD + 2.0
-PLUG_FLANGE_T = 2.5
-# Probe-side tubing (4 mm fittings on the Prandtl)
-PROBE_TUBE_OD = 4.0
-PROBE_BORE = 4.2
 # MS4525DO: datasheet 1/8" barb -> 3/32" ID tubing (~2.38 mm ID).
-# v1 calipers: barb tip Ø2.1, shoulder Ø3.5.  Sensor-side bore holds the
-# smaller OD line that slips over the barb tip.
+# SUN barbs take 6 mm ID hose; step down with a COTS reducer (not printed).
 MS_TUBE_OD = 3.5  # typical silicone OD over 3/32" ID line (VERIFY)
-MS_BORE = 3.7
 MS_BARB_TIP_D = 2.1
 MS_BARB_SHOULDER_D = 3.5
 MS_BARB_DY = 4.3  # barb centre spacing on Holybro carrier
-# Plug port layout (local: +X toward probe / nose when installed)
-PLUG_TOTAL_Y = 2.4
-PLUG_STATIC_Y = -2.4
-PLUG_STATIC2_Y = 0.0  # optional 2nd static (BMP581 tee test); Z offset
-PLUG_STATIC2_Z = 2.8
-PLUG_ENABLE_STATIC2 = True
 
 # --- battery (slab on centerline) -------------------------------------------
 # User intent: 50 mm X (fore-aft), ~6 mm Y (L-R), 70 mm Z (top-bottom).
@@ -169,7 +157,23 @@ BED_MARGIN = 10.0  # keep toolpaths inside (skirt/brim + slicer keepout)
 # =============================================================================
 HALF_W = RIGHT_EXTENT  # used where "outer +Y skin" is needed (USB, static holes)
 INNER_H = OUTER_H - 2 * WALL
-CRADLE_R = OUTER_TUBE_OD / 2 + CRADLE_CLEAR
+# Stepped cradle radii (print clearance on each SUN OD).
+CRADLE_R_TIP = SUN_TIP_OD / 2 + CRADLE_CLEAR
+CRADLE_R_SMOOTH = SUN_SMOOTH_OD / 2 + CRADLE_CLEAR
+CRADLE_R_THREAD = SUN_THREAD_MAJOR / 2 + CRADLE_CLEAR + 0.15
+CRADLE_R_BARREL = SUN_BARREL_OD / 2 + CRADLE_CLEAR
+CRADLE_R = max(CRADLE_R_THREAD, CRADLE_R_BARREL)  # largest clamp radius
+SUN_BARB_TIP_ABOVE_AXIS = SUN_BARB_ABOVE_BARREL + SUN_BARREL_OD / 2
+# World X: pod nose tip = SUN tip→smooth shoulder (tip protrudes -X).
+SUN_SMOOTH_X0 = 0.0
+SUN_THREAD_X0 = SUN_SMOOTH_LEN
+SUN_THREAD_X1 = SUN_THREAD_X0 + SUN_THREAD_LEN
+SUN_AFT_X = SUN_TOTAL_LEN - SUN_TIP_LEN
+SUN_BARB_TE_X = SUN_BARB_TE_FROM_NOSE - SUN_TIP_LEN
+SUN_BARB_STATIC_X = SUN_BARB_STATIC_FROM_NOSE - SUN_TIP_LEN
+SUN_BARB_PITOT_X = SUN_BARB_PITOT_FROM_NOSE - SUN_TIP_LEN
+SUN_RECESS_BOSS_D = SUN_RECESS_D - 0.30
+SUN_RECESS_BOSS_LEN = SUN_RECESS_DEPTH - 0.80
 SECTION_RY = 0.5 * OUTER_W  # ellipse semi-axis Y
 # Construction ellipse is taller than OUTER_H so flat chops leave real chords.
 SECTION_RZ = 0.5 * OUTER_H + max(TOP_CHOP, BOTTOM_CHOP)
@@ -180,10 +184,8 @@ _flat_t = (OUTER_H - SECTION_ZC) / SECTION_RZ
 _flat_b = (0.0 - SECTION_ZC) / SECTION_RZ
 FLAT_TOP_HALF_W = SECTION_RY * math.sqrt(max(0.0, 1.0 - _flat_t * _flat_t))
 FLAT_BOT_HALF_W = SECTION_RY * math.sqrt(max(0.0, 1.0 - _flat_b * _flat_b))
-# Packing note (not modeled): INNER_TUBE_N segments + (N-1) O-rings ≈ OUTER_TUBE_LEN.
-CRADLE_LEN = OUTER_TUBE_LEN
-PLUG_X0 = NOSE_EXTENSION + CRADLE_LEN  # aft face of outer tube / plug flange seat
-NOSE_BULKHEAD_X = PLUG_X0 + PLUG_FLANGE_T + 1.0
+# Aft bulkhead just behind SUN end-B recess boss.
+NOSE_BULKHEAD_X = SUN_AFT_X + 3.0
 
 # Electronics in the +Y bay on the RIGHT half only (left half is the cover).
 # MS/Boost sit beside the pitot cradle; battery X-span shared with Babysitter
@@ -316,19 +318,27 @@ print(
     f"{'OK' if BED_BB <= BED_LIMIT else 'TOO LONG'})"
 )
 print(
-    f"pitot cradle: OD={OUTER_TUBE_OD} ID={OUTER_TUBE_ID} L={CRADLE_LEN}; "
-    f"inners {INNER_TUBE_N}x OD{INNER_TUBE_OD}/ID{INNER_TUBE_ID}, "
-    f"O-ring T={ORING_T} ID={ORING_ID}"
+    f"SUN-B cradle: tipØ{SUN_TIP_OD} protrude {SUN_TIP_LEN}; "
+    f"smoothØ{SUN_SMOOTH_OD}@{SUN_SMOOTH_X0:.1f}..{SUN_THREAD_X0:.1f}; "
+    f"threadØ{SUN_THREAD_MAJOR}..{SUN_THREAD_X1:.1f}; "
+    f"barbs TE/S/P @ {SUN_BARB_TE_X:.1f}/{SUN_BARB_STATIC_X:.1f}/{SUN_BARB_PITOT_X:.1f}; "
+    f"aft @ {SUN_AFT_X:.1f}"
 )
 print(
-    f"MS4525 barb tubing: tip Ø{MS_BARB_TIP_D} / shoulder Ø{MS_BARB_SHOULDER_D}; "
-    f"datasheet 3/32\" ID (~2.38). Plug {PROBE_TUBE_OD} mm -> ~{MS_TUBE_OD} mm OD line."
+    f"MS4525: tip Ø{MS_BARB_TIP_D} / shoulder Ø{MS_BARB_SHOULDER_D}; "
+    f"3/32\" ID (~2.38). SUN 6 mm hose -> COTS reducer -> ~{MS_TUBE_OD} mm OD line."
 )
 assert BED_BB <= BED_LIMIT, (
     f"half footprint {BED_BB:.1f} exceeds bed limit {BED_LIMIT:.1f}; shorten OUTER_L"
 )
 assert PITOT_AXIS_Z - CRADLE_R > WALL + 1.0, "pitot cradle too low"
-assert PITOT_AXIS_Z + CRADLE_R < OUTER_H - WALL - 1.0, "pitot cradle too high"
+assert PITOT_AXIS_Z + SUN_BARB_TIP_ABOVE_AXIS + 6.0 < OUTER_H - WALL, (
+    "SUN barb tips + hose need more headroom — raise OUTER_H or lower PITOT_AXIS_Z"
+)
+# Pod X of thread start equals smooth length; SUN-nose station T3 = tip+smooth.
+assert abs(SUN_THREAD_X0 - SUN_SMOOTH_LEN) < 0.05
+assert abs((SUN_TIP_LEN + SUN_SMOOTH_LEN) - (SUN_THREAD_X0 + SUN_TIP_LEN)) < 0.05
+assert abs(SUN_AFT_X - (SUN_TOTAL_LEN - SUN_TIP_LEN)) < 0.05
 assert BATT_Z0 >= WALL - 0.05, "battery pocket intersects floor"
 assert BATT_Z0 + BATT_POCKET_Z <= OUTER_H - WALL + 0.05, "battery pocket intersects top"
 assert DECK_Y1 - DECK_Y0 >= max(b["yl"] for b in BOARDS.values()) + 1.0, (
@@ -677,18 +687,91 @@ def hollow_half(side: int) -> cq.Workplane:
 
 
 def add_pitot_cradle(body: cq.Workplane, side: int) -> cq.Workplane:
-    """Semicylindrical clamp bore for OUTER_TUBE + nose mouth + internal bulkheads."""
-    bore = x_cylinder(CRADLE_R, CRADLE_LEN + 2.0, -1.0, 0.0, PITOT_AXIS_Z)
-    body = body.cut(bore)
-    # Aft access for the plug
+    """
+    SUN-B clamp: tip mouth + stepped bore, upward barb bay, aft recess boss,
+    and bulkheads.  Barbs point +Z (ESA water tip).
+    """
+    # Protruding tip clearance through the nose (outside + into shoulder).
     body = body.cut(
-        x_cylinder(CRADLE_R + 0.2, 8.0, PLUG_X0 - 1.0, 0.0, PITOT_AXIS_Z)
+        x_cylinder(
+            CRADLE_R_TIP,
+            SUN_TIP_LEN + 2.0,
+            -(SUN_TIP_LEN + 1.0),
+            0.0,
+            PITOT_AXIS_Z,
+        )
+    )
+    # Ø10.65 smooth barrel from pod nose tip to thread.
+    body = body.cut(
+        x_cylinder(
+            CRADLE_R_SMOOTH,
+            SUN_SMOOTH_LEN + 0.4,
+            SUN_SMOOTH_X0 - 0.2,
+            0.0,
+            PITOT_AXIS_Z,
+        )
+    )
+    # Threaded band (slightly roomier).
+    body = body.cut(
+        x_cylinder(
+            CRADLE_R_THREAD,
+            SUN_THREAD_LEN + 0.6,
+            SUN_THREAD_X0 - 0.3,
+            0.0,
+            PITOT_AXIS_Z,
+        )
+    )
+    # Matte barb barrel to aft face.
+    body = body.cut(
+        x_cylinder(
+            CRADLE_R_BARREL,
+            (SUN_AFT_X - SUN_THREAD_X1) + 1.0,
+            SUN_THREAD_X1 - 0.3,
+            0.0,
+            PITOT_AXIS_Z,
+        )
     )
 
-    # Internal bulkheads — rectangular blanks poke through the curved skin unless
-    # clipped to the outer envelope (same lesson as the mating flange).
+    # Barb + hose tunnel above the axis (both halves; stems straddle y=0).
+    barb_y = SUN_BARB_STEM_OD / 2 + 1.5
+    barb_z1 = PITOT_AXIS_Z + SUN_BARB_TIP_ABOVE_AXIS + 8.0
+    barb_x0 = SUN_THREAD_X1 - 1.0
+    barb_x1 = SUN_AFT_X - 1.0
+    barb_bay = (
+        cq.Workplane("XY")
+        .transformed(offset=(barb_x0, -barb_y, PITOT_AXIS_Z + CRADLE_R_BARREL - 1.0))
+        .box(
+            barb_x1 - barb_x0,
+            2.0 * barb_y,
+            barb_z1 - (PITOT_AXIS_Z + CRADLE_R_BARREL - 1.0),
+            centered=(False, False, False),
+        )
+    )
+    body = body.cut(barb_bay)
+
+    # Right-half hose escape toward MS4525 / deck (+Y).
+    if side > 0:
+        hose = (
+            cq.Workplane("XY")
+            .transformed(
+                offset=(
+                    SUN_BARB_TE_X - 6.0,
+                    0.0,
+                    PITOT_AXIS_Z + CRADLE_R_BARREL - 0.5,
+                )
+            )
+            .box(
+                (SUN_BARB_PITOT_X + 8.0) - (SUN_BARB_TE_X - 6.0),
+                DECK_Y0 + 8.0,
+                14.0,
+                centered=(False, False, False),
+            )
+        )
+        body = body.cut(hose)
+
     outer = full_body_solid(inset=0.0)
-    for x in (NOSE_FAIR_LEN + 8.0, PLUG_X0 - 12.0):
+
+    def _bulkhead(x: float, bore_r: float) -> cq.Workplane:
         if side > 0:
             y_span = RIGHT_EXTENT - WALL - 0.4
             plate = (
@@ -701,13 +784,88 @@ def add_pitot_cradle(body: cq.Workplane, side: int) -> cq.Workplane:
             plate = (
                 cq.Workplane("XY")
                 .transformed(offset=(x, -y_span, WALL))
-                .box(3.0, max(y_span, 1.0), OUTER_H - 2 * WALL,
-                     centered=(False, False, False))
+                .box(
+                    3.0,
+                    max(y_span, 1.0),
+                    OUTER_H - 2 * WALL,
+                    centered=(False, False, False),
+                )
             )
         plate = plate.intersect(outer)
-        body = body.union(plate)
-        body = body.cut(x_cylinder(CRADLE_R, 5.0, x - 1.0, 0.0, PITOT_AXIS_Z))
+        # Keep barb bay open on the upper bulkheads in the barb zone.
+        if x >= SUN_THREAD_X1 - 5.0:
+            plate = plate.cut(barb_bay)
+        return plate
+
+    # Clamp bulkheads: mid-smooth, mid-thread, just forward of aft face.
+    for x, br in (
+        (SUN_SMOOTH_X0 + SUN_SMOOTH_LEN * 0.55, CRADLE_R_SMOOTH),
+        (SUN_THREAD_X0 + SUN_THREAD_LEN * 0.5, CRADLE_R_THREAD),
+        (SUN_AFT_X - 8.0, CRADLE_R_BARREL),
+    ):
+        body = _union_if_solid(body, _bulkhead(x, br))
+        body = body.cut(x_cylinder(br, 5.0, x - 1.0, 0.0, PITOT_AXIS_Z))
+
+    # Aft bulkhead + locating boss into end-B blind recess (Ø6.03 × 7.06).
+    aft_bh_x = SUN_AFT_X + 0.2
+    body = _union_if_solid(body, _bulkhead(aft_bh_x, CRADLE_R_BARREL))
+    boss = x_cylinder(
+        SUN_RECESS_BOSS_D / 2,
+        SUN_RECESS_BOSS_LEN + 1.5,
+        SUN_AFT_X - SUN_RECESS_BOSS_LEN,
+        0.0,
+        PITOT_AXIS_Z,
+    )
+    # Boss only where this half has material near the seam.
+    if side > 0:
+        boss_keep = (
+            cq.Workplane("XY")
+            .transformed(offset=(SUN_AFT_X - SUN_RECESS_BOSS_LEN - 0.5, -0.05, WALL))
+            .box(
+                SUN_RECESS_BOSS_LEN + 3.0,
+                max(CRADLE_R_BARREL + 2.0, 4.0),
+                OUTER_H - 2 * WALL,
+                centered=(False, False, False),
+            )
+        )
+    else:
+        boss_keep = (
+            cq.Workplane("XY")
+            .transformed(
+                offset=(
+                    SUN_AFT_X - SUN_RECESS_BOSS_LEN - 0.5,
+                    -(CRADLE_R_BARREL + 2.0),
+                    WALL,
+                )
+            )
+            .box(
+                SUN_RECESS_BOSS_LEN + 3.0,
+                CRADLE_R_BARREL + 2.05,
+                OUTER_H - 2 * WALL,
+                centered=(False, False, False),
+            )
+        )
+    body = _union_if_solid(body, boss.intersect(boss_keep).intersect(outer))
     return body
+
+
+def build_sun_placeholder() -> cq.Workplane:
+    """Simple stepped solid for assembly STEP (not printed)."""
+    tip = x_cylinder(SUN_TIP_OD / 2, SUN_TIP_LEN, -SUN_TIP_LEN, 0.0, PITOT_AXIS_Z)
+    smooth = x_cylinder(
+        SUN_SMOOTH_OD / 2, SUN_SMOOTH_LEN, SUN_SMOOTH_X0, 0.0, PITOT_AXIS_Z
+    )
+    thread = x_cylinder(
+        SUN_THREAD_MAJOR / 2, SUN_THREAD_LEN, SUN_THREAD_X0, 0.0, PITOT_AXIS_Z
+    )
+    barrel = x_cylinder(
+        SUN_BARREL_OD / 2,
+        SUN_AFT_X - SUN_THREAD_X1,
+        SUN_THREAD_X1,
+        0.0,
+        PITOT_AXIS_Z,
+    )
+    return tip.union(smooth).union(thread).union(barrel)
 
 
 def add_battery_pocket(body: cq.Workplane) -> cq.Workplane:
@@ -912,59 +1070,6 @@ def build_left() -> cq.Workplane:
     return body
 
 
-def build_plug() -> cq.Workplane:
-    """
-    Aft plug for the outer pitot tube.  Flange seats against the tube aft face;
-    cylindrical body RTVs into OUTER_TUBE_ID.  Ports:
-      - total:   PROBE_BORE -> MS_BORE (step)
-      - static:  same
-      - static2: optional BMP581 tee test (PROBE_BORE both ends)
-    """
-    body = (
-        cq.Workplane("YZ")
-        .circle(PLUG_FLANGE_OD / 2)
-        .extrude(PLUG_FLANGE_T)
-    )
-    stem = (
-        cq.Workplane("YZ")
-        .workplane(offset=PLUG_FLANGE_T)
-        .circle(PLUG_OD / 2)
-        .extrude(PLUG_LEN)
-    )
-    body = body.union(stem)
-
-    def port(y: float, z: float, probe_bore: float, ms_bore: float, dual_static: bool = False):
-        # Through from flange face (-X side of plug local = sensor side) to stem tip
-        total_len = PLUG_FLANGE_T + PLUG_LEN + 0.2
-        # Sensor-side (flange face) bore for MS tubing
-        sensor = (
-            cq.Workplane("YZ")
-            .workplane(offset=-0.1)
-            .center(y, z)
-            .circle(ms_bore / 2)
-            .extrude(PLUG_FLANGE_T + 3.0)
-        )
-        # Probe-side bore for 4 mm tubing (from stem tip inward)
-        probe = (
-            cq.Workplane("YZ")
-            .workplane(offset=PLUG_FLANGE_T + PLUG_LEN + 0.1)
-            .center(y, z)
-            .circle(probe_bore / 2)
-            .extrude(-(PLUG_LEN + 1.0 if dual_static else PLUG_LEN - 1.0))
-        )
-        return sensor, probe
-
-    s, p = port(PLUG_TOTAL_Y, 0.0, PROBE_BORE, MS_BORE)
-    body = body.cut(s).cut(p)
-    s, p = port(PLUG_STATIC_Y, 0.0, PROBE_BORE, MS_BORE)
-    body = body.cut(s).cut(p)
-    if PLUG_ENABLE_STATIC2:
-        # Full 4 mm through for optional BMP581 feed test
-        s, p = port(PLUG_STATIC2_Y, PLUG_STATIC2_Z, PROBE_BORE, PROBE_BORE, dual_static=True)
-        body = body.cut(s).cut(p)
-    return body
-
-
 def as_single_solid(wp: cq.Workplane, name: str = "part") -> cq.Workplane:
     """
     Collapse a Compound to one Solid for slicer-friendly STLs.
@@ -1017,16 +1122,6 @@ def for_print_half(half: cq.Workplane, side: int) -> cq.Workplane:
     return p
 
 
-def for_print_plug(plug: cq.Workplane) -> cq.Workplane:
-    """
-    Flange flat on the bed, stem up.  Model plug is built along +X (flange at
-    x=0); -90° about Y maps that to +Z so it isn't printed on its side.
-    """
-    p = plug.rotate((0, 0, 0), (0, 1, 0), -90)
-    bb = p.val().BoundingBox()
-    return p.translate((-bb.xmin, -bb.ymin, -bb.zmin))
-
-
 def _print_bb_ok(name: str, solid: cq.Workplane, check_bed: bool = True) -> None:
     bb = solid.val().BoundingBox()
     print(
@@ -1064,22 +1159,15 @@ def _stl_boundary_edges(path: str, ndigits: int = 5) -> tuple[int, int]:
 if __name__ == "__main__":
     right = as_single_solid(build_right(), "pod_right")
     left = as_single_solid(build_left(), "pod_left")
-    plug = as_single_solid(build_plug(), "pitot_plug")
 
     right_print = for_print_half(right, +1)
     left_print = for_print_half(left, -1)
-    plug_print = for_print_plug(plug)
 
     assert len(right_print.val().Solids()) == 1, "pod_right print must be one solid"
     assert len(left_print.val().Solids()) == 1, "pod_left print must be one solid"
-    assert len(plug_print.val().Solids()) == 1, "pitot_plug print must be one solid"
 
     _print_bb_ok("pod_right", right_print)
     _print_bb_ok("pod_left", left_print)
-    _print_bb_ok("pitot_plug", plug_print, check_bed=False)
-    assert abs(plug_print.val().BoundingBox().zlen - (PLUG_FLANGE_T + PLUG_LEN)) < 0.2, (
-        "pitot_plug should stand flange-down with stem height FLANGE_T+PLUG_LEN"
-    )
 
     # Tighter tessellation — looser settings left open edges on pod_left that
     # AnkerMake rejects as corrupt.  Assert watertight after write.
@@ -1087,7 +1175,6 @@ if __name__ == "__main__":
     for name, solid in (
         ("pod_right.stl", right_print),
         ("pod_left.stl", left_print),
-        ("pitot_plug.stl", plug_print),
     ):
         cq.exporters.export(solid, name, tolerance=tol, angularTolerance=ang)
         n_tri, n_bound = _stl_boundary_edges(name)
@@ -1097,17 +1184,15 @@ if __name__ == "__main__":
 
     cq.exporters.export(right, "pod_right.step")
     cq.exporters.export(left, "pod_left.step")
-    cq.exporters.export(plug, "pitot_plug.step")  # model orientation for Fusion
 
-    # Assembly STEP: left + right + plug at cradle aft (flange at PLUG_X0)
+    # Assembly STEP: halves + SUN-B placeholder (not printed).
     asm = right.union(left)
-    plug_placed = build_plug().translate((PLUG_X0, 0.0, PITOT_AXIS_Z))
     try:
-        asm = asm.union(plug_placed)
+        asm = asm.union(build_sun_placeholder())
     except Exception as exc:
-        print(f"assembly plug union skipped: {exc}")
+        print(f"assembly SUN placeholder union skipped: {exc}")
     cq.exporters.export(asm, "pod_assembly.step")
-    print("exported pod_left/right + pitot_plug STL/STEP + pod_assembly.step")
+    print("exported pod_left/right STL/STEP + pod_assembly.step (with SUN placeholder)")
 
     # Full requirements gate (STL + geometry).  See REQUIREMENTS.md / validate_pod.py.
     from validate_pod import validate_all
