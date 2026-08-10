@@ -18,10 +18,11 @@
 #    SUN-B forward (TE) barb capped / unused
 #    Pod multi-hole static bay -> BMP581 only
 #
-#  Pitot mount: ESA SUN-B adapter (see SUN_B_CALIPERS.md).  Tip protrudes
-#  one tip-length past the pod nose; Ø10.65 shoulder sits at x=0.  Printed
-#  L/R cradle clamps the body, clears upward barbs, and locates the aft
-#  blind recess on a boss.
+#  Pitot mount: ESA SUN-B adapter (see SUN_B_CALIPERS.md).  Nose outer mold
+#  line fairs into the tip OD (sharp lip).  Ø10.65 shoulder seats on the aft
+#  face of a tip-only nose bulkhead (x=SHOULDER_BH_T).  Aft blind recess on a
+#  printed boss.  Knurled band = integral L/R clamp; flange screws = press.
+#  Stern is a blunt convex ellipsoidal loft (not a pin/nipple).
 #
 #  Fasteners: M2.5 brass heat-set inserts (hub-case lessons: pilot = OD -
 #  melt allowance, depth = insert length + extra, screw-relief bore below).
@@ -51,7 +52,9 @@ GASKET_W = 1.6
 GASKET_D = 0.9
 SHELL_SCREW_INSET = 3.0  # flange screw centres from outer skin
 NOSE_FAIR_LEN = 28.0  # tip -> full midsection
-TAIL_FAIR_LEN = 20.0  # full midsection -> aft tip
+# Slightly shorter than early v2 so SUN shoulder bulkhead (+SHOULDER_BH_T)
+# still fits the 210 mm diagonal bed budget.
+TAIL_FAIR_LEN = 17.0  # full midsection -> aft tip
 OGIVE_STATIONS = 8  # loft stations in each fairing (smoothness)
 # Construction ellipse overshoots the final flats so the chords have real width
 # (cutting at the ellipse apex left a vanishing flat top).
@@ -66,7 +69,9 @@ OUTER_W = LEFT_EXTENT + RIGHT_EXTENT  # ~52 mm overall
 OUTER_H = 77.0  # Z, flat bottom -> flat top (battery pocket 72 + walls)
 SECTION_YC = 0.5 * (RIGHT_EXTENT - LEFT_EXTENT)  # ellipse centre offset toward +Y
 # Nose/tail tip centre in Y.  Ideal is the seam (0) so both halves get a tip;
-# exact 0.0 breaks OCCT mid∪ogive fuse.  ~4 mm still reaches well into -Y.
+# exact 0.0 breaks OCCT mid∪ogive fuse.  Nose stays near 0 (coaxial with
+# the SUN tip); tail may sit a little into +Y.
+NOSE_TIP_YC = 0.35
 TIP_YC = 4.0
 
 # --- M2.5 heat-set inserts (same family as pi5_aviation_case.py) ------------
@@ -87,7 +92,7 @@ BOARD_POST_D = 7.0
 BOARD_POST_H = INS_DEPTH + SCREW_RELIEF_EXTRA + SCREW_RELIEF_FLOOR + 1.0
 
 # --- ESA SUN-B pitot mount (calipers: SUN_B_CALIPERS.md, 2026-08-09) --------
-# Pod nose tip x=0 is the tip→Ø10.65 shoulder.  Tip protrudes -X by SUN_TIP_LEN.
+# Pod exterior nose ≈ x=0.  Ø10.65 shoulder seats at SHOULDER_BH_T.
 SUN_TIP_OD = 8.93
 SUN_SMOOTH_OD = 10.65
 SUN_THREAD_MAJOR = 11.76
@@ -104,7 +109,11 @@ SUN_BARB_STEM_OD = 5.96
 SUN_BARB_ABOVE_BARREL = 16.08  # barrel OD top → barb tip
 SUN_RECESS_D = 6.03
 SUN_RECESS_DEPTH = 7.06
-CRADLE_CLEAR = 0.20  # print clearance on metal ODs
+# Slip clearances on tip/smooth/barrel; snug clamp on knurled band when L/R close.
+CRADLE_CLEAR = 0.20
+CLAMP_CLEAR = 0.08  # press-fit-ish on rough band (PETG; tune after dry-fit)
+# Nose bulkhead: tip-only bore; Ø10.65 shoulder seats on its aft face.
+SHOULDER_BH_T = 2.5
 PITOT_AXIS_Z = 28.0  # cradle axis height from outer bottom
 # MS4525DO: datasheet 1/8" barb -> 3/32" ID tubing (~2.38 mm ID).
 # SUN barbs take 6 mm ID hose; step down with a COTS reducer (not printed).
@@ -157,27 +166,38 @@ BED_MARGIN = 10.0  # keep toolpaths inside (skirt/brim + slicer keepout)
 # =============================================================================
 HALF_W = RIGHT_EXTENT  # used where "outer +Y skin" is needed (USB, static holes)
 INNER_H = OUTER_H - 2 * WALL
-# Stepped cradle radii (print clearance on each SUN OD).
+# Stepped cradle radii.  Knurled band uses CLAMP_CLEAR (integral split clamp).
 CRADLE_R_TIP = SUN_TIP_OD / 2 + CRADLE_CLEAR
 CRADLE_R_SMOOTH = SUN_SMOOTH_OD / 2 + CRADLE_CLEAR
-CRADLE_R_THREAD = SUN_THREAD_MAJOR / 2 + CRADLE_CLEAR + 0.15
+CRADLE_R_CLAMP = SUN_THREAD_MAJOR / 2 + CLAMP_CLEAR
 CRADLE_R_BARREL = SUN_BARREL_OD / 2 + CRADLE_CLEAR
-CRADLE_R = max(CRADLE_R_THREAD, CRADLE_R_BARREL)  # largest clamp radius
+CRADLE_R = max(CRADLE_R_CLAMP, CRADLE_R_BARREL)
 SUN_BARB_TIP_ABOVE_AXIS = SUN_BARB_ABOVE_BARREL + SUN_BARREL_OD / 2
-# World X: pod nose tip = SUN tip→smooth shoulder (tip protrudes -X).
-SUN_SMOOTH_X0 = 0.0
-SUN_THREAD_X0 = SUN_SMOOTH_LEN
+# World X: pod exterior nose ≈ 0.  SUN Ø10.65 shoulder seats on the aft face
+# of the nose bulkhead at SHOULDER_BH_T (tip-only hole through that bulkhead).
+SUN_SMOOTH_X0 = SHOULDER_BH_T  # shoulder / start of Ø10.65
+SUN_TIP_X0 = SUN_SMOOTH_X0 - SUN_TIP_LEN  # free tip end (protrudes past x=0)
+SUN_THREAD_X0 = SUN_SMOOTH_X0 + SUN_SMOOTH_LEN
 SUN_THREAD_X1 = SUN_THREAD_X0 + SUN_THREAD_LEN
-SUN_AFT_X = SUN_TOTAL_LEN - SUN_TIP_LEN
-SUN_BARB_TE_X = SUN_BARB_TE_FROM_NOSE - SUN_TIP_LEN
-SUN_BARB_STATIC_X = SUN_BARB_STATIC_FROM_NOSE - SUN_TIP_LEN
-SUN_BARB_PITOT_X = SUN_BARB_PITOT_FROM_NOSE - SUN_TIP_LEN
-SUN_RECESS_BOSS_D = SUN_RECESS_D - 0.30
-SUN_RECESS_BOSS_LEN = SUN_RECESS_DEPTH - 0.80
+SUN_AFT_X = SUN_SMOOTH_X0 + (SUN_TOTAL_LEN - SUN_TIP_LEN)
+SUN_BARB_TE_X = SUN_SMOOTH_X0 + (SUN_BARB_TE_FROM_NOSE - SUN_TIP_LEN)
+SUN_BARB_STATIC_X = SUN_SMOOTH_X0 + (SUN_BARB_STATIC_FROM_NOSE - SUN_TIP_LEN)
+SUN_BARB_PITOT_X = SUN_SMOOTH_X0 + (SUN_BARB_PITOT_FROM_NOSE - SUN_TIP_LEN)
+SUN_RECESS_BOSS_D = SUN_RECESS_D - 0.25
+SUN_RECESS_BOSS_LEN = SUN_RECESS_DEPTH - 0.50  # seat deep in aft cup
+# Integral clamp land covers most of the knurled band (forward of barbs).
+CLAMP_X0 = SUN_THREAD_X0 + 0.5
+CLAMP_LEN = SUN_THREAD_LEN - 1.5
+CLAMP_R_OUTER = CRADLE_R_CLAMP + 5.0  # thick meat around the snug bore
 SECTION_RY = 0.5 * OUTER_W  # ellipse semi-axis Y
 # Construction ellipse is taller than OUTER_H so flat chops leave real chords.
 SECTION_RZ = 0.5 * OUTER_H + max(TOP_CHOP, BOTTOM_CHOP)
 SECTION_ZC = 0.5 * OUTER_H + 0.5 * (TOP_CHOP - BOTTOM_CHOP)
+# Nose mouth: outer mold line fairs into the SUN tip OD with a thin sharp lip
+# (not a blunt bulkhead face).  Radial wall at the entry ≈ NOSE_LIP_WALL.
+NOSE_LIP_WALL = 0.70  # radial PETG at mouth (outer − bore); keeps a sharp lip
+NOSE_MOUTH_R = CRADLE_R_TIP + NOSE_LIP_WALL  # outer radius at x≈0
+# Tail tip radius used only as a fallback scale; stern is hemispherical.
 TIP_R = CRADLE_R + WALL + 1.5
 # Flat chord half-width at the top/bottom cuts (for sanity prints / asserts).
 _flat_t = (OUTER_H - SECTION_ZC) / SECTION_RZ
@@ -318,11 +338,13 @@ print(
     f"{'OK' if BED_BB <= BED_LIMIT else 'TOO LONG'})"
 )
 print(
-    f"SUN-B cradle: tipØ{SUN_TIP_OD} protrude {SUN_TIP_LEN}; "
-    f"smoothØ{SUN_SMOOTH_OD}@{SUN_SMOOTH_X0:.1f}..{SUN_THREAD_X0:.1f}; "
-    f"threadØ{SUN_THREAD_MAJOR}..{SUN_THREAD_X1:.1f}; "
+    f"SUN-B cradle: tipØ{SUN_TIP_OD} @ {SUN_TIP_X0:.1f}..{SUN_SMOOTH_X0:.1f} "
+    f"(protrude {-SUN_TIP_X0:.1f} past nose); "
+    f"shoulder seat @ {SUN_SMOOTH_X0:.1f}; "
+    f"smoothØ{SUN_SMOOTH_OD}..{SUN_THREAD_X0:.1f}; "
+    f"clampØ{SUN_THREAD_MAJOR}+{CLAMP_CLEAR} @{CLAMP_X0:.1f}..{CLAMP_X0+CLAMP_LEN:.1f}; "
     f"barbs TE/S/P @ {SUN_BARB_TE_X:.1f}/{SUN_BARB_STATIC_X:.1f}/{SUN_BARB_PITOT_X:.1f}; "
-    f"aft @ {SUN_AFT_X:.1f}"
+    f"aft boss @ {SUN_AFT_X:.1f}"
 )
 print(
     f"MS4525: tip Ø{MS_BARB_TIP_D} / shoulder Ø{MS_BARB_SHOULDER_D}; "
@@ -335,10 +357,10 @@ assert PITOT_AXIS_Z - CRADLE_R > WALL + 1.0, "pitot cradle too low"
 assert PITOT_AXIS_Z + SUN_BARB_TIP_ABOVE_AXIS + 6.0 < OUTER_H - WALL, (
     "SUN barb tips + hose need more headroom — raise OUTER_H or lower PITOT_AXIS_Z"
 )
-# Pod X of thread start equals smooth length; SUN-nose station T3 = tip+smooth.
-assert abs(SUN_THREAD_X0 - SUN_SMOOTH_LEN) < 0.05
-assert abs((SUN_TIP_LEN + SUN_SMOOTH_LEN) - (SUN_THREAD_X0 + SUN_TIP_LEN)) < 0.05
-assert abs(SUN_AFT_X - (SUN_TOTAL_LEN - SUN_TIP_LEN)) < 0.05
+assert abs(SUN_SMOOTH_X0 - SHOULDER_BH_T) < 0.05
+assert abs(SUN_TIP_X0 - (SUN_SMOOTH_X0 - SUN_TIP_LEN)) < 0.05
+assert abs(SUN_THREAD_X0 - (SUN_SMOOTH_X0 + SUN_SMOOTH_LEN)) < 0.05
+assert abs(SUN_AFT_X - (SUN_SMOOTH_X0 + SUN_TOTAL_LEN - SUN_TIP_LEN)) < 0.05
 assert BATT_Z0 >= WALL - 0.05, "battery pocket intersects floor"
 assert BATT_Z0 + BATT_POCKET_Z <= OUTER_H - WALL + 0.05, "battery pocket intersects top"
 assert DECK_Y1 - DECK_Y0 >= max(b["yl"] for b in BOARDS.values()) + 1.0, (
@@ -481,17 +503,17 @@ def _round_bottom_chord(solid: cq.Workplane, inset: float) -> cq.Workplane:
     return solid
 
 
-def _loft_ogive_nose(inset: float, tip_r: float) -> cq.Workplane:
+def _loft_ogive_nose(inset: float, mouth_r: float) -> cq.Workplane:
     """
-    Rounded nose: tip → full mid ellipse at NOSE_FAIR_LEN, then hold that
-    ellipse a few mm into the midspan so the junction is a volume overlap
-    (no freestream-facing mid butt face).
+    Nose fairs into the SUN tip: mouth circle (≈ tip OD + thin lip) on the
+    pitot axis → full mid ellipse at NOSE_FAIR_LEN, held a few mm into mid
+    so the junction is a volume overlap (no freestream mid butt).
     """
     ry = max(SECTION_RY - inset, 3.0)
     rz = max(SECTION_RZ - inset, 3.0)
     zc_mid = SECTION_ZC
-    tip_r = max(tip_r, 2.5)
-    tip_yc = TIP_YC
+    mouth_r = max(mouth_r, 2.0)
+    tip_yc = NOSE_TIP_YC
     tip_zc = PITOT_AXIS_Z
     n = OGIVE_STATIONS
     x_full = NOSE_FAIR_LEN
@@ -500,7 +522,7 @@ def _loft_ogive_nose(inset: float, tip_r: float) -> cq.Workplane:
         cq.Workplane("YZ")
         .workplane(offset=inset)
         .center(tip_yc, tip_zc)
-        .circle(tip_r)
+        .circle(mouth_r)
     )
     prev_x, prev_yc, prev_zc = inset, tip_yc, tip_zc
     for i in range(1, n):
@@ -513,8 +535,8 @@ def _loft_ogive_nose(inset: float, tip_r: float) -> cq.Workplane:
             s.workplane(offset=x - prev_x)
             .center(yc - prev_yc, zc - prev_zc)
             .ellipse(
-                max(tip_r + (ry - tip_r) * sc, 2.0),
-                max(tip_r + (rz - tip_r) * sc, 2.0),
+                max(mouth_r + (ry - mouth_r) * sc, 2.0),
+                max(mouth_r + (rz - mouth_r) * sc, 2.0),
             )
         )
         prev_x, prev_yc, prev_zc = x, yc, zc
@@ -527,20 +549,27 @@ def _loft_ogive_nose(inset: float, tip_r: float) -> cq.Workplane:
     return s.loft(ruled=False)
 
 
-def _loft_ogive_tail(inset: float, tip_r: float) -> cq.Workplane:
+def _loft_ogive_tail(inset: float, _unused_tip_r: float = 0.0) -> cq.Workplane:
     """
-    Rounded tail: hold full mid ellipse from MID_END_X-2.5, then taper to tip.
-    Hold avoids an aft-facing rectangular mid butt into the wake.
+    Convex rounded stern: quarter-ellipse radius law (blunt aft body), ending
+    on a centred circle.  Kept OCCT-boolean-safe (no sphere fuse, no pin tip,
+    no dense near-pole stations that invert shell classification).
     """
     ry = max(SECTION_RY - inset, 3.0)
     rz = max(SECTION_RZ - inset, 3.0)
     zc_mid = SECTION_ZC
-    tip_r = max(tip_r, 2.5)
-    tip_yc = TIP_YC
+    tip_yc = SECTION_YC  # centred stern — clean circular end rim
     tip_zc = zc_mid
     x_hold = MID_END_X - 2.5
     x_tip = OUTER_L - inset
-    n = OGIVE_STATIONS
+    # Blunt end radius: large enough to read convex, not a nipple.
+    end_r = max(min(0.40 * min(ry, rz), 12.0), 9.5)
+    n = OGIVE_STATIONS + 2
+
+    def stern_scale(t: float) -> float:
+        t = max(0.0, min(1.0, t))
+        return math.sqrt(max(0.0, 1.0 - t * t))
+
     s = (
         cq.Workplane("YZ")
         .workplane(offset=x_hold)
@@ -548,33 +577,36 @@ def _loft_ogive_tail(inset: float, tip_r: float) -> cq.Workplane:
         .ellipse(ry, rz)
     )
     prev_x, prev_yc, prev_zc = x_hold, SECTION_YC, zc_mid
-    # Station at MID_END_X (still full), then taper.
     s = (
         s.workplane(offset=MID_END_X - prev_x)
         .center(0, 0)
         .ellipse(ry, rz)
     )
     prev_x = MID_END_X
+    # Parameter runs 0→t_end so the last station lands on end_r via the
+    # ellipse law (side view = convex circular-arc style taper).
+    t_end = math.sqrt(max(0.0, 1.0 - (end_r / max(ry, end_r + 0.1)) ** 2))
+    t_end = max(0.55, min(0.82, t_end))
     for i in range(1, n):
-        t = i / (n - 1)
-        sc = _ogive_scale(t)
-        x = MID_END_X + (x_tip - MID_END_X) * t
-        yc = SECTION_YC + (tip_yc - SECTION_YC) * sc
-        zc = zc_mid + (tip_zc - zc_mid) * sc
+        t = t_end * i / (n - 1)
+        sc = stern_scale(t)
+        # Uniform X march to the tip (matches circular meridian when sc=sqrt).
+        x = MID_END_X + (x_tip - MID_END_X) * (i / (n - 1))
+        yc = SECTION_YC + (tip_yc - SECTION_YC) * (i / (n - 1))
+        zc = zc_mid + (tip_zc - zc_mid) * (i / (n - 1))
+        rr = max(ry * sc, end_r)
+        rz_i = max(rz * sc, end_r)
         if i == n - 1:
             s = (
                 s.workplane(offset=x - prev_x)
                 .center(yc - prev_yc, zc - prev_zc)
-                .circle(tip_r)
+                .circle(end_r)
             )
         else:
             s = (
                 s.workplane(offset=x - prev_x)
                 .center(yc - prev_yc, zc - prev_zc)
-                .ellipse(
-                    max(ry + (tip_r - ry) * sc, 2.0),
-                    max(rz + (tip_r - rz) * sc, 2.0),
-                )
+                .ellipse(rr, rz_i)
             )
         prev_x, prev_yc, prev_zc = x, yc, zc
     return s.loft(ruled=False)
@@ -586,13 +618,13 @@ def full_body_solid(inset: float = 0.0) -> cq.Workplane:
     together so the fairing junction has no rectangular step into the flow.
     Bottom chord gets an aero radius; top flat stays square for the fairing mate.
     """
-    tip_r = max(TIP_R - 0.35 * inset, 2.5)
+    mouth_r = max(NOSE_MOUTH_R - 0.35 * inset, 2.0)
     # Mid begins at the fairing junction; ogives hold full section into the mid.
     body_x0 = NOSE_FAIR_LEN
     body_len = MID_END_X - body_x0
     mid = _ellipse_mid(inset, body_x0, body_len)
-    nose = _loft_ogive_nose(inset, tip_r)
-    tail = _loft_ogive_tail(inset, tip_r * 0.75)
+    nose = _loft_ogive_nose(inset, mouth_r)
+    tail = _loft_ogive_tail(inset)
     body = mid.union(nose).union(tail)
     body = _flat_caps(body, inset)
     body = _round_bottom_chord(body, inset)
@@ -688,40 +720,72 @@ def hollow_half(side: int) -> cq.Workplane:
 
 def add_pitot_cradle(body: cq.Workplane, side: int) -> cq.Workplane:
     """
-    SUN-B clamp: tip mouth + stepped bore, upward barb bay, aft recess boss,
-    and bulkheads.  Barbs point +Z (ESA water tip).
+    SUN-B mount (no separate saddle STL):
+
+      1. Forward stop — tip-only nose BH; Ø10.65 seats at x=SHOULDER_BH_T
+      2. Integral split clamp — thick L/R land + snug bore on knurled band
+      3. Aft boss — seats end-B blind recess
+      4. Barb bay (+Z) and right-half hose escape
+
+    Closing the clamshell flange screws supplies the clamp press.
     """
-    # Protruding tip clearance through the nose (outside + into shoulder).
+    outer = full_body_solid(inset=0.0)
+
+    def _side_plate(x0: float, xlen: float) -> cq.Workplane:
+        if side > 0:
+            y_span = RIGHT_EXTENT - WALL - 0.4
+            plate = (
+                cq.Workplane("XY")
+                .transformed(offset=(x0, 0.0, WALL))
+                .box(xlen, y_span, OUTER_H - 2 * WALL, centered=(False, False, False))
+            )
+        else:
+            y_span = LEFT_EXTENT - WALL - 0.4
+            plate = (
+                cq.Workplane("XY")
+                .transformed(offset=(x0, -y_span, WALL))
+                .box(
+                    xlen,
+                    max(y_span, 1.0),
+                    OUTER_H - 2 * WALL,
+                    centered=(False, False, False),
+                )
+            )
+        return plate.intersect(outer)
+
+    # Nose shoulder bulkhead: tip-only bore; Ø10.65 seats on aft face (x=SHOULDER_BH_T).
+    body = _union_if_solid(body, _side_plate(0.0, SHOULDER_BH_T))
+    # Tip clearance through bulkhead + protrusion (never open this to smooth OD).
     body = body.cut(
         x_cylinder(
             CRADLE_R_TIP,
-            SUN_TIP_LEN + 2.0,
-            -(SUN_TIP_LEN + 1.0),
+            SUN_TIP_LEN + SHOULDER_BH_T + 2.0,
+            SUN_TIP_X0 - 1.0,
             0.0,
             PITOT_AXIS_Z,
         )
     )
-    # Ø10.65 smooth barrel from pod nose tip to thread.
+    # Ø10.65 smooth barrel — starts aft of the shoulder seat face.
     body = body.cut(
         x_cylinder(
             CRADLE_R_SMOOTH,
             SUN_SMOOTH_LEN + 0.4,
-            SUN_SMOOTH_X0 - 0.2,
+            SUN_SMOOTH_X0,
             0.0,
             PITOT_AXIS_Z,
         )
     )
-    # Threaded band (slightly roomier).
+    # Knurled band — snug bore (clamp land added below).
     body = body.cut(
         x_cylinder(
-            CRADLE_R_THREAD,
+            CRADLE_R_CLAMP,
             SUN_THREAD_LEN + 0.6,
             SUN_THREAD_X0 - 0.3,
             0.0,
             PITOT_AXIS_Z,
         )
     )
-    # Matte barb barrel to aft face.
+    # Matte barb barrel to aft face (slip).
     body = body.cut(
         x_cylinder(
             CRADLE_R_BARREL,
@@ -769,46 +833,34 @@ def add_pitot_cradle(body: cq.Workplane, side: int) -> cq.Workplane:
         )
         body = body.cut(hose)
 
-    outer = full_body_solid(inset=0.0)
+    # Mid-smooth bulkhead (secondary bearing on Ø10.65).
+    x_sm = SUN_SMOOTH_X0 + SUN_SMOOTH_LEN * 0.55
+    body = _union_if_solid(body, _side_plate(x_sm, 3.0))
+    body = body.cut(x_cylinder(CRADLE_R_SMOOTH, 5.0, x_sm - 1.0, 0.0, PITOT_AXIS_Z))
 
-    def _bulkhead(x: float, bore_r: float) -> cq.Workplane:
-        if side > 0:
-            y_span = RIGHT_EXTENT - WALL - 0.4
-            plate = (
-                cq.Workplane("XY")
-                .transformed(offset=(x, 0.0, WALL))
-                .box(3.0, y_span, OUTER_H - 2 * WALL, centered=(False, False, False))
-            )
-        else:
-            y_span = LEFT_EXTENT - WALL - 0.4
-            plate = (
-                cq.Workplane("XY")
-                .transformed(offset=(x, -y_span, WALL))
-                .box(
-                    3.0,
-                    max(y_span, 1.0),
-                    OUTER_H - 2 * WALL,
-                    centered=(False, False, False),
-                )
-            )
-        plate = plate.intersect(outer)
-        # Keep barb bay open on the upper bulkheads in the barb zone.
-        if x >= SUN_THREAD_X1 - 5.0:
-            plate = plate.cut(barb_bay)
-        return plate
+    # Integral split clamp land on the knurled band (thick, snug bore).
+    clamp = _side_plate(CLAMP_X0, CLAMP_LEN)
+    # Keep clamp meat near the bore; trim far electronics deck volume on right.
+    clamp_core = x_cylinder(
+        CLAMP_R_OUTER, CLAMP_LEN + 0.4, CLAMP_X0 - 0.2, 0.0, PITOT_AXIS_Z
+    )
+    clamp = clamp.intersect(clamp_core)
+    body = _union_if_solid(body, clamp)
+    body = body.cut(
+        x_cylinder(CRADLE_R_CLAMP, CLAMP_LEN + 1.0, CLAMP_X0 - 0.5, 0.0, PITOT_AXIS_Z)
+    )
 
-    # Clamp bulkheads: mid-smooth, mid-thread, just forward of aft face.
-    for x, br in (
-        (SUN_SMOOTH_X0 + SUN_SMOOTH_LEN * 0.55, CRADLE_R_SMOOTH),
-        (SUN_THREAD_X0 + SUN_THREAD_LEN * 0.5, CRADLE_R_THREAD),
-        (SUN_AFT_X - 8.0, CRADLE_R_BARREL),
-    ):
-        body = _union_if_solid(body, _bulkhead(x, br))
-        body = body.cut(x_cylinder(br, 5.0, x - 1.0, 0.0, PITOT_AXIS_Z))
+    # Bulkhead just forward of aft face (before barbs end).
+    x_aft_pre = SUN_AFT_X - 8.0
+    aft_pre = _side_plate(x_aft_pre, 3.0).cut(barb_bay)
+    body = _union_if_solid(body, aft_pre)
+    body = body.cut(
+        x_cylinder(CRADLE_R_BARREL, 5.0, x_aft_pre - 1.0, 0.0, PITOT_AXIS_Z)
+    )
 
-    # Aft bulkhead + locating boss into end-B blind recess (Ø6.03 × 7.06).
+    # Aft bulkhead + locating boss into end-B blind recess.
     aft_bh_x = SUN_AFT_X + 0.2
-    body = _union_if_solid(body, _bulkhead(aft_bh_x, CRADLE_R_BARREL))
+    body = _union_if_solid(body, _side_plate(aft_bh_x, 3.0))
     boss = x_cylinder(
         SUN_RECESS_BOSS_D / 2,
         SUN_RECESS_BOSS_LEN + 1.5,
@@ -816,7 +868,6 @@ def add_pitot_cradle(body: cq.Workplane, side: int) -> cq.Workplane:
         0.0,
         PITOT_AXIS_Z,
     )
-    # Boss only where this half has material near the seam.
     if side > 0:
         boss_keep = (
             cq.Workplane("XY")
@@ -850,8 +901,10 @@ def add_pitot_cradle(body: cq.Workplane, side: int) -> cq.Workplane:
 
 
 def build_sun_placeholder() -> cq.Workplane:
-    """Simple stepped solid for assembly STEP (not printed)."""
-    tip = x_cylinder(SUN_TIP_OD / 2, SUN_TIP_LEN, -SUN_TIP_LEN, 0.0, PITOT_AXIS_Z)
+    """Simple stepped solid for assembly STEP / QC renders (not printed)."""
+    tip = x_cylinder(
+        SUN_TIP_OD / 2, SUN_TIP_LEN, SUN_TIP_X0, 0.0, PITOT_AXIS_Z
+    )
     smooth = x_cylinder(
         SUN_SMOOTH_OD / 2, SUN_SMOOTH_LEN, SUN_SMOOTH_X0, 0.0, PITOT_AXIS_Z
     )
@@ -1155,6 +1208,164 @@ def _stl_boundary_edges(path: str, ndigits: int = 5) -> tuple[int, int]:
     return n, boundary
 
 
+def render_right_interior_png(right: cq.Workplane | None = None) -> str:
+    """
+    Orthogonal QC view into open pod_right (−Y → +Y): SUN-B + boards + battery
+    pocket.  Unique filename per envelope size.  Called from __main__ each regen.
+    """
+    import numpy as np
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Patch
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+    from itertools import product
+
+    def tessellate(wp: cq.Workplane, tol: float = 0.28):
+        verts, tris = wp.val().tessellate(tol, 0.2)
+        v = np.array([[p.x, p.y, p.z] for p in verts], dtype=np.float64)
+        return v[np.array(tris, dtype=np.int32)]
+
+    if right is None:
+        right = as_single_solid(build_right(), "pod_right")
+    out = f"pod_v2_{OUTER_L:.0f}x{OUTER_W:.0f}x{OUTER_H:.0f}_right_interior.png"
+
+    palette = {
+        "MS4525": (0.15, 0.45, 0.85, 1.0),
+        "BOOST": (0.90, 0.30, 0.15, 1.0),
+        "BABY": (0.20, 0.70, 0.30, 1.0),
+        "PROMICRO": (0.55, 0.30, 0.80, 1.0),
+        "BMP581": (0.95, 0.75, 0.10, 1.0),
+        "MAG": (0.80, 0.20, 0.55, 1.0),
+    }
+    # Distinct SUN segments so the Ø8.93→Ø10.65 shoulder stop is obvious.
+    sun_segs = (
+        (
+            x_cylinder(SUN_TIP_OD / 2, SUN_TIP_LEN, SUN_TIP_X0, 0.0, PITOT_AXIS_Z),
+            (0.55, 0.58, 0.62, 0.95),
+            "SUN tip Ø8.93",
+        ),
+        (
+            x_cylinder(
+                SUN_SMOOTH_OD / 2, SUN_SMOOTH_LEN, SUN_SMOOTH_X0, 0.0, PITOT_AXIS_Z
+            ),
+            (0.25, 0.35, 0.55, 0.98),
+            "SUN smooth Ø10.65",
+        ),
+        (
+            x_cylinder(
+                SUN_THREAD_MAJOR / 2, SUN_THREAD_LEN, SUN_THREAD_X0, 0.0, PITOT_AXIS_Z
+            ).union(
+                x_cylinder(
+                    SUN_BARREL_OD / 2,
+                    SUN_AFT_X - SUN_THREAD_X1,
+                    SUN_THREAD_X1,
+                    0.0,
+                    PITOT_AXIS_Z,
+                )
+            ),
+            (0.40, 0.48, 0.55, 0.95),
+            "SUN clamp/barrel",
+        ),
+    )
+
+    fig = plt.figure(figsize=(16, 7.2), dpi=150)
+    ax = fig.add_subplot(111, projection="3d")
+    ax.set_proj_type("ortho")
+
+    ax.add_collection3d(
+        Poly3DCollection(
+            tessellate(right, 0.28),
+            facecolors=(0.93, 0.78, 0.42, 0.18),
+            edgecolors=(0.35, 0.28, 0.15, 0.12),
+            linewidths=0.12,
+        )
+    )
+    for seg, color, _ in sun_segs:
+        ax.add_collection3d(
+            Poly3DCollection(
+                tessellate(seg, 0.35),
+                facecolors=color,
+                edgecolors=(0.15, 0.15, 0.18, 0.35),
+                linewidths=0.2,
+            )
+        )
+    for name, b in BOARDS.items():
+        pcb = (
+            cq.Workplane("XY")
+            .transformed(offset=(b["x0"], DECK_Y0 + b["y0"], b["z0"]))
+            .box(b["xl"], b["yl"], 2.0, centered=(False, False, False))
+        )
+        ax.add_collection3d(
+            Poly3DCollection(
+                tessellate(pcb, 0.5),
+                facecolors=palette[name],
+                edgecolors=(0.05, 0.05, 0.05, 0.5),
+                linewidths=0.3,
+            )
+        )
+        ax.text(
+            b["x0"] + b["xl"] / 2,
+            DECK_Y0 + b["y0"] + b["yl"] / 2,
+            b["z0"] + 4.0,
+            name,
+            fontsize=7,
+            ha="center",
+            va="bottom",
+            color="black",
+        )
+
+    bx0, by0, bz0 = BATT_X0, BATT_Y0, BATT_Z0
+    bx1 = bx0 + BATT_POCKET_X
+    by1 = by0 + BATT_POCKET_Y
+    bz1 = bz0 + BATT_POCKET_Z
+    corners = list(product([bx0, bx1], [by0, by1], [bz0, bz1]))
+    for i, j in (
+        (0, 1), (0, 2), (0, 4), (1, 3), (1, 5), (2, 3),
+        (2, 6), (3, 7), (4, 5), (4, 6), (5, 7), (6, 7),
+    ):
+        p, q = corners[i], corners[j]
+        ax.plot([p[0], q[0]], [p[1], q[1]], [p[2], q[2]], color="black", lw=1.1, alpha=0.85)
+
+    for x, label in (
+        (SUN_SMOOTH_X0, "shoulder\nseat"),
+        (CLAMP_X0, "clamp"),
+        (SUN_AFT_X, "aft"),
+    ):
+        ax.plot(
+            [x, x], [0, 8], [PITOT_AXIS_Z, PITOT_AXIS_Z],
+            color="crimson", lw=1.0, alpha=0.7,
+        )
+        ax.text(x, 10, PITOT_AXIS_Z + 6, label, fontsize=6, color="crimson", ha="center")
+
+    ax.set_xlim(SUN_TIP_X0 - 5, OUTER_L + 5)
+    ax.set_ylim(-2, RIGHT_EXTENT + 2)
+    ax.set_zlim(-2, OUTER_H + 2)
+    ax.set_box_aspect((OUTER_L - SUN_TIP_X0 + 10, RIGHT_EXTENT + 4, OUTER_H + 4))
+    ax.view_init(elev=0, azim=-90)
+    ax.set_xlabel("X aft (mm)")
+    ax.set_ylabel("Y right (mm)")
+    ax.set_zlabel("Z up (mm)")
+    ax.set_title(
+        "Right half interior — orthogonal (−Y → +Y)\n"
+        f"SUN tip @ {SUN_TIP_X0:.1f}; shoulder seat @ {SUN_SMOOTH_X0:.1f}; "
+        f"clamp ~{CLAMP_X0:.0f}–{CLAMP_X0 + CLAMP_LEN:.0f}; aft @ {SUN_AFT_X:.0f}"
+    )
+    ax.grid(True, alpha=0.25)
+    handles = [
+        Patch(facecolor=(0.93, 0.78, 0.42, 0.5), label="pod_right"),
+        *[Patch(facecolor=c[:3], label=lab) for _, c, lab in sun_segs],
+        Patch(facecolor="black", label="battery pocket"),
+    ] + [Patch(facecolor=palette[n], label=n) for n in palette]
+    ax.legend(handles=handles, loc="upper right", fontsize=7.5, framealpha=0.92)
+    plt.tight_layout()
+    fig.savefig(out, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    print(f"wrote {out}")
+    return out
+
+
 # =============================================================================
 if __name__ == "__main__":
     right = as_single_solid(build_right(), "pod_right")
@@ -1193,6 +1404,9 @@ if __name__ == "__main__":
         print(f"assembly SUN placeholder union skipped: {exc}")
     cq.exporters.export(asm, "pod_assembly.step")
     print("exported pod_left/right STL/STEP + pod_assembly.step (with SUN placeholder)")
+
+    # QC interior layout (ortho into open right half) — every revision.
+    render_right_interior_png(right)
 
     # Full requirements gate (STL + geometry).  See REQUIREMENTS.md / validate_pod.py.
     from validate_pod import validate_all
