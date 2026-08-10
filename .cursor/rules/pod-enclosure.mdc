@@ -19,6 +19,6 @@ cd enclosures/pod && uv run --project .. python validate_pod.py
 ```
 
 5. **Do not** claim STLs are AnkerMake-ready unless `validate_pod.py` exits 0 (watertight single-solid mesh + geometry checks).
-6. Preview PNGs: use a **unique filename per shape revision** (e.g. `pod_v2_220x52x77_flats.png`). Never reuse a stale cached name like `pod_v2_shape.png`.
+6. Preview PNGs: use a **unique filename per shape revision**. Every regen must write `pod_v2_*_right_interior.png` (ortho into open `pod_right` with SUN + boards) via `render_right_interior_png()`. Never reuse a stale cached name like `pod_v2_shape.png`.
 7. Print contracts: flange-down, 45° diagonal baked into STL export; M2.5 heat-set (no self-tap); boards/USB/static bay on `pod_right` only. Pitot is **ESA SUN-B** (`SUN_B_CALIPERS.md`) — not tubes-in-tube / printed plug.
 8. Enclosure-only work continues on **`master`** (no PR) unless the user asks otherwise.

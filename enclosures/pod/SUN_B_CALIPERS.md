@@ -74,7 +74,18 @@ Two polished diameters ahead of the thread (your correction — needed).
 | T2  | Threaded section **length**                       | Along side   | 25.37 |
 | T3  | Nose tip → **start of thread**                    | Along side   | 52.25 |
 | T4  | Nose tip → **end of thread** (barb region begins) | Along side   | 77.52 |
+| T5  | Thread count over a measured run | 28 threads / ~25 mm (re-confirmed) | see below |
 
+
+**Pitch interpretation:** 28 threads / 25 mm ⇒ pitch 25/28 ≈ **0.893 mm** ⇒
+**~28.4 TPI**. That is much closer to imperial **28 TPI** (pitch = 25.4/28 ≈
+0.907 mm; ~27.6 threads per exact 25 mm) than to M12×1.0 or M12×0.75. If the
+“25 mm” run was actually ~1″ on a ruler, the count is exactly 28 TPI.
+
+Major Ø11.76 mm (0.463″) is **between** common 28‑TPI sizes (7/16‑28 UNEF ≈
+11.11 mm, ½‑28 UNEF ≈ 12.7 mm) — likely a specialty OD with **28 TPI**, not a
+bin-stock nut. Confirm by trial-fitting a 28 TPI nut/die or measuring one full
+inch of thread before CAD of a captured nut.
 
 ---
 

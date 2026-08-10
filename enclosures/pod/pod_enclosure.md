@@ -49,6 +49,7 @@ Exports (CWD):
 | `pod_right.stl` / `.step` | Right half (electronics), print-oriented |
 | `pod_assembly.step` | Assembled (model orientation) + SUN-B placeholder |
 | `pod_v2_*_*.png` | Shape previews — **unique name per revision** |
+| `pod_v2_*_right_interior.png` | Ortho view into open `pod_right` (SUN + boards) |
 
 ## Coordinate system & layout
 
@@ -96,11 +97,14 @@ toward the MS4525.
 Calipers: [`SUN_B_CALIPERS.md`](SUN_B_CALIPERS.md). Printed L/R cradle only
 (no tubes-in-tube, no RTV plug):
 
-- Tip Ø8.93 protrudes **24.75 mm** past pod nose; Ø10.65 shoulder at `x=0`
-- Stepped clamp for smooth / thread / matte barrel; upward barb bay
+- Outer nose **fairs into tip Ø8.93** (thin sharp lip at the mouth); tip-only
+  bore through the nose bulkhead; Ø10.65 shoulder seats on that bulkhead’s
+  **aft face** at `x=SHOULDER_BH_T` (forward stop)
+- **Integral split clamp** on the knurled band (thick L/R land, snug bore;
+  flange screws supply the press — no separate saddle STL)
 - Aft blind recess (Ø6.03 × 7.06) seats on a printed locating boss
-- Primary flight load is the Prandtl cantilever into the brass SUN — cradle
-  clamps and locates, it does not invent shaft seals
+- Upward barb bay; hose escapes into the right half
+- Primary flight load is the Prandtl cantilever into the brass SUN
 
 ## Battery
 
