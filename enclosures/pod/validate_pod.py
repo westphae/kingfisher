@@ -195,6 +195,16 @@ def check_geometry(r: CheckResult) -> None:
     else:
         r.ok("I3 right half volume > left (electronics present)")
 
+    # A9 — ogive tip stays fused (a disconnected tip scrap used to leave a flat nub)
+    rbb = right.val().BoundingBox()
+    if rbb.xmax < pod.OUTER_L - 1.0:
+        r.fail(
+            f"A9 right tip truncated xmax={rbb.xmax:.1f} "
+            f"(want ≥ {pod.OUTER_L - 1.0:.1f}; tip scrap dropped?)"
+        )
+    else:
+        r.ok(f"A9 right tip xmax={rbb.xmax:.1f}")
+
     # P4 — print orientation / bed
     for name, solid, side in (
         ("pod_right", right, +1),
@@ -217,7 +227,8 @@ def check_geometry(r: CheckResult) -> None:
             )
 
     # L2 — SUN-B cradle stations present and tip protrudes past pod nose.
-    if abs(pod.SUN_AFT_X - (pod.SUN_TOTAL_LEN - pod.SUN_TIP_LEN)) > 0.05:
+    aft_expect = pod.SUN_SMOOTH_X0 + (pod.SUN_TOTAL_LEN - pod.SUN_TIP_LEN)
+    if abs(pod.SUN_AFT_X - aft_expect) > 0.05:
         r.fail("L2 SUN aft station math inconsistent")
     else:
         r.ok(
@@ -226,10 +237,17 @@ def check_geometry(r: CheckResult) -> None:
         )
     sun = pod.build_sun_placeholder()
     sbb = sun.val().BoundingBox()
-    if sbb.xmin > -pod.SUN_TIP_LEN + 0.5:
-        r.fail(f"L2 SUN tip xmin={sbb.xmin:.1f} (want ≈ {-pod.SUN_TIP_LEN})")
+    if abs(sbb.xmin - pod.SUN_TIP_X0) > 0.5:
+        r.fail(f"L2 SUN tip xmin={sbb.xmin:.1f} (want ≈ {pod.SUN_TIP_X0:.1f})")
     else:
         r.ok(f"L2 SUN tip protrudes to x={sbb.xmin:.1f}")
+    if abs(sbb.xmin) < 1.0 or sbb.xmin > 0:
+        r.fail("L2 SUN tip should extend past pod nose (x<0)")
+    # Shoulder seat: smooth OD must not start before nose bulkhead aft face.
+    if pod.SUN_SMOOTH_X0 < pod.SHOULDER_BH_T - 0.05:
+        r.fail("L2 SUN shoulder seat forward of nose bulkhead")
+    else:
+        r.ok(f"L2 SUN shoulder seats at x={pod.SUN_SMOOTH_X0:.1f} (tip-only BH)")
 
 
 def validate_all(*, stl_only: bool = False, directory: Path = POD_DIR) -> CheckResult:

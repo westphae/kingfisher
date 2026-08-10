@@ -15,12 +15,13 @@ cd enclosures/pod && uv run --project .. python validate_pod.py
 |----|-------------|
 | A1 | Overall skinny pod ~**220 × 52 × 77 mm** (L×W×H); asymmetric about seam (thin left, wider right for Babysitter 33 mm). |
 | A2 | Midsection cross-section is the **same construction ellipse** the ogive fairings end on — not a separate rectangle. |
-| A3 | Nose/tail are **multi-station ogive lofts** (rounded), tip centres near the seam (`TIP_YC`; exact 0.0 breaks OCCT fuse). |
+| A3 | Nose/tail are **multi-station ogive lofts**. Nose mouth fairs into the SUN tip OD (sharp lip). Stern is a **convex rounded** cap (no pin/nipple). Nose tip centre near seam (`NOSE_TIP_YC`; exact 0.0 breaks OCCT fuse). |
 | A4 | Fairings **hold full mid section** a few mm into the midspan so the junction is a volume overlap. |
 | A5 | **No planar freestream-facing butt** at nose/tail↔mid junctions (no rectangular step into the airflow). |
 | A6 | **Flat top** for wing-fairing mate: real chord width (not a vanishing apex cut); top edge may be square. |
 | A7 | **Flat bottom** so the pod stands upright; bottom↔side edge has aero **radius** (`BOTTOM_EDGE_R`). |
 | A8 | Left hollow must receive a real nose tip (xmin near 0), not only midsection. |
+| A9 | Tail tip stays **fused** to the half (xmax ≈ `OUTER_L`); no dropped tip scrap / flat nub. |
 
 ## Interior must stay interior
 
@@ -49,7 +50,7 @@ Slicer settings (supports, PETG starting points) live in
 | ID | Requirement |
 |----|-------------|
 | L1 | Battery pocket **50 × 6 × 70 mm** (X×Y×Z) + **1 mm/side**; Y thin across seam; Z = height. |
-| L2 | Pitot: **ESA SUN-B** clamp (dims in `SUN_B_CALIPERS.md`); tip protrudes; no tubes-in-tube / printed plug. |
+| L2 | Pitot: **ESA SUN-B** — tip shoulder + aft recess boss + integral knurled-band clamp in L/R (no separate saddle / tubes-in-tube). |
 | L3 | SUN aft barb → pitot → MS4525 `+`; middle → static → MS4525 `−`; forward TE capped; multi-hole bay → BMP581 only. |
 | L4 | SUN barbs: **6 mm ID** hose → COTS reducer → MS4525 3/32″ ID (~2.38 mm); v1 barbs tip Ø2.1 / shoulder Ø3.5. |
 
