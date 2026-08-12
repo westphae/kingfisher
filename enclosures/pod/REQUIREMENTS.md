@@ -23,13 +23,22 @@ cd enclosures/pod && uv run --project .. python validate_pod.py
 | A8 | Left hollow must receive a real nose tip (xmin near 0), not only midsection. |
 | A9 | Tail tip stays **fused** to the half (xmax ≈ `OUTER_L`); no dropped tip scrap / flat nub. |
 
+## Shell seal
+
+| ID | Requirement |
+|----|-------------|
+| S1 | Closed L+R cavity has **no freestream openings** except: (1) Prandtl/SUN tip mouth, (2) multi-hole static array, (3) Battery Babysitter micro-USB charge port (rubber dust plug / flap). No Pro Micro exterior USB window. **No exterior battery door/slot** — pack is installed from the open mating face before close-up. Bottom side fairings must be continuous (parallel-offset R, not a through-slot). |
+| S2 | Mating faces seal with a **thin rubber strip / O-cord in the right-half groove** and/or a thin RTV coat on the flange. Battery straddles the seam inside the sealed volume. |
+
 ## Interior must stay interior
 
 | ID | Requirement |
 |----|-------------|
 | I1 | Mating flange, pitot bulkheads, electronics deck, board posts, and nubs are **intersected with the outer envelope** before union. |
 | I2 | Built halves must not protrude outside `full_body_solid(0)` (extra volume ≈ 0). |
-| I3 | Board mounts / static bay / USB cutout exist **only on `pod_right`**. Left is cover + cradle + flange inserts. |
+| I3 | Board mounts / static bay / charge-port cutout exist **only on `pod_right`**. Left is cover + cradle. Clamshell: **heat-set inserts in the right flange**; clearance + counterbore through the left cover. |
+| I4 | Mating face stays **open for install** (battery + boards from the seam before close-up per S1). Flange is a **perimeter rail + local screw bosses** with insert/clearance holes — not a solid bulkhead across the bay. |
+| I5 | Boards must **not collide** with cradle bulkheads/clamp lands; leave cable clearance (`BOARD_GAP`) between boards. Cradle plates are clipped to `CRADLE_LAND_Y` so they stay around the pitot bore. Boards under the clamp in X sit outboard of `CRADLE_LAND_Y + BOARD_GAP`. |
 
 ## Print / export (AnkerMake M5C)
 
@@ -49,7 +58,7 @@ Slicer settings (supports, PETG starting points) live in
 
 | ID | Requirement |
 |----|-------------|
-| L1 | Battery pocket **50 × 6 × 70 mm** (X×Y×Z) + **1 mm/side**; Y thin across seam; Z = height. |
+| L1 | Battery pocket **50 × 6 × 70 mm** (X×Y×Z) + **1 mm/side**; Y thin across seam; Z = height. Pocket notches interior/flange only — never pierces outer skin. |
 | L2 | Pitot: **ESA SUN-B** — tip shoulder + aft recess boss + integral knurled-band clamp in L/R (no separate saddle / tubes-in-tube). |
 | L3 | SUN aft barb → pitot → MS4525 `+`; middle → static → MS4525 `−`; forward TE capped; multi-hole bay → BMP581 only. |
 | L4 | SUN barbs: **6 mm ID** hose → COTS reducer → MS4525 3/32″ ID (~2.38 mm); v1 barbs tip Ø2.1 / shoulder Ø3.5. |

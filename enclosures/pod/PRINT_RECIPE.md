@@ -42,7 +42,8 @@ Suggested support settings (tune after first preview):
 - Type: **tree / organic** if available (cleaner on the outer skin); else normal
 - Overhang threshold: **45–50°**
 - Top Z contact / interface: on (easier peel from PETG)
-- Prefer **not** filling small horizontal holes (static array, USB window, insert
+- Prefer **not** filling small horizontal holes (static array, Babysitter charge
+  USB, insert
   pilots, cradle bore) if the slicer offers paint-on — clear those in preview
 
 After a good slice, **File → Save Project** as a `.3mf` next to the STLs if you
@@ -69,10 +70,11 @@ skin looks fuzzy or stringy.
 ## After print
 
 1. Remove supports carefully from the outer skin (cosmetic + aero face).
-2. Deburr mating flange, SUN cradle bore / barb bay, USB window, static holes,
+2. Deburr mating flange, SUN cradle bore / barb bay, charge USB, static holes,
    screw paths.
-3. Install **M2.5 heat-set inserts** in left flange + right board posts (no
-   self-tap). Same pilot/depth scheme as the hub case.
+3. Install **M2.5 heat-set inserts** in the **right** flange + right board
+   posts (no self-tap). Left cover is clearance only. Same pilot/depth scheme
+   as the hub case.
 4. Dry-fit L/R halves around the **SUN-B** (barbs up; tip protruding; aft recess
    on the locating boss) before final assembly. Plumb 6 mm hose → COTS reducer
    → MS4525; cap the forward TE barb.

@@ -23,11 +23,18 @@ cd enclosures/pod && uv run --project .. python validate_pod.py
   ellipse as the fairing end-stations (held through a short overlap) so there
   is no rectangular freestream-facing step at the junction. Section is
   asymmetric about the seam (thin left cover, wider right electronics bay).
-- Asymmetry: **board mounts / static bay / USB are on `pod_right` only**;
-  `pod_left` is the cover (pitot cradle + flange inserts).
-- Fasteners: M2.5 brass heat-set inserts (same pilot / depth / screw-relief
-  scheme as the hub case). Left half = inserts; right half = clearance +
-  counterbore. Board posts also take inserts (not self-tap pilots).
+- Asymmetry: **board mounts / static bay / charge USB are on `pod_right` only**;
+- **Seal (S1/S2):** outer skin opens only at the SUN tip mouth, static-hole
+  array, and Babysitter micro-USB charge port (recess for a rubber dust plug /
+  flap). No Pro Micro wall window; no exterior battery door — install the LiPo
+  from the open mating face, then close. Mating faces: thin rubber strip /
+  O-cord in the right-half groove, and/or a thin RTV coat on the flange.
+  `pod_left` is the cover (pitot cradle + clearance holes).
+- Fasteners: **12× M2.5** (6 X-stations × top+bottom). Brass heat-set inserts
+  in the **right** flange (pilot = insert OD − melt allowance, plus screw-relief
+  bore below the insert). Left cover is clearance Ø + counterbore only — screws
+  go through the cover into the right-half inserts. Board posts on the right
+  deck also take the same inserts (not self-tap pilots).
 - Internal blanks (flange, bulkheads, deck, posts, static-bay walls) are
   **intersected with the outer envelope** so rectangular stock cannot poke
   through the curved skin.
@@ -61,9 +68,9 @@ no slicer rotation needed. Each STL is a **single solid** (AnkerMake rejects
 multi-body compounds). STEP files stay in model orientation for Fusion.
 
 **Left vs right:** only `pod_right` has the electronics deck, M2.5 insert
-posts, static bay, and USB cutout. `pod_left` is the cover (shell + pitot
-cradle bulkheads + flange inserts). A left-only print will not show sensor
-mounts — that is intentional, not a fit-check stub.
+posts, flange heat-set inserts, static bay, and Babysitter charge-port
+cutout. `pod_left` is the cover (shell + pitot cradle + flange clearance
+holes). A left-only print will not show sensor mounts — that is intentional.
 
 Nose → aft:
 
@@ -110,7 +117,10 @@ Calipers: [`SUN_B_CALIPERS.md`](SUN_B_CALIPERS.md). Printed L/R cradle only
 
 Pocket sized for **50 × 6 × 70 mm** (X × Y × Z) plus **1 mm** clearance per
 side; wedge with double-sided foam tape. Thickness is across the seam
-(centerline slab).
+(centerline slab). Install the pack (and foam) into the open right/left
+halves **before** fastening and sealing the clamshell — the pocket does not
+open to freestream. Charge in service via the Babysitter micro-USB window
+(+Y skin) with a rubber plug over the port when not charging.
 
 ## Fairing / wing attach (deferred)
 
