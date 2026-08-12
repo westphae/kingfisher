@@ -26,6 +26,7 @@
 #
 #  Fasteners: M2.5 brass heat-set inserts (hub-case lessons: pilot = OD -
 #  melt allowance, depth = insert length + extra, screw-relief bore below).
+#  Clamshell: screws through left cover → inserts in right electronics half.
 #
 #  Printer: AnkerMake M5C (220 x 220) — body may print diagonally.
 #  Re-run:  cd enclosures/pod && uv run --project .. python wing_pod_v2.py
@@ -47,10 +48,11 @@ import cadquery as cq
 # Nose/tail are multi-station ogive lofts.  Section is *asymmetric* about the
 # seam: thin left cover, wider right half for boards — total width ~52 mm.
 WALL = 2.5
-FLANGE_W = 6.0  # mating-face flange width (into each half)
+FLANGE_W = 6.0  # mating-face flange depth into each half (±Y)
+FLANGE_RAIL = 4.0  # perimeter rail on the open mating face (I4)
 GASKET_W = 1.6
 GASKET_D = 0.9
-SHELL_SCREW_INSET = 3.0  # flange screw centres from outer skin
+SHELL_SCREW_INSET = 3.0  # flange screw centres from outer skin (in the rails)
 NOSE_FAIR_LEN = 28.0  # tip -> full midsection
 # Slightly shorter than early v2 so SUN shoulder bulkhead (+SHOULDER_BH_T)
 # still fits the 210 mm diagonal bed budget.
@@ -60,7 +62,10 @@ OGIVE_STATIONS = 8  # loft stations in each fairing (smoothness)
 # (cutting at the ellipse apex left a vanishing flat top).
 TOP_CHOP = 10.0  # mm of ellipse above OUTER_H before the flat-top cut
 BOTTOM_CHOP = 10.0  # mm of ellipse below z=0 before the flat-bottom cut
-BOTTOM_EDGE_R = 8.0  # outer fillet on flat-bottom ↔ side (top stays square)
+# Bottom↔side radius: OCCT edge-fillet on the mid refuses to fuse cleanly with
+# the ogives (open STL), and keep-cylinder booleans leave a freestream trench /
+# rail.  Square corners until a section-native R is done properly.
+BOTTOM_EDGE_R = 0.0
 
 # Extents from the clamshell seam (y=0).  Right holds BABY_W=33 on the deck.
 LEFT_EXTENT = 10.0   # -Y cover side (battery half + wall + margin)
@@ -123,8 +128,8 @@ MS_BARB_SHOULDER_D = 3.5
 MS_BARB_DY = 4.3  # barb centre spacing on Holybro carrier
 
 # --- battery (slab on centerline) -------------------------------------------
-# User intent: 50 mm X (fore-aft), ~6 mm Y (L-R), 70 mm Z (top-bottom).
-# +1 mm each side for foam-tape wedge.
+# 50×6×70 mm pack (X×Y×Z) + 1 mm/side foam-tape.  Installed from the open
+# mating face before close-up — pocket must not open to freestream (S1).
 BATT_X = 50.0
 BATT_Y = 6.0
 BATT_Z = 70.0
@@ -154,8 +159,12 @@ STATIC_HOLE_COLS = 5
 STATIC_HOLE_PITCH_X = 4.5
 STATIC_HOLE_PITCH_Z = 4.5
 
-# USB-C window (Pro Micro)
-USBC_W, USBC_H = 12.0, 7.0
+# Exterior openings (only these may pierce the outer skin — see REQUIREMENTS S1):
+#   • Prandtl / SUN tip mouth
+#   • static-port hole array
+#   • Battery Babysitter micro-USB charge port
+# Pro Micro has no exterior USB window (program over Wi‑Fi / bench before close-up).
+USB_CHARGE_W, USB_CHARGE_H = 9.5, 4.8  # micro-B plug clearance
 
 # Printer bed — halves export already flange-down and rotated 45° for diagonal
 BED = 220.0
@@ -208,24 +217,37 @@ FLAT_BOT_HALF_W = SECTION_RY * math.sqrt(max(0.0, 1.0 - _flat_b * _flat_b))
 NOSE_BULKHEAD_X = SUN_AFT_X + 3.0
 
 # Electronics in the +Y bay on the RIGHT half only (left half is the cover).
-# MS/Boost sit beside the pitot cradle; battery X-span shared with Babysitter
-# + Pro Micro; mag aft of static bay but still in the constant midsection so
-# the tail fairing can taper cleanly.
-DECK_X0 = max(4.0, NOSE_FAIR_LEN * 0.35)
-MS_X0 = DECK_X0
-BOOST_X0 = MS_X0 + MS_L + 2.0
-BATT_X0 = max(NOSE_BULKHEAD_X + 0.5, BOOST_X0 + BOOST_L + 2.0)
+# Cradle bulkheads are clipped to CRADLE_LAND_Y so they cannot eat the bay.
+# Boards sit on the deck with BOARD_GAP for Qwiic / hose / finger clearance.
+BOARD_GAP = 5.0
+CRADLE_LAND_Y = CRADLE_R_CLAMP + 7.0  # cradle plates stay near the pitot bore
+_MID_SMOOTH_X1 = SUN_SMOOTH_X0 + SUN_SMOOTH_LEN * 0.55 + 3.0
+
+# Deck starts aft of the mid-smooth cradle plate + cable gap.
+DECK_X0 = max(NOSE_FAIR_LEN + 2.0, _MID_SMOOTH_X1 + BOARD_GAP)
+MS_X0 = DECK_X0  # under clamp in X; Y placement clears clamp land (see MS_Y0)
+# Boost aft of clamp + gap (and aft of MS) so it is not under the knurled land.
+BOOST_X0 = max(MS_X0 + MS_L + BOARD_GAP, CLAMP_X0 + CLAMP_LEN + BOARD_GAP)
+# Battery / Baby aft of SUN aft bulkhead + gap (and aft of boost).
+_AFT_BH_X1 = SUN_AFT_X + 0.2 + 3.0
+BATT_X0 = max(
+    NOSE_BULKHEAD_X + BOARD_GAP,
+    BOOST_X0 + BOOST_L + BOARD_GAP,
+    _AFT_BH_X1 + BOARD_GAP,
+)
 BABY_X0 = BATT_X0
-PM_X0 = BABY_X0 + BABY_L + 0.4
+# Baby + Pro Micro share the battery X-span; keep them tight (short Qwiic hop).
+PM_X0 = BABY_X0 + BABY_L + 1.0
 assert PM_X0 + PM_L <= BATT_X0 + BATT_POCKET_X + 0.6, (
     "Pro Micro does not fit in battery X-span; widen pack or shorten Baby gap"
 )
-BAY_X0 = max(PM_X0 + PM_L, BATT_X0 + BATT_POCKET_X) + 1.0
+BAY_X0 = max(PM_X0 + PM_L, BATT_X0 + BATT_POCKET_X) + BOARD_GAP
 BMP_X0 = BAY_X0 + BAY_WALL + 1.5
 BAY_X1 = BMP_X0 + BMP581_L + 2.5 + BAY_WALL
-MAG_X0 = BAY_X1 + 0.8
-# Constant midsection ends after mag; tail fairing is empty taper aft of that.
-MID_END_X = MAG_X0 + MAG_W + 1.0
+# Mag shares the static-bay X-span (outboard in Y) to keep bed diagonal.
+MAG_X0 = BMP_X0
+# Constant midsection ends after static bay; tail fairing is empty taper.
+MID_END_X = BAY_X1 + 1.0
 OUTER_L = MID_END_X + TAIL_FAIR_LEN
 # Flange / screws only where the section is constant (not in the fairings)
 FLANGE_X0 = NOSE_FAIR_LEN + 2.0
@@ -234,18 +256,29 @@ FLANGE_X1 = MID_END_X - 2.0
 BATT_Y0 = -BATT_POCKET_Y / 2
 BATT_Z0 = (OUTER_H - BATT_POCKET_Z) / 2
 
-# Electronics sit on a deck in the +Y half, clear of the battery slot
+# Electronics deck in the +Y half, clear of the battery slot
 DECK_Y0 = BATT_POCKET_Y / 2 + 1.0
 DECK_Y1 = RIGHT_EXTENT - WALL
 DECK_Z = WALL + STANDOFF_DECK_Z
 
-# Board Y placements (board-local origin = corner; world y = DECK_Y0 + y0)
-MS_Y0 = 1.0
-BOOST_Y0 = 1.0
+# Board Y placements (board-local origin = corner; world y = DECK_Y0 + y0).
+# Cradle plates + clamp land occupy y < CRADLE_LAND_Y; keep BOARD_GAP beyond that
+# so PCBs/cables do not graze the pitot clamp (MS sits under the clamp in X).
+_BOARD_Y0_CLEAR = CRADLE_LAND_Y + BOARD_GAP - DECK_Y0
+MS_Y0 = _BOARD_Y0_CLEAR
+assert DECK_Y0 + MS_Y0 + MS_W <= DECK_Y1 + 0.05, (
+    "MS4525 does not fit outboard of cradle land"
+)
+# Boost is just aft of the clamp; keep a small inboard margin but prefer outboard.
+BOOST_Y0 = min(_BOARD_Y0_CLEAR, DECK_Y1 - DECK_Y0 - BOOST_W)
 BABY_Y0 = 0.5
 PM_Y0 = 0.5
-BMP_Y0 = 1.0
-MAG_Y0 = 1.0
+BMP_Y0 = 0.5
+# Mag beside BMP (short axis along Y) inside the static-bay X-span.
+MAG_Y0 = BMP_Y0 + BMP581_W + 0.5
+assert DECK_Y0 + MAG_Y0 + MAG_W <= DECK_Y1 + 0.05, (
+    "mag does not fit outboard of BMP — narrow boards or widen bay"
+)
 
 _MSH = [
     (MS_HOLE_INSET, MS_W - MS_HOLE_INSET),
@@ -302,13 +335,14 @@ BOARDS = {
         x0=MAG_X0,
         y0=MAG_Y0,
         z0=DECK_Z,
-        xl=MAG_W,  # short axis along X (saves body length)
-        yl=MAG_L,
-        holes=[(MAG_W / 2, INSET)],  # hole opposite Qwiic; Qwiic faces +Y
+        xl=MAG_L,  # long along X (shares static-bay span with BMP)
+        yl=MAG_W,  # short along Y (fits outboard of BMP)
+        holes=[(INSET, MAG_W / 2)],  # hole opposite Qwiic; Qwiic faces +X aft
     ),
 }
 
-# Clamshell flange screws (world X, Z); left half gets inserts, right clearance
+# Clamshell flange screws (world X, Z): through left cover → heat-set inserts
+# in the right (electronics) half.  Top + bottom row at each station.
 _flange_xs = []
 x = FLANGE_X0 + 8.0
 while x < FLANGE_X1 - 8.0:
@@ -318,6 +352,7 @@ FLANGE_SCREWS = []
 for fx in _flange_xs:
     FLANGE_SCREWS.append((fx, OUTER_H - SHELL_SCREW_INSET))
     FLANGE_SCREWS.append((fx, SHELL_SCREW_INSET))
+assert CRADLE_LAND_Y + 8.0 < DECK_Y1, "cradle land leaves no electronics bay"
 
 # Half printed flange-down then rotated 45°: AABB side ≈ (L+H)/sqrt(2).
 BED_BB = (OUTER_L + OUTER_H) / math.sqrt(2)
@@ -327,7 +362,7 @@ print(
 )
 print(
     f"flats: top/bottom chords ~{2 * FLAT_TOP_HALF_W:.1f} mm "
-    f"(top square-edge; bottom R={BOTTOM_EDGE_R}); "
+    f"(square edges; bottom R deferred); "
     f"mid≡ogive ellipse so junction has no freestream step"
 )
 assert BOTTOM_EDGE_R < 0.5 * OUTER_W - 2.0, "BOTTOM_EDGE_R too large for body width"
@@ -435,6 +470,14 @@ def _flat_caps(solid: cq.Workplane, inset: float) -> cq.Workplane:
     return solid.cut(top_cut).cut(bot_cut)
 
 
+def _bottom_chord_half_w(inset: float) -> float:
+    """Half-width of the flat-bottom chord after flats at z=inset."""
+    ry = max(SECTION_RY - inset, 1.0)
+    rz = max(SECTION_RZ - inset, 1.0)
+    factor = (inset - SECTION_ZC) / rz
+    return ry * math.sqrt(max(0.0, 1.0 - factor * factor))
+
+
 def _ellipse_mid(inset: float, x0: float, length: float) -> cq.Workplane:
     """
     Constant midsection = same construction ellipse the ogives end on.
@@ -450,57 +493,6 @@ def _ellipse_mid(inset: float, x0: float, length: float) -> cq.Workplane:
         .extrude(length)
         .translate((x0, 0, 0))
     )
-
-
-def _bottom_chord_half_w(inset: float) -> float:
-    """Half-width of the flat-bottom chord after _flat_caps at z=inset."""
-    ry = max(SECTION_RY - inset, 1.0)
-    rz = max(SECTION_RZ - inset, 1.0)
-    factor = (inset - SECTION_ZC) / rz
-    return ry * math.sqrt(max(0.0, 1.0 - factor * factor))
-
-
-def _round_bottom_chord(solid: cq.Workplane, inset: float) -> cq.Workplane:
-    """
-    Radius flat-bottom ↔ ellipse edges along the midsection (top stays square).
-
-    Applied after flat caps.  Uses (corner box − keep cylinder) at each bottom
-    chord end — edge-fillet is unreliable on the lofted body.
-    """
-    r = BOTTOM_EDGE_R - inset
-    if r < 0.5:
-        return solid
-    half = _bottom_chord_half_w(inset)
-    if half <= r + 0.75:
-        print(f"WARNING bottom R={r:.1f} skipped (chord half-width {half:.1f})")
-        return solid
-    z0 = inset
-    x0 = NOSE_FAIR_LEN - 0.5
-    length = (MID_END_X + 0.5) - x0
-    for y_edge, inward in (
-        (SECTION_YC - half, +1.0),
-        (SECTION_YC + half, -1.0),
-    ):
-        y_ax = y_edge + inward * r
-        z_ax = z0 + r
-        keep = (
-            cq.Workplane("YZ")
-            .workplane(offset=x0)
-            .center(y_ax, z_ax)
-            .circle(r)
-            .extrude(length)
-        )
-        # Outboard of the chord end × below z0+r — the sharp corner wedge.
-        outboard = -inward
-        y_lo = min(y_edge, y_edge + outboard * r) - 0.05
-        y_hi = max(y_edge, y_edge + outboard * r) + 0.05
-        corner = (
-            cq.Workplane("XY")
-            .transformed(offset=(x0 - 0.05, y_lo, z0 - 0.05))
-            .box(length + 0.1, y_hi - y_lo, r + 0.1, centered=(False, False, False))
-        )
-        solid = solid.cut(corner.cut(keep))
-    return solid
 
 
 def _loft_ogive_nose(inset: float, mouth_r: float) -> cq.Workplane:
@@ -540,7 +532,6 @@ def _loft_ogive_nose(inset: float, mouth_r: float) -> cq.Workplane:
             )
         )
         prev_x, prev_yc, prev_zc = x, yc, zc
-    # Constant full section through the mid overlap.
     s = (
         s.workplane(offset=x_hold - prev_x)
         .center(SECTION_YC - prev_yc, zc_mid - prev_zc)
@@ -552,8 +543,7 @@ def _loft_ogive_nose(inset: float, mouth_r: float) -> cq.Workplane:
 def _loft_ogive_tail(inset: float, _unused_tip_r: float = 0.0) -> cq.Workplane:
     """
     Convex rounded stern: quarter-ellipse radius law (blunt aft body), ending
-    on a centred circle.  Kept OCCT-boolean-safe (no sphere fuse, no pin tip,
-    no dense near-pole stations that invert shell classification).
+    on a centred circle.  Kept OCCT-boolean-safe (no sphere fuse, no pin tip).
     """
     ry = max(SECTION_RY - inset, 3.0)
     rz = max(SECTION_RZ - inset, 3.0)
@@ -562,7 +552,6 @@ def _loft_ogive_tail(inset: float, _unused_tip_r: float = 0.0) -> cq.Workplane:
     tip_zc = zc_mid
     x_hold = MID_END_X - 2.5
     x_tip = OUTER_L - inset
-    # Blunt end radius: large enough to read convex, not a nipple.
     end_r = max(min(0.40 * min(ry, rz), 12.0), 9.5)
     n = OGIVE_STATIONS + 2
 
@@ -583,14 +572,11 @@ def _loft_ogive_tail(inset: float, _unused_tip_r: float = 0.0) -> cq.Workplane:
         .ellipse(ry, rz)
     )
     prev_x = MID_END_X
-    # Parameter runs 0→t_end so the last station lands on end_r via the
-    # ellipse law (side view = convex circular-arc style taper).
     t_end = math.sqrt(max(0.0, 1.0 - (end_r / max(ry, end_r + 0.1)) ** 2))
     t_end = max(0.55, min(0.82, t_end))
     for i in range(1, n):
         t = t_end * i / (n - 1)
         sc = stern_scale(t)
-        # Uniform X march to the tip (matches circular meridian when sc=sqrt).
         x = MID_END_X + (x_tip - MID_END_X) * (i / (n - 1))
         yc = SECTION_YC + (tip_yc - SECTION_YC) * (i / (n - 1))
         zc = zc_mid + (tip_zc - zc_mid) * (i / (n - 1))
@@ -613,22 +599,14 @@ def _loft_ogive_tail(inset: float, _unused_tip_r: float = 0.0) -> cq.Workplane:
 
 
 def full_body_solid(inset: float = 0.0) -> cq.Workplane:
-    """
-    Mid + ogive nose/tail share one construction ellipse, then flat-chopped
-    together so the fairing junction has no rectangular step into the flow.
-    Bottom chord gets an aero radius; top flat stays square for the fairing mate.
-    """
+    """Mid + ogive nose/tail: shared ellipse, flat-chopped top/bottom."""
     mouth_r = max(NOSE_MOUTH_R - 0.35 * inset, 2.0)
-    # Mid begins at the fairing junction; ogives hold full section into the mid.
     body_x0 = NOSE_FAIR_LEN
     body_len = MID_END_X - body_x0
-    mid = _ellipse_mid(inset, body_x0, body_len)
-    nose = _loft_ogive_nose(inset, mouth_r)
-    tail = _loft_ogive_tail(inset)
-    body = mid.union(nose).union(tail)
-    body = _flat_caps(body, inset)
-    body = _round_bottom_chord(body, inset)
-    return body
+    mid = _flat_caps(_ellipse_mid(inset, body_x0, body_len), inset)
+    nose = _flat_caps(_loft_ogive_nose(inset, mouth_r), inset)
+    tail = _flat_caps(_loft_ogive_tail(inset), inset)
+    return mid.union(nose).union(tail)
 
 
 def _keep_half(side: int) -> cq.Workplane:
@@ -653,65 +631,99 @@ def hollow_half(side: int) -> cq.Workplane:
     hollow = outer.cut(inner)
     body = hollow.intersect(_keep_half(side))
 
-    # Mating flange only along the constant midsection (not in nose/tail tapers)
+    # Open mating flange (I4): perimeter rail + local screw bosses.  The bay
+    # centre stays open so the battery and boards install from the seam before
+    # close-up (S1).  A solid bulkhead across the face blocks that path.
     fx0, fx1 = FLANGE_X0, FLANGE_X1
     flen = fx1 - fx0
+    z0 = WALL
+    z_h = OUTER_H - 2 * WALL
     if side > 0:
         flange = (
             cq.Workplane("XY")
-            .transformed(offset=(fx0, 0, WALL))
-            .box(flen, FLANGE_W, OUTER_H - 2 * WALL, centered=(False, False, False))
+            .transformed(offset=(fx0, 0, z0))
+            .box(flen, FLANGE_W, z_h, centered=(False, False, False))
         )
-        flange_cut = (
+        open_bay = (
             cq.Workplane("XY")
-            .transformed(offset=(fx0 + 1.0, 0, WALL + 1.0))
-            .box(flen - 2.0, FLANGE_W + 0.1, OUTER_H - 2 * WALL - 2.0,
-                 centered=(False, False, False))
+            .transformed(offset=(fx0 + FLANGE_RAIL, -0.05, z0 + FLANGE_RAIL))
+            .box(
+                flen - 2 * FLANGE_RAIL,
+                FLANGE_W + 0.2,
+                z_h - 2 * FLANGE_RAIL,
+                centered=(False, False, False),
+            )
         )
-        flange = flange.cut(flange_cut)
+        flange = flange.cut(open_bay)
+        for fx, fz in FLANGE_SCREWS:
+            flange = flange.union(
+                _cyl_y(fx, fz, -0.05, FLANGE_W + 0.1, BOSS_D / 2)
+            )
     else:
         flange = (
             cq.Workplane("XY")
-            .transformed(offset=(fx0, -FLANGE_W, WALL))
-            .box(flen, FLANGE_W, OUTER_H - 2 * WALL, centered=(False, False, False))
+            .transformed(offset=(fx0, -FLANGE_W, z0))
+            .box(flen, FLANGE_W, z_h, centered=(False, False, False))
         )
-        flange_cut = (
+        open_bay = (
             cq.Workplane("XY")
-            .transformed(offset=(fx0 + 1.0, -FLANGE_W - 0.1, WALL + 1.0))
-            .box(flen - 2.0, FLANGE_W + 0.1, OUTER_H - 2 * WALL - 2.0,
-                 centered=(False, False, False))
+            .transformed(
+                offset=(fx0 + FLANGE_RAIL, -FLANGE_W - 0.05, z0 + FLANGE_RAIL)
+            )
+            .box(
+                flen - 2 * FLANGE_RAIL,
+                FLANGE_W + 0.2,
+                z_h - 2 * FLANGE_RAIL,
+                centered=(False, False, False),
+            )
         )
-        flange = flange.cut(flange_cut)
-    # Clip flange to outer envelope so rectangular blanks don't poke out of
-    # the faired nose/tail (looked like stray tabs at the fairing junctions).
+        flange = flange.cut(open_bay)
+        for fx, fz in FLANGE_SCREWS:
+            flange = flange.union(
+                _cyl_y(fx, fz, 0.05, -(FLANGE_W + 0.1), BOSS_D / 2)
+            )
+    # Clip to outer envelope so rectangular blanks don't poke out of the ogives.
     flange = flange.intersect(outer)
     body = body.union(flange)
 
-    # Gasket groove on the right-half mating face only (O-cord / silicone).
+    # Mating-face seal groove on the right-half rails (thin rubber / O-cord).
+    # A wipe of RTV on the flange face is an acceptable alternative / backup.
     if side > 0:
+        g_z0 = z0 + 0.5 * (FLANGE_RAIL - GASKET_W)
+        g_z1 = OUTER_H - WALL - FLANGE_RAIL + 0.5 * (FLANGE_RAIL - GASKET_W)
+        g_x0 = fx0 + 0.5 * (FLANGE_RAIL - GASKET_W)
+        g_x1 = fx1 - 0.5 * (FLANGE_RAIL + GASKET_W)
         groove = (
             cq.Workplane("XY")
-            .transformed(offset=(fx0 + 2.0, -0.05, WALL + 3.0))
-            .box(flen - 4.0, GASKET_D + 0.1, GASKET_W, centered=(False, False, False))
+            .transformed(offset=(fx0 + FLANGE_RAIL * 0.25, -0.05, g_z0))
+            .box(flen - FLANGE_RAIL * 0.5, GASKET_D + 0.1, GASKET_W,
+                 centered=(False, False, False))
         )
         groove2 = (
             cq.Workplane("XY")
-            .transformed(
-                offset=(fx0 + 2.0, -0.05, OUTER_H - WALL - 3.0 - GASKET_W)
-            )
-            .box(flen - 4.0, GASKET_D + 0.1, GASKET_W, centered=(False, False, False))
+            .transformed(offset=(fx0 + FLANGE_RAIL * 0.25, -0.05, g_z1))
+            .box(flen - FLANGE_RAIL * 0.5, GASKET_D + 0.1, GASKET_W,
+                 centered=(False, False, False))
         )
         groove3 = (
             cq.Workplane("XY")
-            .transformed(offset=(fx0 + 2.0, -0.05, WALL + 3.0))
-            .box(GASKET_W, GASKET_D + 0.1, OUTER_H - 2 * WALL - 6.0,
-                 centered=(False, False, False))
+            .transformed(offset=(g_x0, -0.05, z0 + FLANGE_RAIL * 0.25))
+            .box(
+                GASKET_W,
+                GASKET_D + 0.1,
+                z_h - FLANGE_RAIL * 0.5,
+                centered=(False, False, False),
+            )
         )
         groove4 = (
             cq.Workplane("XY")
-            .transformed(offset=(fx1 - 2.0 - GASKET_W, -0.05, WALL + 3.0))
-            .box(GASKET_W, GASKET_D + 0.1, OUTER_H - 2 * WALL - 6.0,
-                 centered=(False, False, False))
+            .transformed(offset=(g_x1, -0.05, z0 + FLANGE_RAIL * 0.25))
+            .box(
+                GASKET_W,
+                GASKET_D + 0.1,
+                z_h - FLANGE_RAIL * 0.5,
+                centered=(False, False, False),
+            )
         )
         body = body.cut(groove).cut(groove2).cut(groove3).cut(groove4)
 
@@ -732,15 +744,19 @@ def add_pitot_cradle(body: cq.Workplane, side: int) -> cq.Workplane:
     outer = full_body_solid(inset=0.0)
 
     def _side_plate(x0: float, xlen: float) -> cq.Workplane:
+        """
+        Cradle bulkhead blank, clipped to CRADLE_LAND_Y so plates stay around
+        the pitot bore and do not span the electronics bay (board collisions).
+        """
         if side > 0:
-            y_span = RIGHT_EXTENT - WALL - 0.4
+            y_span = min(CRADLE_LAND_Y, RIGHT_EXTENT - WALL - 0.4)
             plate = (
                 cq.Workplane("XY")
                 .transformed(offset=(x0, 0.0, WALL))
                 .box(xlen, y_span, OUTER_H - 2 * WALL, centered=(False, False, False))
             )
         else:
-            y_span = LEFT_EXTENT - WALL - 0.4
+            y_span = min(CRADLE_LAND_Y, LEFT_EXTENT - WALL - 0.4)
             plate = (
                 cq.Workplane("XY")
                 .transformed(offset=(x0, -y_span, WALL))
@@ -921,55 +937,119 @@ def build_sun_placeholder() -> cq.Workplane:
     return tip.union(smooth).union(thread).union(barrel)
 
 
+def _mating_flange_protect() -> cq.Workplane:
+    """
+    Perimeter rails + screw bosses on both halves.  Subtracted from the battery
+    pocket tool so a full-height pack recess cannot erase the open flange (I4).
+    """
+    fx0, fx1 = FLANGE_X0, FLANGE_X1
+    flen = fx1 - fx0
+    z0 = WALL
+    z_h = OUTER_H - 2 * WALL
+    parts: list[cq.Workplane] = []
+    for y0, y_sign in ((0.0, +1.0), (-FLANGE_W, -1.0)):
+        rail = (
+            cq.Workplane("XY")
+            .transformed(offset=(fx0, y0, z0))
+            .box(flen, FLANGE_W, z_h, centered=(False, False, False))
+        )
+        open_bay = (
+            cq.Workplane("XY")
+            .transformed(offset=(fx0 + FLANGE_RAIL, y0 - 0.05, z0 + FLANGE_RAIL))
+            .box(
+                flen - 2 * FLANGE_RAIL,
+                FLANGE_W + 0.2,
+                z_h - 2 * FLANGE_RAIL,
+                centered=(False, False, False),
+            )
+        )
+        rail = rail.cut(open_bay)
+        for fx, fz in FLANGE_SCREWS:
+            rail = rail.union(
+                _cyl_y(fx, fz, 0.0 if y_sign > 0 else 0.0, y_sign * FLANGE_W, BOSS_D / 2)
+            )
+        parts.append(rail)
+    out = parts[0].union(parts[1])
+    return out.intersect(full_body_solid(inset=0.0))
+
+
 def add_battery_pocket(body: cq.Workplane) -> cq.Workplane:
+    """
+    Centerline pack recess.  The LiPo is installed from the open mating face
+    before the clamshell is closed — this cut only notches interior/flange
+    material.  It must never pierce the outer skin (a raw box cut previously
+    punched a freestream slot through the thin left bottom and the floor/roof).
+    Top/bottom flange rails and screw bosses are preserved (I4).
+    """
+    outer = full_body_solid(inset=0.0)
+    inner = full_body_solid(inset=WALL)
+    wall = outer.cut(inner)
     pocket = (
         cq.Workplane("XY")
         .transformed(offset=(BATT_X0, BATT_Y0, BATT_Z0))
         .box(BATT_POCKET_X, BATT_POCKET_Y, BATT_POCKET_Z, centered=(False, False, False))
     )
-    return body.cut(pocket)
+    # Interior notch only: inside outer envelope, but not through the skin.
+    cut_tool = pocket.intersect(outer).cut(wall)
+    try:
+        cut_tool = cut_tool.cut(_mating_flange_protect())
+    except Exception:
+        pass
+    try:
+        if cut_tool.val().Volume() < 1.0:
+            return body
+    except Exception:
+        return body
+    return body.cut(cut_tool)
+
+
+def _cyl_y(x: float, z: float, y0: float, dy: float, r: float) -> cq.Workplane:
+    """
+    Solid cylinder radius r along ±Y from y0 (length |dy|).
+
+    CadQuery's "XZ" workplane has normal −Y, so offset/extrude sign flips are
+    easy to get wrong and previously cut flange screws into empty space.
+    """
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+
+    direction = 1.0 if dy >= 0.0 else -1.0
+    ax = gp_Ax2(gp_Pnt(x, y0, z), gp_Dir(0.0, direction, 0.0))
+    return cq.Workplane().add(
+        cq.Shape.cast(BRepPrimAPI_MakeCylinder(ax, r, abs(dy)).Shape())
+    )
 
 
 def add_flange_fasteners(body: cq.Workplane, side: int) -> cq.Workplane:
+    """
+    Clamshell fasteners: M2.5 screws through the left cover into heat-set
+    inserts in the right (electronics) half.
+    """
     for (fx, fz) in FLANGE_SCREWS:
-        if side < 0:
-            # Inserts in left half, axis along +Y into the flange
-            pilot = (
-                cq.Workplane("XZ")
-                .workplane(offset=-0.01)
-                .center(fx, fz)
-                .circle(INS_HOLE_D / 2)
-                .extrude(-INS_DEPTH)
+        if side > 0:
+            # Heat-set pilots in the right flange, axis +Y from the seam.
+            body = body.cut(_cyl_y(fx, fz, -0.05, INS_DEPTH + 0.1, INS_HOLE_D / 2))
+            relief_depth = min(
+                INS_DEPTH + SCREW_RELIEF_EXTRA, FLANGE_W - SCREW_RELIEF_FLOOR
             )
-            body = body.cut(pilot)
-            relief_depth = min(INS_DEPTH + SCREW_RELIEF_EXTRA, FLANGE_W - SCREW_RELIEF_FLOOR)
-            if relief_depth > INS_DEPTH:
-                relief = (
-                    cq.Workplane("XZ")
-                    .workplane(offset=-0.01)
-                    .center(fx, fz)
-                    .circle(SCREW_RELIEF_D / 2)
-                    .extrude(-relief_depth)
+            if relief_depth > INS_DEPTH + 0.05:
+                body = body.cut(
+                    _cyl_y(fx, fz, -0.05, relief_depth + 0.1, SCREW_RELIEF_D / 2)
                 )
-                body = body.cut(relief)
         else:
-            # Clearance + counterbore from the right outer side through flange
-            hole = (
-                cq.Workplane("XZ")
-                .workplane(offset=FLANGE_W + 0.1)
-                .center(fx, fz)
-                .circle(LID_SCREW_D / 2)
-                .extrude(-(FLANGE_W + 0.2))
+            # Clearance through the left cover flange; CB on the −Y (exterior) face.
+            body = body.cut(
+                _cyl_y(fx, fz, 0.1, -(FLANGE_W + 0.3), LID_SCREW_D / 2)
             )
-            body = body.cut(hole)
-            cb = (
-                cq.Workplane("XZ")
-                .workplane(offset=FLANGE_W + 0.1)
-                .center(fx, fz)
-                .circle(LID_CB_D / 2)
-                .extrude(-(LID_CB_DEPTH))
+            body = body.cut(
+                _cyl_y(
+                    fx,
+                    fz,
+                    -FLANGE_W + 0.05,
+                    -(LID_CB_DEPTH + 0.15),
+                    LID_CB_D / 2,
+                )
             )
-            body = body.cut(cb)
     return body
 
 
@@ -1089,19 +1169,32 @@ def add_static_bay(body: cq.Workplane) -> cq.Workplane:
     return body
 
 
-def add_usb_cutout(body: cq.Workplane) -> cq.Workplane:
-    pm = BOARDS["PROMICRO"]
-    # USB-C on the board's -Y edge in board frame — face it toward +Y outer wall
-    ux = pm["x0"] + pm["xl"] / 2
-    uz = DECK_Z + 3.0 + PCB_T
+def add_charge_port_cutout(body: cq.Workplane) -> cq.Workplane:
+    """
+    Micro-USB charge window for the Battery Babysitter through the +Y skin.
+    Connector sits on the board's +Y edge (faces the outer wall).  A shallow
+    outer recess accepts a COTS rubber USB dust plug / flap door.
+    """
+    baby = BOARDS["BABY"]
+    ux = baby["x0"] + baby["xl"] / 2
+    uz = baby["z0"] + PCB_T + USB_CHARGE_H / 2 - 0.5
+    # Through-hole for the plug
     cut = (
         cq.Workplane("XZ")
         .workplane(offset=HALF_W + 0.1)
         .center(ux, uz)
-        .rect(USBC_W, USBC_H, centered=True)
+        .rect(USB_CHARGE_W, USB_CHARGE_H, centered=True)
         .extrude(-(WALL + 4.0))
     )
-    return body.cut(cut)
+    # Outer recess for rubber door / dust plug (larger than the hole)
+    recess = (
+        cq.Workplane("XZ")
+        .workplane(offset=HALF_W + 0.1)
+        .center(ux, uz)
+        .rect(USB_CHARGE_W + 4.0, USB_CHARGE_H + 3.0, centered=True)
+        .extrude(-1.2)
+    )
+    return body.cut(cut).cut(recess)
 
 
 def build_right() -> cq.Workplane:
@@ -1111,7 +1204,7 @@ def build_right() -> cq.Workplane:
     body = add_flange_fasteners(body, +1)
     body = add_electronics_deck(body)
     body = add_static_bay(body)
-    body = add_usb_cutout(body)
+    body = add_charge_port_cutout(body)
     return body
 
 
