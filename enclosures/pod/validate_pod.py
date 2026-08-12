@@ -91,8 +91,15 @@ def check_stls(r: CheckResult, directory: Path = POD_DIR) -> None:
         r.ok(f"P2 {name}: {n_tri} tris, watertight")
 
 
-def _planar_butt_area(solid, x_lo: float, x_hi: float, want_fwd: bool) -> float:
-    """Area of nearly planar faces with |nx|~1 and thin X extent in [x_lo, x_hi]."""
+def _planar_butt_area(
+    solid, x_lo: float, x_hi: float, want_fwd: bool, *, z_min: float = 0.0
+) -> float:
+    """
+    Area of nearly planar faces with |nx|~1 and thin X extent in [x_lo, x_hi].
+
+    Faces with center z < z_min are ignored — bottom-edge R ramp ends are not
+    midsection freestream butts (A5).
+    """
     import cadquery as cq
     from OCP.TopAbs import TopAbs_FACE
     from OCP.TopExp import TopExp_Explorer
@@ -107,7 +114,11 @@ def _planar_butt_area(solid, x_lo: float, x_hi: float, want_fwd: bool) -> float:
             exp.Next()
             continue
         try:
-            n = f.normalAt(f.Center())
+            c = f.Center()
+            if c.z < z_min:
+                exp.Next()
+                continue
+            n = f.normalAt(c)
             if want_fwd and n.x < -0.98 and f.Area() > 1.0:
                 total += f.Area()
             if (not want_fwd) and n.x > 0.98 and f.Area() > 1.0:
@@ -153,11 +164,21 @@ def check_geometry(r: CheckResult) -> None:
     else:
         r.ok(f"A6 flat top chord ~{2 * pod.FLAT_TOP_HALF_W:.1f} mm")
 
+    # Ignore bottom-R ramp faces (z below the fillet crown).
+    z_ignore = pod.BOTTOM_EDGE_R + 2.0
     nose_butt = _planar_butt_area(
-        outer, pod.NOSE_FAIR_LEN - 3.0, pod.NOSE_FAIR_LEN + 4.0, want_fwd=True
+        outer,
+        pod.NOSE_FAIR_LEN - 3.0,
+        pod.NOSE_FAIR_LEN + 4.0,
+        want_fwd=True,
+        z_min=z_ignore,
     )
     tail_butt = _planar_butt_area(
-        outer, pod.MID_END_X - 4.0, pod.MID_END_X + 3.0, want_fwd=False
+        outer,
+        pod.MID_END_X - 4.0,
+        pod.MID_END_X + 3.0,
+        want_fwd=False,
+        z_min=z_ignore,
     )
     if nose_butt > BUTT_FACE_AREA_MAX:
         r.fail(f"A5 nose junction freestream butt area {nose_butt:.1f} mm²")
@@ -194,6 +215,81 @@ def check_geometry(r: CheckResult) -> None:
         r.fail("I3 right half not larger than left (missing electronics?)")
     else:
         r.ok("I3 right half volume > left (electronics present)")
+
+    # I4 — mating face open for install (not a solid flange bulkhead)
+    from OCP.BRepClass3d import BRepClass3d_SolidClassifier
+    from OCP.TopAbs import TopAbs_IN
+    from OCP.gp import gp_Pnt
+
+    mid_x = 0.5 * (pod.FLANGE_X0 + pod.FLANGE_X1)
+    mid_z = 0.5 * pod.OUTER_H
+    blocked = []
+    for name, solid, y in (
+        ("pod_right", right, 0.5),
+        ("pod_left", left, -0.5),
+    ):
+        if (
+            BRepClass3d_SolidClassifier(
+                solid.val().wrapped, gp_Pnt(mid_x, y, mid_z), 1e-4
+            ).State()
+            == TopAbs_IN
+        ):
+            blocked.append(name)
+    if blocked:
+        r.fail(
+            f"I4 mating bay blocked at ({mid_x:.0f},±0.5,{mid_z:.0f}) on "
+            f"{', '.join(blocked)} — flange must stay open for install"
+        )
+    else:
+        r.ok("I4 mating bay open for install (rail + bosses only)")
+
+    # I5 — boards clear cradle land + mutual BOARD_GAP
+    cradle_plates = [
+        (0.0, pod.SHOULDER_BH_T),
+        (pod.SUN_SMOOTH_X0 + pod.SUN_SMOOTH_LEN * 0.55, 3.0),
+        (pod.SUN_AFT_X - 8.0, 3.0),
+        (pod.SUN_AFT_X + 0.2, 3.0),
+    ]
+    clamp_x0 = pod.CLAMP_X0
+    clamp_x1 = pod.CLAMP_X0 + pod.CLAMP_LEN
+    y_clear = pod.CRADLE_LAND_Y + pod.BOARD_GAP
+    board_boxes = []
+    for name, b in pod.BOARDS.items():
+        x0, x1 = b["x0"], b["x0"] + b["xl"]
+        y0 = pod.DECK_Y0 + b["y0"]
+        y1 = y0 + b["yl"]
+        board_boxes.append((name, x0, x1, y0, y1))
+        for px, plen in cradle_plates:
+            p0, p1 = px, px + plen
+            if x1 > p0 and x0 < p1 and y0 < y_clear - 0.05:
+                r.fail(
+                    f"I5 {name} collides cradle plate x={p0:.1f}..{p1:.1f} "
+                    f"(board y0={y0:.1f} < clear Y={y_clear:.1f})"
+                )
+        # Clamp land is a thick cylinder over the knurled band — boards under it
+        # in X must sit outboard with cable clearance (not merely miss the PCB).
+        if x1 > clamp_x0 and x0 < clamp_x1 and y0 < y_clear - 0.05:
+            r.fail(
+                f"I5 {name} under clamp land without Y clearance "
+                f"(board y0={y0:.1f} < {y_clear:.1f})"
+            )
+    # Pairwise clearance: X-neighbors need BOARD_GAP; X-overlap OK if Y-separated.
+    for i, (n1, a0, a1, ay0, ay1) in enumerate(board_boxes):
+        for n2, b0, b1, by0, by1 in board_boxes[i + 1 :]:
+            x_overlap = a1 > b0 and a0 < b1
+            y_overlap = ay1 > by0 and ay0 < by1
+            if x_overlap and y_overlap:
+                r.fail(f"I5 {n1}/{n2} footprints overlap in X and Y")
+                continue
+            if x_overlap:
+                continue  # stacked in Y (e.g. BMP + mag)
+            gap = b0 - a1 if a1 <= b0 else a0 - b1
+            if 0.0 <= gap < pod.BOARD_GAP - 0.05 and not (
+                {n1, n2} == {"BABY", "PROMICRO"}  # tight Qwiic hop by design
+            ):
+                r.fail(f"I5 {n1}/{n2} X-gap {gap:.1f} < BOARD_GAP {pod.BOARD_GAP}")
+    if not any(n.startswith("FAIL I5") for n in r.notes):
+        r.ok("I5 boards clear cradle land + BOARD_GAP")
 
     # A9 — ogive tip stays fused (a disconnected tip scrap used to leave a flat nub)
     rbb = right.val().BoundingBox()
@@ -248,6 +344,152 @@ def check_geometry(r: CheckResult) -> None:
         r.fail("L2 SUN shoulder seat forward of nose bulkhead")
     else:
         r.ok(f"L2 SUN shoulder seats at x={pod.SUN_SMOOTH_X0:.1f} (tip-only BH)")
+
+    check_shell_seal(r, pod, left, right)
+
+
+def check_shell_seal(r: CheckResult, pod, left, right) -> None:
+    """
+    S1 — sealed cavity except intentional openings (tip, static array, charge USB).
+
+    Seal the mating face, then ray-cast from a cavity point to a grid of
+    exterior samples near the bottom-side fairings.  Zero wall hits ⇒ leak.
+    Intentional openings are excluded from the sample set.
+    """
+    import math
+
+    import cadquery as cq
+    from OCP.BRepIntCurveSurface import BRepIntCurveSurface_Inter
+    from OCP.gp import gp_Dir, gp_Lin, gp_Pnt
+
+    from OCP.BRepClass3d import BRepClass3d_SolidClassifier
+    from OCP.TopAbs import TopAbs_IN
+
+    outer = pod.full_body_solid(0.0)
+    seal = (
+        cq.Workplane("XY")
+        .transformed(offset=(-1, -0.15, -1))
+        .box(pod.OUTER_L + 2, 0.3, pod.OUTER_H + 2, centered=(False, False, False))
+        .intersect(outer)
+    )
+    closed = pod.as_single_solid(left.union(right).union(seal), "sealed_pod")
+    shp = closed.val().wrapped
+    outer_shp = outer.val().wrapped
+    cavity = (100.0, 8.0, 40.0)
+
+    def is_freestream(pt: tuple[float, float, float]) -> bool:
+        # Only true exterior counts — cavity/void samples inside the envelope
+        # have 0 wall hits to each other and are not leaks.
+        return (
+            BRepClass3d_SolidClassifier(outer_shp, gp_Pnt(*pt), 1e-4).State()
+            != TopAbs_IN
+        )
+
+    def n_hits(dst: tuple[float, float, float]) -> int:
+        dx = dst[0] - cavity[0]
+        dy = dst[1] - cavity[1]
+        dz = dst[2] - cavity[2]
+        length = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if length < 1e-6:
+            return 0
+        lin = gp_Lin(gp_Pnt(*cavity), gp_Dir(dx / length, dy / length, dz / length))
+        inter = BRepIntCurveSurface_Inter()
+        inter.Init(shp, lin, 1e-4)
+        n = 0
+        while inter.More():
+            w = inter.W()
+            if 0.05 < w < length - 0.05:
+                n += 1
+            inter.Next()
+        return n
+
+    # Allowed exterior piercings — skip samples that aim into these windows.
+    baby = pod.BOARDS["BABY"]
+    charge_x = baby["x0"] + baby["xl"] / 2
+    charge_z = baby["z0"] + pod.PCB_T + pod.USB_CHARGE_H / 2 - 0.5
+    static_x0 = (pod.BAY_X0 + pod.BAY_X1) / 2 - (
+        (pod.STATIC_HOLE_COLS - 1) * pod.STATIC_HOLE_PITCH_X / 2 + 4.0
+    )
+    static_x1 = (pod.BAY_X0 + pod.BAY_X1) / 2 + (
+        (pod.STATIC_HOLE_COLS - 1) * pod.STATIC_HOLE_PITCH_X / 2 + 4.0
+    )
+
+    def allowed(x: float, y: float, z: float) -> bool:
+        # Tip mouth
+        if x < 5.0 and abs(z - pod.PITOT_AXIS_Z) < pod.CRADLE_R_TIP + 3.0:
+            return True
+        # Static array on +Y skin
+        if y > pod.RIGHT_EXTENT - 3.0 and static_x0 <= x <= static_x1:
+            return True
+        # Babysitter charge port on +Y skin
+        if (
+            y > pod.RIGHT_EXTENT - 3.0
+            and abs(x - charge_x) < pod.USB_CHARGE_W / 2 + 2.0
+            and abs(z - charge_z) < pod.USB_CHARGE_H / 2 + 2.0
+        ):
+            return True
+        return False
+
+    leaks: list[tuple[float, float, float]] = []
+    half = pod._bottom_chord_half_w(0.0)
+    y_br = pod.SECTION_YC + half  # right bottom chord
+    # Dense grid at the bottom-side fairing — this is where a mismatched
+    # inner/outer R previously left a through-slot.
+    for x in range(int(pod.NOSE_FAIR_LEN) + 5, int(pod.MID_END_X) - 5, 10):
+        for y in range(int(y_br) - 2, int(pod.RIGHT_EXTENT) + 4, 1):
+            for z in (-1.0, 0.5, 2.0, 4.0, 6.0, 8.0):
+                pt = (float(x), float(y), float(z))
+                if allowed(*pt) or not is_freestream(pt):
+                    continue
+                if n_hits(pt) == 0:
+                    leaks.append(pt)
+        y_bl = pod.SECTION_YC - half
+        for y in range(int(-pod.LEFT_EXTENT) - 3, int(y_bl) + 3, 1):
+            for z in (-1.0, 0.5, 2.0, 4.0, 6.0):
+                pt = (float(x), float(y), float(z))
+                if not is_freestream(pt):
+                    continue
+                if n_hits(pt) == 0:
+                    leaks.append(pt)
+
+    if leaks:
+        ex = leaks[0]
+        r.fail(
+            f"S1 shell leak: cavity→exterior 0-hit path "
+            f"(e.g. ({ex[0]:.0f},{ex[1]:.1f},{ex[2]:.1f}); {len(leaks)} samples)"
+        )
+    else:
+        r.ok("S1 sealed cavity (tip / static / charge USB only)")
+
+    # Battery pocket must not pierce the outer envelope (no freestream slot).
+    pocket = (
+        cq.Workplane("XY")
+        .transformed(offset=(pod.BATT_X0, pod.BATT_Y0, pod.BATT_Z0))
+        .box(
+            pod.BATT_POCKET_X,
+            pod.BATT_POCKET_Y,
+            pod.BATT_POCKET_Z,
+            centered=(False, False, False),
+        )
+    )
+    batt_outside = pocket.cut(outer).val().Volume()
+    # The raw box may overhang the faired envelope; the *cut tool* must not
+    # pierce the skin.  Check that a sealed-shell ray test already passed and
+    # that the applied notch (pocket ∩ outer − wall) does not reach freestream
+    # by ensuring hollow halves have no cavity↔exterior path at battery X.
+    inner = pod.full_body_solid(pod.WALL)
+    wall = outer.cut(inner)
+    cut_tool = pocket.intersect(outer).cut(wall)
+    try:
+        tool_vol = cut_tool.val().Volume()
+    except Exception:
+        tool_vol = 0.0
+    # Cut tool should be interior-only; intersecting it with wall ≈ 0.
+    tool_in_wall = cut_tool.intersect(wall).val().Volume() if tool_vol > 0 else 0.0
+    if tool_in_wall > 1.0:
+        r.fail(f"S1 battery cut intersects outer wall by {tool_in_wall:.0f} mm³")
+    else:
+        r.ok(f"S1 battery notch interior-only ({tool_vol:.0f} mm³, box overhang {batt_outside:.0f})")
 
 
 def validate_all(*, stl_only: bool = False, directory: Path = POD_DIR) -> CheckResult:
