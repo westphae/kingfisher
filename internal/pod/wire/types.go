@@ -221,6 +221,7 @@ const (
 	AttrBmpIirPress    AttrKey = 3
 	AttrBmpIirTemp     AttrKey = 4
 	AttrMmcBandwidth   AttrKey = 5
+	AttrQmaxCapacity   AttrKey = 6
 )
 
 // Ack acknowledges a Cmd by its outbound seq number.

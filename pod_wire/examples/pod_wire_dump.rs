@@ -130,6 +130,17 @@ fn main() {
             },
         }),
     );
+    dump(
+        "cmd_set_attr_qmax",
+        &Frame::Cmd(CmdEnvelope {
+            seq: 5,
+            cmd: Cmd::SetAttr {
+                sensor: SensorId::Battery,
+                key: AttrKey::QmaxCapacity,
+                value: 1840.0,
+            },
+        }),
+    );
 
     dump(
         "status",

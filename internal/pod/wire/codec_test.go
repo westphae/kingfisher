@@ -50,6 +50,9 @@ func TestRustFixtures(t *testing.T) {
 		"cmd_set_attr_mmc_bw": CmdFrame{Seq: 4, Cmd: CmdSetAttr{
 			Sensor: SensorMag, Key: AttrMmcBandwidth, Value: 100.0,
 		}},
+		"cmd_set_attr_qmax": CmdFrame{Seq: 5, Cmd: CmdSetAttr{
+			Sensor: SensorBattery, Key: AttrQmaxCapacity, Value: 1840.0,
+		}},
 		"status": Status{
 			PodUptimeUs:     5_000_000,
 			BatteryV:        3.78,

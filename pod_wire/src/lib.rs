@@ -171,6 +171,8 @@ pub enum AttrKey {
     BmpIirTemp,
     /// MMC5983 bandwidth (Hz): 100, 200, 400, or 800 (IC1 BW[1:0]).
     MmcBandwidth,
+    /// Impedance Track Qmax / last-known FullChargeCapacity seed (mAh).
+    QmaxCapacity,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -359,6 +361,14 @@ mod tests {
                 sensor: SensorId::Mag,
                 key: AttrKey::MmcBandwidth,
                 value: 100.0,
+            },
+        }));
+        rt(&Frame::Cmd(CmdEnvelope {
+            seq: 5,
+            cmd: Cmd::SetAttr {
+                sensor: SensorId::Battery,
+                key: AttrKey::QmaxCapacity,
+                value: 1840.0,
             },
         }));
     }
