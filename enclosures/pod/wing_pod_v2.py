@@ -5,8 +5,8 @@
 #  Printed PETG halves (flat mating face on the bed, curved outer up) that mate
 #  into a sealed aero shell.  Midsection: flat top (wing fairing mate), flat
 #  L/R sides, curved bottom.  Nose + tail are lofted fairings (not blunt
-#  plates).  Electronics / board posts live on the RIGHT half only; left is
-#  the cover.  Pod↔fairing latch is deferred.
+#  plates).  Electronics live on the RIGHT +Y wall (XZ boards, Y-axis inserts);
+#  left is the cover.  Pod↔fairing latch is deferred.
 #
 #  Boards (Qwiic era — rearrangeable via BOARDS dict):
 #    SparkFun Pro Micro ESP32-C3, Battery Babysitter (BQ27441), MMC5983MA,
@@ -16,12 +16,14 @@
 #    Prandtl total  -> SUN-B aft barb -> 6 mm hose -> COTS reducer -> MS4525 +
 #    Prandtl static -> SUN-B middle barb -> same path -> MS4525 -
 #    SUN-B forward (TE) barb capped / unused
-#    Pod multi-hole static bay -> BMP581 only
+#    Isolated static bay (BMP+mag) -> BMP581; serviceable cover after heat-set
 #
 #  Pitot mount: ESA SUN-B adapter (see SUN_B_CALIPERS.md).  Nose outer mold
-#  line fairs into the tip OD (sharp lip).  Ø10.65 shoulder seats on the aft
-#  face of a tip-only nose bulkhead (x=SHOULDER_BH_T).  Aft blind recess on a
-#  printed boss.  Knurled band = integral L/R clamp; flange screws = press.
+#  line fairs into the tip OD with a ≥1.5 mm lip.  Ø10.65 shoulder seats on
+#  the aft face of a tip-only nose bulkhead (x=SHOULDER_BH_T).  Aft blind
+#  recess on a printed boss that is shorter than the cup (print-1: 2 mm extra
+#  prevented the shoulder from seating).  Knurled band = integral L/R clamp
+#  with FDM bore allowance; flange screws = press.
 #  Stern is a blunt convex ellipsoidal loft (not a pin/nipple).
 #
 #  Fasteners: M2.5 brass heat-set inserts (hub-case lessons: pilot = OD -
@@ -56,7 +58,7 @@ SHELL_SCREW_INSET = 3.0  # flange screw centres from outer skin (in the rails)
 NOSE_FAIR_LEN = 28.0  # tip -> full midsection
 # Slightly shorter than early v2 so SUN shoulder bulkhead (+SHOULDER_BH_T)
 # still fits the 210 mm diagonal bed budget.
-TAIL_FAIR_LEN = 17.0  # full midsection -> aft tip
+TAIL_FAIR_LEN = 12.0  # full midsection -> aft tip (was 17; trimmed for board X-span)
 OGIVE_STATIONS = 8  # loft stations in each fairing (smoothness)
 # Construction ellipse overshoots the final flats so the chords have real width
 # (cutting at the ellipse apex left a vanishing flat top).
@@ -114,11 +116,20 @@ SUN_BARB_STEM_OD = 5.96
 SUN_BARB_ABOVE_BARREL = 16.08  # barrel OD top → barb tip
 SUN_RECESS_D = 6.03
 SUN_RECESS_DEPTH = 7.06
-# Slip clearances on tip/smooth/barrel; snug clamp on knurled band when L/R close.
-CRADLE_CLEAR = 0.20
-CLAMP_CLEAR = 0.08  # press-fit-ish on rough band (PETG; tune after dry-fit)
+# Print-1: boss ~2 mm too long — SUN could not reach aft BH / nose shoulder.
+# Keep ≥2.5 mm unused cup depth (fillet at cup floor + FDM).
+SUN_RECESS_BOSS_AXIAL_CLR = 2.50
+SUN_RECESS_BOSS_DIA_CLR = 0.40  # was 0.25; easier entry into Ø6.03 cup
+# Print-1 (PETG split half-pipes): 0.20 mm radial slip was OK on the aft
+# barrel (~x=95) but tight on tip, mid-smooth (~x=20), and especially the
+# knurled clamp (~x=30, was 0.08).  Per-station allowances; clamp stays
+# tighter than slip so the knurl is still the grip.
+CRADLE_CLEAR_TIP = 0.40
+CRADLE_CLEAR_SMOOTH = 0.40
+CRADLE_CLEAR_BARREL = 0.22
+CLAMP_CLEAR = 0.28  # FDM; flange screws close the rest onto the knurl
 # Nose bulkhead: tip-only bore; Ø10.65 shoulder seats on its aft face.
-SHOULDER_BH_T = 2.5
+SHOULDER_BH_T = 3.5  # was 2.5; more meat at the mouth (left lip tore)
 PITOT_AXIS_Z = 28.0  # cradle axis height from outer bottom
 # MS4525DO: datasheet 1/8" barb -> 3/32" ID tubing (~2.38 mm ID).
 # SUN barbs take 6 mm ID hose; step down with a COTS reducer (not printed).
@@ -138,9 +149,20 @@ BATT_POCKET_X = BATT_X + 2 * BATT_CLR
 BATT_POCKET_Y = BATT_Y + 2 * BATT_CLR
 BATT_POCKET_Z = BATT_Z + 2 * BATT_CLR
 
-# --- boards -----------------------------------------------------------------
-STANDOFF_DECK_Z = 4.0  # interior floor thickness above outer bottom (right half)
+# --- boards (wall-mount on +Y inner skin) -----------------------------------
+# Floor posts failed print-1: iron cannot reach well bottoms, and outboard
+# posts put PCBs through the elliptical wall.  Boards sit in XZ on *raised*
+# standoffs (not flush on the land); inserts along Y, set from the open
+# mating face.  Screw-relief continues past the insert into the land (hub).
 PCB_T = 1.6
+COMP_H = 8.0  # default component/Qwiic keepout inboard of the PCB
+MS_COMP_H = 12.0  # MS4525 barbs + reducer
+WALL_LAND_T = 7.0  # extra meat on +Y inner skin behind the standoffs
+STANDOFF_H = 4.0  # raise PCB off the wall land (air gap; not flush)
+STATIC_COVER_T = 2.2
+STATIC_FRAME_T = INS_DEPTH + SCREW_RELIEF_EXTRA + SCREW_RELIEF_FLOOR  # ~9.5
+STATIC_WINDOW_MARGIN = 2.0  # window vs board AABB (iron + PCB through)
+STATIC_FRAME_LIP = 8.0  # ±Z frame around the window (cover screws live here)
 BMP581_L, BMP581_W = 25.4, 25.4
 BOOST_L, BOOST_W = 24.5, 24.5
 PM_L, PM_W = 17.8, 33.0  # long axis along Y
@@ -162,9 +184,8 @@ STATIC_HOLE_PITCH_Z = 4.5
 # Exterior openings (only these may pierce the outer skin — see REQUIREMENTS S1):
 #   • Prandtl / SUN tip mouth
 #   • static-port hole array
-#   • Battery Babysitter micro-USB charge port
+#   • panel USB (CAB-15464) + rocker (COM-08837) + 2× 5 mm LED holders
 # Pro Micro has no exterior USB window (program over Wi‑Fi / bench before close-up).
-USB_CHARGE_W, USB_CHARGE_H = 9.5, 4.8  # micro-B plug clearance
 
 # Printer bed — halves export already flange-down and rotated 45° for diagonal
 BED = 220.0
@@ -176,10 +197,10 @@ BED_MARGIN = 10.0  # keep toolpaths inside (skirt/brim + slicer keepout)
 HALF_W = RIGHT_EXTENT  # used where "outer +Y skin" is needed (USB, static holes)
 INNER_H = OUTER_H - 2 * WALL
 # Stepped cradle radii.  Knurled band uses CLAMP_CLEAR (integral split clamp).
-CRADLE_R_TIP = SUN_TIP_OD / 2 + CRADLE_CLEAR
-CRADLE_R_SMOOTH = SUN_SMOOTH_OD / 2 + CRADLE_CLEAR
+CRADLE_R_TIP = SUN_TIP_OD / 2 + CRADLE_CLEAR_TIP
+CRADLE_R_SMOOTH = SUN_SMOOTH_OD / 2 + CRADLE_CLEAR_SMOOTH
 CRADLE_R_CLAMP = SUN_THREAD_MAJOR / 2 + CLAMP_CLEAR
-CRADLE_R_BARREL = SUN_BARREL_OD / 2 + CRADLE_CLEAR
+CRADLE_R_BARREL = SUN_BARREL_OD / 2 + CRADLE_CLEAR_BARREL
 CRADLE_R = max(CRADLE_R_CLAMP, CRADLE_R_BARREL)
 SUN_BARB_TIP_ABOVE_AXIS = SUN_BARB_ABOVE_BARREL + SUN_BARREL_OD / 2
 # World X: pod exterior nose ≈ 0.  SUN Ø10.65 shoulder seats on the aft face
@@ -192,8 +213,8 @@ SUN_AFT_X = SUN_SMOOTH_X0 + (SUN_TOTAL_LEN - SUN_TIP_LEN)
 SUN_BARB_TE_X = SUN_SMOOTH_X0 + (SUN_BARB_TE_FROM_NOSE - SUN_TIP_LEN)
 SUN_BARB_STATIC_X = SUN_SMOOTH_X0 + (SUN_BARB_STATIC_FROM_NOSE - SUN_TIP_LEN)
 SUN_BARB_PITOT_X = SUN_SMOOTH_X0 + (SUN_BARB_PITOT_FROM_NOSE - SUN_TIP_LEN)
-SUN_RECESS_BOSS_D = SUN_RECESS_D - 0.25
-SUN_RECESS_BOSS_LEN = SUN_RECESS_DEPTH - 0.50  # seat deep in aft cup
+SUN_RECESS_BOSS_D = SUN_RECESS_D - SUN_RECESS_BOSS_DIA_CLR
+SUN_RECESS_BOSS_LEN = SUN_RECESS_DEPTH - SUN_RECESS_BOSS_AXIAL_CLR
 # Integral clamp land covers most of the knurled band (forward of barbs).
 CLAMP_X0 = SUN_THREAD_X0 + 0.5
 CLAMP_LEN = SUN_THREAD_LEN - 1.5
@@ -202,9 +223,9 @@ SECTION_RY = 0.5 * OUTER_W  # ellipse semi-axis Y
 # Construction ellipse is taller than OUTER_H so flat chops leave real chords.
 SECTION_RZ = 0.5 * OUTER_H + max(TOP_CHOP, BOTTOM_CHOP)
 SECTION_ZC = 0.5 * OUTER_H + 0.5 * (TOP_CHOP - BOTTOM_CHOP)
-# Nose mouth: outer mold line fairs into the SUN tip OD with a thin sharp lip
-# (not a blunt bulkhead face).  Radial wall at the entry ≈ NOSE_LIP_WALL.
-NOSE_LIP_WALL = 0.70  # radial PETG at mouth (outer − bore); keeps a sharp lip
+# Nose mouth: outer mold line fairs into the SUN tip OD.  Print-1 0.7 mm lip
+# tore on the left half — keep ≥1.5 mm radial PETG at the entry.
+NOSE_LIP_WALL = 1.60
 NOSE_MOUTH_R = CRADLE_R_TIP + NOSE_LIP_WALL  # outer radius at x≈0
 # Tail tip radius used only as a fallback scale; stern is hemispherical.
 TIP_R = CRADLE_R + WALL + 1.5
@@ -216,37 +237,57 @@ FLAT_BOT_HALF_W = SECTION_RY * math.sqrt(max(0.0, 1.0 - _flat_b * _flat_b))
 # Aft bulkhead just behind SUN end-B recess boss.
 NOSE_BULKHEAD_X = SUN_AFT_X + 3.0
 
-# Electronics in the +Y bay on the RIGHT half only (left half is the cover).
-# Cradle bulkheads are clipped to CRADLE_LAND_Y so they cannot eat the bay.
-# Boards sit on the deck with BOARD_GAP for Qwiic / hose / finger clearance.
+# Electronics on the RIGHT +Y wall only (left half is the cover).
+# Cradle bulkheads stay near the pitot bore; boards hang from the wall land.
 BOARD_GAP = 5.0
 CRADLE_LAND_Y = CRADLE_R_CLAMP + 7.0  # cradle plates stay near the pitot bore
-_MID_SMOOTH_X1 = SUN_SMOOTH_X0 + SUN_SMOOTH_LEN * 0.55 + 3.0
+# Inboard face of the +Y wall land.  Standoffs protrude toward the seam by
+# STANDOFF_H so the PCB is raised off the wall; insert + screw-relief live in
+# standoff + land (hub-case scheme: long screws pass through the insert).
+Y_LAND = 32.0
+Y_PCB = Y_LAND - STANDOFF_H
+assert Y_PCB - PCB_T - MS_COMP_H >= CRADLE_LAND_Y + 1.0, (
+    "MS keepout hits cradle — raise Y_LAND or shorten standoffs"
+)
 
-# Deck starts aft of the mid-smooth cradle plate + cable gap.
-DECK_X0 = max(NOSE_FAIR_LEN + 2.0, _MID_SMOOTH_X1 + BOARD_GAP)
-MS_X0 = DECK_X0  # under clamp in X; Y placement clears clamp land (see MS_Y0)
-# Boost aft of clamp + gap (and aft of MS) so it is not under the knurled land.
-BOOST_X0 = max(MS_X0 + MS_L + BOARD_GAP, CLAMP_X0 + CLAMP_LEN + BOARD_GAP)
-# Battery / Baby aft of SUN aft bulkhead + gap (and aft of boost).
+
+def ellipse_y_plus(z: float, inset: float = 0.0) -> float:
+    """Approximate +Y skin of the construction ellipse at height z."""
+    ry = max(SECTION_RY - inset, 1.0)
+    rz = max(SECTION_RZ - inset, 1.0)
+    t = (z - SECTION_ZC) / rz
+    if abs(t) >= 0.999:
+        return SECTION_YC
+    return SECTION_YC + ry * math.sqrt(max(0.0, 1.0 - t * t))
+
+
+# Wall-mounted XZ boards.  MS/Boost may overlap the clamp in X (they sit at
+# y=Y_PCB, clamp land is y<CRADLE_LAND_Y).  Place MS under the barb stations
+# so 6 mm hose stays short.
+MS_X0 = SUN_BARB_TE_X - 6.0
+MS_Z0 = 20.0
+BOOST_X0 = MS_X0 + MS_L + BOARD_GAP
+BOOST_Z0 = 20.0
 _AFT_BH_X1 = SUN_AFT_X + 0.2 + 3.0
 BATT_X0 = max(
     NOSE_BULKHEAD_X + BOARD_GAP,
-    BOOST_X0 + BOOST_L + BOARD_GAP,
     _AFT_BH_X1 + BOARD_GAP,
+    BOOST_X0 + BOOST_L + BOARD_GAP,
 )
 BABY_X0 = BATT_X0
-# Baby + Pro Micro share the battery X-span; keep them tight (short Qwiic hop).
+BABY_Z0 = 22.0
 PM_X0 = BABY_X0 + BABY_L + 1.0
+PM_Z0 = BABY_Z0  # 33 mm along Z (was along Y on the floor)
 assert PM_X0 + PM_L <= BATT_X0 + BATT_POCKET_X + 0.6, (
     "Pro Micro does not fit in battery X-span; widen pack or shorten Baby gap"
 )
 BAY_X0 = max(PM_X0 + PM_L, BATT_X0 + BATT_POCKET_X) + BOARD_GAP
-BMP_X0 = BAY_X0 + BAY_WALL + 1.5
-BAY_X1 = BMP_X0 + BMP581_L + 2.5 + BAY_WALL
-# Mag shares the static-bay X-span (outboard in Y) to keep bed diagonal.
+BMP_X0 = BAY_X0 + 1.5
+BMP_Z0 = 22.0
+BAY_X1 = BMP_X0 + BMP581_L + 4.0
 MAG_X0 = BMP_X0
-# Constant midsection ends after static bay; tail fairing is empty taper.
+MAG_Z0 = BMP_Z0 + BMP581_W + BOARD_GAP
+# Constant midsection ends after static holes; tail fairing is empty taper.
 MID_END_X = BAY_X1 + 1.0
 OUTER_L = MID_END_X + TAIL_FAIR_LEN
 # Flange / screws only where the section is constant (not in the fairings)
@@ -255,30 +296,6 @@ FLANGE_X1 = MID_END_X - 2.0
 
 BATT_Y0 = -BATT_POCKET_Y / 2
 BATT_Z0 = (OUTER_H - BATT_POCKET_Z) / 2
-
-# Electronics deck in the +Y half, clear of the battery slot
-DECK_Y0 = BATT_POCKET_Y / 2 + 1.0
-DECK_Y1 = RIGHT_EXTENT - WALL
-DECK_Z = WALL + STANDOFF_DECK_Z
-
-# Board Y placements (board-local origin = corner; world y = DECK_Y0 + y0).
-# Cradle plates + clamp land occupy y < CRADLE_LAND_Y; keep BOARD_GAP beyond that
-# so PCBs/cables do not graze the pitot clamp (MS sits under the clamp in X).
-_BOARD_Y0_CLEAR = CRADLE_LAND_Y + BOARD_GAP - DECK_Y0
-MS_Y0 = _BOARD_Y0_CLEAR
-assert DECK_Y0 + MS_Y0 + MS_W <= DECK_Y1 + 0.05, (
-    "MS4525 does not fit outboard of cradle land"
-)
-# Boost is just aft of the clamp; keep a small inboard margin but prefer outboard.
-BOOST_Y0 = min(_BOARD_Y0_CLEAR, DECK_Y1 - DECK_Y0 - BOOST_W)
-BABY_Y0 = 0.5
-PM_Y0 = 0.5
-BMP_Y0 = 0.5
-# Mag beside BMP (short axis along Y) inside the static-bay X-span.
-MAG_Y0 = BMP_Y0 + BMP581_W + 0.5
-assert DECK_Y0 + MAG_Y0 + MAG_W <= DECK_Y1 + 0.05, (
-    "mag does not fit outboard of BMP — narrow boards or widen bay"
-)
 
 _MSH = [
     (MS_HOLE_INSET, MS_W - MS_HOLE_INSET),
@@ -290,56 +307,187 @@ if MS_HOLE_FLIP:
         (MS_L - MS_HOLE_INSET, MS_W - MS_HOLE_INSET),
     ]
 
+# Board local: xl along X, zl along Z, holes (hx, hz).  y is the land face.
 BOARDS = {
     "MS4525": dict(
-        x0=MS_X0, y0=MS_Y0, z0=DECK_Z, xl=MS_L, yl=MS_W, holes=_MSH
+        x0=MS_X0, z0=MS_Z0, xl=MS_L, zl=MS_W, holes=_MSH, comp_h=MS_COMP_H
     ),
     "BOOST": dict(
         x0=BOOST_X0,
-        y0=BOOST_Y0,
-        z0=DECK_Z,
+        z0=BOOST_Z0,
         xl=BOOST_L,
-        yl=BOOST_W,
+        zl=BOOST_W,
         holes=[
             (INSET, INSET),
             (BOOST_L - INSET, INSET),
             (INSET, BOOST_W - INSET),
             (BOOST_L - INSET, BOOST_W - INSET),
         ],
+        comp_h=COMP_H,
     ),
     "BABY": dict(
         x0=BABY_X0,
-        y0=BABY_Y0,
-        z0=DECK_Z,
+        z0=BABY_Z0,
         xl=BABY_L,
-        yl=BABY_W,
+        zl=BABY_W,
         holes=[
             (2.5, 2.5),
             (BABY_L - 2.5, 2.5),
             (2.5, BABY_W - 2.5),
             (BABY_L - 2.5, BABY_W - 2.5),
         ],
+        comp_h=COMP_H,
     ),
     "PROMICRO": dict(
-        x0=PM_X0, y0=PM_Y0, z0=DECK_Z, xl=PM_L, yl=PM_W, holes=[]
+        x0=PM_X0,
+        z0=PM_Z0,
+        xl=PM_L,
+        zl=PM_W,
+        holes=[],  # castellated, no OEM holes — printed tray (L7)
+        clamp_posts=[
+            (3.0, -2.5),
+            (PM_L - 3.0, -2.5),
+            (3.0, PM_W + 2.5),
+            (PM_L - 3.0, PM_W + 2.5),
+        ],
+        comp_h=COMP_H,
     ),
     "BMP581": dict(
         x0=BMP_X0,
-        y0=BMP_Y0,
-        z0=DECK_Z,
+        z0=BMP_Z0,
         xl=BMP581_L,
-        yl=BMP581_W,
-        holes=[(INSET, INSET), (BMP581_L - INSET, INSET)],
+        zl=BMP581_W,
+        holes=[
+            (INSET, INSET),
+            (BMP581_L - INSET, INSET),
+            (INSET, BMP581_W - INSET),
+            (BMP581_L - INSET, BMP581_W - INSET),
+        ],
+        comp_h=COMP_H,
     ),
     "MAG": dict(
         x0=MAG_X0,
-        y0=MAG_Y0,
-        z0=DECK_Z,
-        xl=MAG_L,  # long along X (shares static-bay span with BMP)
-        yl=MAG_W,  # short along Y (fits outboard of BMP)
-        holes=[(INSET, MAG_W / 2)],  # hole opposite Qwiic; Qwiic faces +X aft
+        z0=MAG_Z0,
+        xl=MAG_L,
+        zl=MAG_W,
+        holes=[(INSET, MAG_W / 2), (MAG_L - INSET, MAG_W / 2)],
+        comp_h=6.0,
     ),
 }
+
+
+def board_standoffs(b: dict) -> list[tuple[float, float]]:
+    """Local (hx, hz) for M2.5 insert standoffs: through-PCB holes or clamp posts."""
+    posts = list(b.get("holes") or [])
+    if not posts:
+        posts = list(b.get("clamp_posts") or [])
+    return posts
+
+
+def board_keepout(b: dict) -> tuple[float, float, float, float, float, float]:
+    """AABB of PCB + inboard components: (x0,x1,y0,y1,z0,z1)."""
+    x0, x1 = b["x0"], b["x0"] + b["xl"]
+    z0, z1 = b["z0"], b["z0"] + b["zl"]
+    y1 = Y_PCB  # inboard face of raised standoffs (not the wall land)
+    y0 = Y_PCB - PCB_T - b.get("comp_h", COMP_H)
+    return x0, x1, y0, y1, z0, z1
+
+
+def build_routes() -> list[dict]:
+    """Named hose / Qwiic / USB / battery leads for QC + I6/L5 checks."""
+    barb_z = PITOT_AXIS_Z + CRADLE_R_BARREL + 8.0
+    y_run = CRADLE_LAND_Y + 2.5  # between cradle and wall keepouts
+    ms = BOARDS["MS4525"]
+    ms_x = ms["x0"] + 0.5 * ms["xl"]
+    ms_z = ms["z0"] + ms["zl"]  # barbs on +Z edge
+    ms_y = Y_PCB - ms["comp_h"]
+    baby = BOARDS["BABY"]
+    bmp = BOARDS["BMP581"]
+    mag = BOARDS["MAG"]
+    pm = BOARDS["PROMICRO"]
+    boost = BOARDS["BOOST"]
+    qy = Y_PCB - 4.0
+    _, _, bay_y0, _, _, _ = _static_bay_box()
+    return [
+        dict(
+            name="pitot_hose",
+            kind="hose",
+            pts=[
+                (SUN_BARB_PITOT_X, 0.0, barb_z),
+                (SUN_BARB_PITOT_X, y_run, barb_z),
+                (ms_x + 2.0, y_run, barb_z),
+                (ms_x + 2.0, y_run, ms_z + 4.0),
+                (ms_x + 2.0, ms_y, ms_z + 2.0),
+            ],
+        ),
+        dict(
+            name="static_hose",
+            kind="hose",
+            pts=[
+                (SUN_BARB_STATIC_X, 0.0, barb_z),
+                (SUN_BARB_STATIC_X, y_run, barb_z),
+                (ms_x - 2.0, y_run, barb_z),
+                (ms_x - 2.0, y_run, ms_z + 4.0),
+                (ms_x - 2.0, ms_y, ms_z + 2.0),
+            ],
+        ),
+        dict(
+            name="qwiic",
+            kind="wire",
+            pts=[
+                (ms["x0"] + ms["xl"], qy, ms["z0"]),
+                (ms["x0"] + ms["xl"], qy, boost["z0"]),
+                (boost["x0"] + boost["xl"], qy, boost["z0"]),
+                (baby["x0"], qy, baby["z0"]),
+                (baby["x0"] + baby["xl"], qy, baby["z0"]),
+                (pm["x0"], qy, pm["z0"]),
+                (pm["x0"] + pm["xl"], qy, pm["z0"]),
+                (bmp["x0"] - 2.0, qy, bmp["z0"]),
+                (bmp["x0"] - 2.0, bay_y0 - 1.0, bmp["z0"] + 2.0),
+                (bmp["x0"] + 4.0, bay_y0 - 1.0, bmp["z0"] + 2.0),
+                (bmp["x0"] + 4.0, qy, bmp["z0"] + 2.0),
+                (bmp["x0"] + 0.5 * bmp["xl"], qy, bmp["z0"]),
+                (mag["x0"] + 0.5 * mag["xl"], qy, mag["z0"]),
+            ],
+        ),
+        dict(
+            name="usb_pigtail",
+            kind="wire",
+            pts=[
+                (USB_X, PANEL_Y - PANEL_T, USB_Z),
+                (USB_X, Y_PCB - 2.0, USB_Z),
+                (baby["x0"] + 0.5 * baby["xl"], Y_PCB - baby["comp_h"], baby["z0"] + baby["zl"] - 4.0),
+            ],
+        ),
+        dict(
+            name="switch_leads",
+            kind="wire",
+            pts=[
+                (SW_X, PANEL_Y - PANEL_T, SW_Z),
+                (SW_X, Y_PCB - 2.0, SW_Z),
+                (baby["x0"] + 4.0, Y_PCB - baby["comp_h"], baby["z0"] + baby["zl"] - 6.0),
+            ],
+        ),
+        dict(
+            name="led_leads",
+            kind="wire",
+            pts=[
+                (LED_PWR_X, PANEL_Y - PANEL_T, LED_Z),
+                (LED_CHG_X, PANEL_Y - PANEL_T, LED_Z),
+                (USB_X, Y_PCB - 2.0, USB_Z),
+            ],
+        ),
+        dict(
+            name="batt_leads",
+            kind="wire",
+            pts=[
+                (BATT_X0 + 8.0, BATT_Y0 + BATT_POCKET_Y, BATT_Z0 + 8.0),
+                (baby["x0"] + 4.0, y_run, baby["z0"] + 4.0),
+                (baby["x0"] + 4.0, Y_PCB - baby["comp_h"], baby["z0"] + 4.0),
+            ],
+        ),
+    ]
+
 
 # Clamshell flange screws (world X, Z): through left cover → heat-set inserts
 # in the right (electronics) half.  Top + bottom row at each station.
@@ -352,7 +500,6 @@ FLANGE_SCREWS = []
 for fx in _flange_xs:
     FLANGE_SCREWS.append((fx, OUTER_H - SHELL_SCREW_INSET))
     FLANGE_SCREWS.append((fx, SHELL_SCREW_INSET))
-assert CRADLE_LAND_Y + 8.0 < DECK_Y1, "cradle land leaves no electronics bay"
 
 # Half printed flange-down then rotated 45°: AABB side ≈ (L+H)/sqrt(2).
 BED_BB = (OUTER_L + OUTER_H) / math.sqrt(2)
@@ -376,14 +523,23 @@ print(
     f"SUN-B cradle: tipØ{SUN_TIP_OD} @ {SUN_TIP_X0:.1f}..{SUN_SMOOTH_X0:.1f} "
     f"(protrude {-SUN_TIP_X0:.1f} past nose); "
     f"shoulder seat @ {SUN_SMOOTH_X0:.1f}; "
-    f"smoothØ{SUN_SMOOTH_OD}..{SUN_THREAD_X0:.1f}; "
+    f"smoothØ{SUN_SMOOTH_OD}+{CRADLE_CLEAR_SMOOTH}..{SUN_THREAD_X0:.1f}; "
     f"clampØ{SUN_THREAD_MAJOR}+{CLAMP_CLEAR} @{CLAMP_X0:.1f}..{CLAMP_X0+CLAMP_LEN:.1f}; "
     f"barbs TE/S/P @ {SUN_BARB_TE_X:.1f}/{SUN_BARB_STATIC_X:.1f}/{SUN_BARB_PITOT_X:.1f}; "
-    f"aft boss @ {SUN_AFT_X:.1f}"
+    f"aft boss len {SUN_RECESS_BOSS_LEN:.1f} (cup {SUN_RECESS_DEPTH:.1f})"
 )
 print(
     f"MS4525: tip Ø{MS_BARB_TIP_D} / shoulder Ø{MS_BARB_SHOULDER_D}; "
     f"3/32\" ID (~2.38). SUN 6 mm hose -> COTS reducer -> ~{MS_TUBE_OD} mm OD line."
+)
+print(
+    f"wall land Y_LAND={Y_LAND:.1f}; standoff {STANDOFF_H:.1f} → Y_PCB={Y_PCB:.1f}; "
+    f"insert {INS_DEPTH:.2f} + relief extra {SCREW_RELIEF_EXTRA:.1f} "
+    f"(floor {SCREW_RELIEF_FLOOR:.1f})"
+)
+assert STANDOFF_H >= 4.0, "standoffs must raise PCBs off the wall (I8 underside clearance)"
+assert STANDOFF_H + WALL_LAND_T + 0.2 >= INS_DEPTH + SCREW_RELIEF_EXTRA + SCREW_RELIEF_FLOOR, (
+    "standoff+land too thin for hub-case insert + screw relief"
 )
 assert BED_BB <= BED_LIMIT, (
     f"half footprint {BED_BB:.1f} exceeds bed limit {BED_LIMIT:.1f}; shorten OUTER_L"
@@ -395,13 +551,116 @@ assert PITOT_AXIS_Z + SUN_BARB_TIP_ABOVE_AXIS + 6.0 < OUTER_H - WALL, (
 assert abs(SUN_SMOOTH_X0 - SHOULDER_BH_T) < 0.05
 assert abs(SUN_TIP_X0 - (SUN_SMOOTH_X0 - SUN_TIP_LEN)) < 0.05
 assert abs(SUN_THREAD_X0 - (SUN_SMOOTH_X0 + SUN_SMOOTH_LEN)) < 0.05
-assert abs(SUN_AFT_X - (SUN_SMOOTH_X0 + SUN_TOTAL_LEN - SUN_TIP_LEN)) < 0.05
+assert abs(SUN_AFT_X - (SUN_SMOOTH_X0 + (SUN_TOTAL_LEN - SUN_TIP_LEN))) < 0.05
 assert BATT_Z0 >= WALL - 0.05, "battery pocket intersects floor"
 assert BATT_Z0 + BATT_POCKET_Z <= OUTER_H - WALL + 0.05, "battery pocket intersects top"
-assert DECK_Y1 - DECK_Y0 >= max(b["yl"] for b in BOARDS.values()) + 1.0, (
-    "electronics deck too narrow for boards — widen OUTER_W"
-)
+assert SUN_RECESS_BOSS_LEN <= SUN_RECESS_DEPTH - 2.45, "aft pin still too long for print-1"
+assert NOSE_LIP_WALL >= 1.5, "nose lip thinner than print-1 survival"
+assert CLAMP_CLEAR >= 0.20, "clamp bore tighter than print-1 allowed"
+for _n, _b in BOARDS.items():
+    for _z in (_b["z0"], _b["z0"] + _b["zl"]):
+        _yi = ellipse_y_plus(_z, WALL)
+        assert _yi >= Y_LAND + 1.0, (
+            f"{_n} z={_z:.1f}: inner +Y {_yi:.1f} < wall land {Y_LAND}+1"
+        )
+    assert len(board_standoffs(_b)) >= 2, f"{_n} needs ≥2 M2.5 standoffs (I8)"
+    for _hx, _hz in board_standoffs(_b):
+        _z = _b["z0"] + _hz
+        _yi = ellipse_y_plus(_z, WALL)
+        assert _yi >= Y_LAND + 1.0, (
+            f"{_n} standoff z={_z:.1f}: inner +Y {_yi:.1f} < wall land {Y_LAND}+1"
+        )
 
+# --- panel hardware (L6 locked 2026-08-13) ----------------------------------
+# SparkFun COM-08837 = E-Switch R1966A SPST right-angle rocker, snap-in.
+#   WALL=2.5 mm → datasheet X=19.5–19.6 mm, height 13.0 mm (2.0–3.0 mm band).
+# SparkFun CAB-15464 Micro-B panel 6″, M3 ears 17 mm, 14 mm screws + nuts inside.
+# 5 mm chrome ABS LED holder (cnflin / generic): Ø8 mm panel hole, Ø8.2 FDM.
+# Cluster on a local planar +Y pad (tall ellipse is too curved for snap-in/flange).
+# X order, forward→aft: charge LED | rocker | power LED | USB  (charge LED cannot
+# sit aft of USB — Pro Micro upper clamp posts live there).
+PANEL_Z = 66.0
+SW_CUT_X = 19.6
+SW_CUT_Z = 13.0
+SW_X = 94.0
+SW_Z = PANEL_Z
+USB_EAR_PITCH = 17.0
+USB_WIN_X = 10.5
+USB_WIN_Z = 7.5
+USB_X = BABY_X0 + 0.5 * BABY_L
+USB_Z = PANEL_Z
+M3_CLR_D = 3.3
+LED_HOLE_D = 8.2
+LED_PWR_X = 114.0  # red: pod powered (VOUT)
+LED_CHG_X = 72.0  # blue: charging (!CHG!), forward of the rocker
+LED_Z = PANEL_Z
+PANEL_T = WALL
+PAD_M_X = 3.0
+PAD_M_Z_LO = 2.0
+PAD_M_Z_HI = 2.0
+# Flush with the ellipse at the bottom of the rocker (widest station in the pad).
+PANEL_Y = round(ellipse_y_plus(SW_Z - SW_CUT_Z / 2, 0.0), 2)
+assert 2.0 <= WALL <= 3.0, "R1966A snap-in X=19.6 is for 2.0–3.0 mm panels"
+assert abs(USB_X - (BABY_X0 + 0.5 * BABY_L)) < 0.05
+assert SW_Z + SW_CUT_Z / 2 + 1.5 < OUTER_H - WALL, "rocker too close to the flat top"
+assert PANEL_Y <= RIGHT_EXTENT + 0.05, "panel pad wider than +Y extent"
+assert LED_CHG_X + LED_HOLE_D / 2 + 1.5 < SW_X - SW_CUT_X / 2
+assert SW_X + SW_CUT_X / 2 + 1.5 < LED_PWR_X - LED_HOLE_D / 2
+assert LED_PWR_X + LED_HOLE_D / 2 + 1.5 < USB_X - USB_EAR_PITCH / 2 - M3_CLR_D / 2
+
+
+def usb_ear_xz() -> list[tuple[float, float]]:
+    half = USB_EAR_PITCH / 2
+    return [(USB_X - half, USB_Z), (USB_X + half, USB_Z)]
+
+
+def panel_pad_xz() -> tuple[float, float, float, float]:
+    """x0, x1, z0, z1 of the planar +Y panel pad (margin around all cutouts)."""
+    xs = [
+        SW_X - SW_CUT_X / 2,
+        SW_X + SW_CUT_X / 2,
+        USB_X - USB_WIN_X / 2,
+        USB_X + USB_WIN_X / 2,
+        LED_PWR_X - LED_HOLE_D / 2,
+        LED_PWR_X + LED_HOLE_D / 2,
+        LED_CHG_X - LED_HOLE_D / 2,
+        LED_CHG_X + LED_HOLE_D / 2,
+    ]
+    for ex, _ez in usb_ear_xz():
+        xs.append(ex - M3_CLR_D / 2)
+        xs.append(ex + M3_CLR_D / 2)
+    zs = [
+        SW_Z - SW_CUT_Z / 2,
+        SW_Z + SW_CUT_Z / 2,
+        USB_Z - USB_WIN_Z / 2,
+        USB_Z + USB_WIN_Z / 2,
+        LED_Z - LED_HOLE_D / 2,
+        LED_Z + LED_HOLE_D / 2,
+    ]
+    return (
+        min(xs) - PAD_M_X,
+        max(xs) + PAD_M_X,
+        min(zs) - PAD_M_Z_LO,
+        max(zs) + PAD_M_Z_HI,
+    )
+
+
+_PAD_X0, _PAD_X1, _PAD_Z0, _PAD_Z1 = panel_pad_xz()
+assert _PAD_Z1 < OUTER_H - 0.8, f"panel pad z1={_PAD_Z1:.1f} hits the flat top"
+for _n, _b in BOARDS.items():
+    for _hx, _hz in board_standoffs(_b):
+        _px = _b["x0"] + _hx
+        _pz = _b["z0"] + _hz
+        if _PAD_X0 - BOARD_POST_D / 2 <= _px <= _PAD_X1 + BOARD_POST_D / 2:
+            assert _pz + BOARD_POST_D / 2 + 0.8 <= _PAD_Z0, (
+                f"{_n} standoff at z={_pz:.1f} overlaps panel pad z0={_PAD_Z0:.1f}"
+            )
+print(
+    f"panel pad y={PANEL_Y:.2f} (t={PANEL_T:.1f}) z={_PAD_Z0:.1f}..{_PAD_Z1:.1f} "
+    f"x={_PAD_X0:.1f}..{_PAD_X1:.1f}; "
+    f"CHG LED @{LED_CHG_X:.0f} / rocker @{SW_X:.0f} / PWR LED @{LED_PWR_X:.0f} / "
+    f"USB @{USB_X:.1f} z={PANEL_Z:.0f}"
+)
 
 # =============================================================================
 # HELPERS
@@ -417,24 +676,38 @@ def _union_if_solid(body: cq.Workplane, part: cq.Workplane) -> cq.Workplane:
     return body.union(part)
 
 
-def insert_post(x: float, y: float, z0: float, h: float, d: float = BOARD_POST_D) -> cq.Workplane:
-    """Post with heat-set insert pilot + screw-relief bore from the top."""
-    post = (
-        cq.Workplane("XY")
-        .transformed(offset=(x, y, z0))
-        .circle(d / 2)
-        .extrude(h)
-    )
-    post = (
-        post.faces(">Z")
-        .workplane()
-        .center(0, 0)
-        .hole(INS_HOLE_D, min(INS_DEPTH, h - SCREW_RELIEF_FLOOR))
-    )
-    relief = min(INS_DEPTH + SCREW_RELIEF_EXTRA, h - SCREW_RELIEF_FLOOR)
+def wall_standoff_solid(x: float, z: float) -> cq.Workplane:
+    """Raised boss from the PCB plane into the wall land (holes cut later)."""
+    outer = full_body_solid(inset=0.0)
+    h = STANDOFF_H + WALL_LAND_T + 3.0
+    return _cyl_y(x, z, Y_PCB, h, BOARD_POST_D / 2).intersect(outer)
+
+
+def insert_stack_cuts(x: float, z: float, y_face: float, meat: float) -> list[cq.Workplane]:
+    """
+    Hub-case insert stack, cut from y_face toward +Y (into PETG):
+
+      heat-set pilot (INS_HOLE_D × INS_DEPTH)
+      then narrower screw relief (SCREW_RELIEF_D) continuing past the insert
+      leaving ≥ SCREW_RELIEF_FLOOR of PETG before the outer skin.
+    """
+    outer_y = ellipse_y_plus(z, 0.0)
+    available = min(meat, max(0.0, outer_y - y_face))
+    cuts = [_cyl_y(x, z, y_face - 0.08, INS_DEPTH + 0.15, INS_HOLE_D / 2)]
+    relief = min(INS_DEPTH + SCREW_RELIEF_EXTRA, available - SCREW_RELIEF_FLOOR)
     if relief > INS_DEPTH + 0.05:
-        post = post.faces(">Z").workplane().center(0, 0).hole(SCREW_RELIEF_D, relief)
-    return post
+        cuts.append(_cyl_y(x, z, y_face - 0.08, relief + 0.15, SCREW_RELIEF_D / 2))
+    return cuts
+
+
+def board_relief_depth(z: float) -> float:
+    """How far the screw-relief bore goes from Y_PCB toward the skin."""
+    available = ellipse_y_plus(z, 0.0) - Y_PCB
+    return min(
+        INS_DEPTH + SCREW_RELIEF_EXTRA,
+        STANDOFF_H + WALL_LAND_T - SCREW_RELIEF_FLOOR,
+        available - SCREW_RELIEF_FLOOR,
+    )
 
 
 def x_cylinder(r: float, length: float, x0: float, y: float, z: float) -> cq.Workplane:
@@ -598,6 +871,17 @@ def _loft_ogive_tail(inset: float, _unused_tip_r: float = 0.0) -> cq.Workplane:
     return s.loft(ruled=False)
 
 
+def _panel_pad_slab(y_face: float) -> cq.Workplane:
+    """XZ rectangle ending at y_face; thick enough to merge with the ellipse."""
+    x0, x1, z0, z1 = panel_pad_xz()
+    thick = 18.0
+    return (
+        cq.Workplane("XY")
+        .transformed(offset=(x0, y_face - thick, z0))
+        .box(x1 - x0, thick, z1 - z0, centered=(False, False, False))
+    )
+
+
 def full_body_solid(inset: float = 0.0) -> cq.Workplane:
     """Mid + ogive nose/tail: shared ellipse, flat-chopped top/bottom."""
     mouth_r = max(NOSE_MOUTH_R - 0.35 * inset, 2.0)
@@ -606,7 +890,13 @@ def full_body_solid(inset: float = 0.0) -> cq.Workplane:
     mid = _flat_caps(_ellipse_mid(inset, body_x0, body_len), inset)
     nose = _flat_caps(_loft_ogive_nose(inset, mouth_r), inset)
     tail = _flat_caps(_loft_ogive_tail(inset), inset)
-    return mid.union(nose).union(tail)
+    body = mid.union(nose).union(tail)
+    # Local planar +Y pad so R1966A / USB flange see 2.5 mm of flat PETG.
+    y_face = PANEL_Y - inset
+    if y_face > Y_LAND + 1.0:
+        body = body.union(_panel_pad_slab(y_face))
+        body = _flat_caps(body, inset)
+    return body
 
 
 def _keep_half(side: int) -> cq.Workplane:
@@ -842,7 +1132,7 @@ def add_pitot_cradle(body: cq.Workplane, side: int) -> cq.Workplane:
             )
             .box(
                 (SUN_BARB_PITOT_X + 8.0) - (SUN_BARB_TE_X - 6.0),
-                DECK_Y0 + 8.0,
+                Y_PCB + 2.0,
                 14.0,
                 centered=(False, False, False),
             )
@@ -1053,148 +1343,243 @@ def add_flange_fasteners(body: cq.Workplane, side: int) -> cq.Workplane:
     return body
 
 
-def add_electronics_deck(body: cq.Workplane) -> cq.Workplane:
-    """Right-half deck + board insert posts + locating nubs."""
-    deck = (
+def add_electronics_wall(body: cq.Workplane) -> cq.Workplane:
+    """
+    Right-half +Y wall land + raised standoffs with hub-case insert/relief.
+
+    Heat-set from the open mating face (iron along +Y into the inboard face).
+    Insert + screw-relief holes are cut from the assembled body so they
+    continue through the land, not only the boss.
+    """
+    z_lo = min(b["z0"] for b in BOARDS.values()) - 4.0
+    z_hi = max(b["z0"] + b["zl"] for b in BOARDS.values()) + 4.0
+    x_lo = min(b["x0"] for b in BOARDS.values()) - 4.0
+    x_hi = max(b["x0"] + b["xl"] for b in BOARDS.values()) + 4.0
+    land = (
         cq.Workplane("XY")
-        .transformed(offset=(DECK_X0, DECK_Y0, WALL))
+        .transformed(offset=(x_lo, Y_LAND, z_lo))
         .box(
-            OUTER_L - WALL - DECK_X0,
-            DECK_Y1 - DECK_Y0,
-            STANDOFF_DECK_Z,
+            x_hi - x_lo,
+            WALL_LAND_T + 4.0,
+            z_hi - z_lo,
             centered=(False, False, False),
         )
     )
-    # Deck blank is rectangular; clip to outer so it can't poke the curved skin.
-    deck = deck.intersect(full_body_solid(inset=0.0))
-    body = body.union(deck)
+    land = land.intersect(full_body_solid(inset=0.0))
+    body = _union_if_solid(body, land)
 
-    outer_env = full_body_solid(inset=0.0)
-    for name, b in BOARDS.items():
-        bx = b["x0"]
-        # y is offset within the electronics bay
-        by = DECK_Y0 + b["y0"]
-        bz = b["z0"]
-        if b["holes"]:
-            for (hx, hy) in b["holes"]:
-                post = insert_post(bx + hx, by + hy, bz, BOARD_POST_H, BOARD_POST_D)
-                # Posts near the +Y skin can poke through the ellipse — clip.
-                body = _union_if_solid(body, post.intersect(outer_env))
-        else:
-            # Castellated Pro Micro: corner pads (clamp with foam later)
-            for (px, py) in (
-                (bx + 3, by + 3),
-                (bx + b["xl"] - 3, by + 3),
-                (bx + 3, by + b["yl"] - 3),
-                (bx + b["xl"] - 3, by + b["yl"] - 3),
-            ):
-                pad = (
-                    cq.Workplane("XY")
-                    .transformed(offset=(px, py, bz))
-                    .circle(2.2)
-                    .extrude(3.0)
-                    .intersect(outer_env)
-                )
-                body = _union_if_solid(body, pad)
-        # Locating nubs
-        for (nx, ny) in (
-            (bx - 1.0, by - 1.0),
-            (bx + b["xl"] + 1.0, by - 1.0),
-            (bx - 1.0, by + b["yl"] + 1.0),
-            (bx + b["xl"] + 1.0, by + b["yl"] + 1.0),
-        ):
-            if DECK_Y0 < ny < DECK_Y1 and DECK_X0 < nx < OUTER_L - WALL:
-                nub = (
-                    cq.Workplane("XY")
-                    .transformed(offset=(nx, ny, bz))
-                    .circle(1.3)
-                    .extrude(BOARD_POST_H + PCB_T + 0.4)
-                    .intersect(outer_env)
-                )
-                body = _union_if_solid(body, nub)
+    meat = STANDOFF_H + WALL_LAND_T
+    for b in BOARDS.values():
+        for hx, hz in board_standoffs(b):
+            x = b["x0"] + hx
+            z = b["z0"] + hz
+            body = _union_if_solid(body, wall_standoff_solid(x, z))
+            for cut in insert_stack_cuts(x, z, Y_PCB, meat):
+                body = body.cut(cut)
     return body
+
+
+def _static_bay_box() -> tuple[float, float, float, float, float, float]:
+    """x0,x1,y0,y1,z0,z1 of the isolated static plenum (BMP + mag)."""
+    wx0, wx1, wz0, wz1 = _static_window()
+    x0 = wx0 - BAY_WALL
+    x1 = wx1 + BAY_WALL
+    z0 = wz0 - STATIC_FRAME_LIP
+    z1 = wz1 + STATIC_FRAME_LIP
+    y0 = max(CRADLE_LAND_Y + 1.5, Y_PCB - PCB_T - COMP_H - 4.0)
+    y1 = RIGHT_EXTENT
+    return x0, x1, y0, y1, z0, z1
+
+
+def _static_window() -> tuple[float, float, float, float]:
+    """XZ opening in the -Y bay wall so irons/boards fit; cover closes it."""
+    bmp = BOARDS["BMP581"]
+    mag = BOARDS["MAG"]
+    m = STATIC_WINDOW_MARGIN
+    wx0 = min(bmp["x0"], mag["x0"]) - m
+    wx1 = max(bmp["x0"] + bmp["xl"], mag["x0"] + mag["xl"]) + m
+    wz0 = min(bmp["z0"], mag["z0"]) - m
+    wz1 = max(bmp["z0"] + bmp["zl"], mag["z0"] + mag["zl"]) + m
+    return wx0, wx1, wz0, wz1
+
+
+def static_hole_centers() -> list[tuple[float, float]]:
+    bmp = BOARDS["BMP581"]
+    cx = bmp["x0"] + 0.5 * bmp["xl"]
+    cz = bmp["z0"] + 0.5 * bmp["zl"]
+    hx0 = cx - (STATIC_HOLE_COLS - 1) * STATIC_HOLE_PITCH_X / 2
+    hz0 = cz - (STATIC_HOLE_ROWS - 1) * STATIC_HOLE_PITCH_Z / 2
+    return [
+        (hx0 + i * STATIC_HOLE_PITCH_X, hz0 + j * STATIC_HOLE_PITCH_Z)
+        for i in range(STATIC_HOLE_COLS)
+        for j in range(STATIC_HOLE_ROWS)
+    ]
+
+
+def _static_cover_screws() -> list[tuple[float, float]]:
+    """Cover screws on the ±Z frame lips (not the thin ±X walls — PM is close)."""
+    wx0, wx1, wz0, wz1 = _static_window()
+    dx = 6.0
+    dz = 4.0
+    return [
+        (wx0 + dx, wz0 - dz),
+        (wx1 - dx, wz0 - dz),
+        (wx0 + dx, wz1 + dz),
+        (wx1 - dx, wz1 + dz),
+    ]
 
 
 def add_static_bay(body: cq.Workplane) -> cq.Workplane:
-    """Sealed-ish BMP581 bay with multi-hole side wall (pod static only)."""
-    bay_y0 = DECK_Y0
-    bay_y1 = DECK_Y1
-    bay_z0 = DECK_Z
-    bay_z1 = min(OUTER_H - WALL - 1.0, DECK_Z + 28.0)
-    # Rectangular bay blanks poke the curved +Y skin near the bottom chord —
-    # clip to outer before union (same lesson as flange / deck / posts).
-    outer_env = full_body_solid(inset=0.0)
+    """
+    Isolated static plenum: ±X/±Z walls + thick -Y frame with a tool window.
 
-    # Three interior walls ( +X, -X, and a lid shelf); +Y uses outer skin
-    for (x0, y0, sx, sy) in (
-        (BAY_X0, bay_y0, BAY_WALL, bay_y1 - bay_y0),  # -X wall
-        (BAY_X1 - BAY_WALL, bay_y0, BAY_WALL, bay_y1 - bay_y0),  # +X wall
-        (BAY_X0, bay_y0, BAY_X1 - BAY_X0, BAY_WALL),  # -Y wall (toward battery)
-    ):
-        wall = (
+    Static holes in the +Y skin open only into this box.  After heat-set and
+    BMP/mag install, `static_cover.stl` screws onto the frame (foam/RTV gasket)
+    so moisture or a leaky static line cannot flood the electronics bay.
+    Qwiic leaves through a gland slot in the cover.
+    """
+    outer = full_body_solid(inset=0.0)
+    x0, x1, y0, y1, z0, z1 = _static_bay_box()
+    wx0, wx1, wz0, wz1 = _static_window()
+    zh = z1 - z0
+    yw = y1 - y0
+    xw = x1 - x0
+
+    def _box(ox, oy, oz, sx, sy, sz) -> cq.Workplane:
+        return (
             cq.Workplane("XY")
-            .transformed(offset=(x0, y0, bay_z0))
-            .box(sx, sy, bay_z1 - bay_z0, centered=(False, False, False))
-            .intersect(outer_env)
+            .transformed(offset=(ox, oy, oz))
+            .box(sx, sy, sz, centered=(False, False, False))
+            .intersect(outer)
         )
-        body = _union_if_solid(body, wall)
 
-    # Cable notch on -X wall
-    notch = (
+    body = _union_if_solid(body, _box(x0, y0, z0, BAY_WALL, yw, zh))
+    body = _union_if_solid(body, _box(x1 - BAY_WALL, y0, z0, BAY_WALL, yw, zh))
+    body = _union_if_solid(body, _box(x0, y0, z0, xw, yw, BAY_WALL))
+    body = _union_if_solid(body, _box(x0, y0, z1 - BAY_WALL, xw, yw, BAY_WALL))
+    # Thick -Y frame (insert meat for the cover) minus the tool window
+    plate = _box(x0, y0, z0, xw, STATIC_FRAME_T, zh)
+    window = (
         cq.Workplane("XY")
-        .transformed(
-            offset=(BAY_X0 - 0.1, bay_y0 + (bay_y1 - bay_y0) / 2 - 2.5, bay_z1 - 4.0)
-        )
-        .box(BAY_WALL + 0.5, 5.0, 4.0, centered=(False, False, False))
+        .transformed(offset=(wx0, y0 - 0.2, wz0))
+        .box(wx1 - wx0, STATIC_FRAME_T + 0.5, wz1 - wz0, centered=(False, False, False))
     )
-    body = body.cut(notch)
-
-    # Multi-hole static array through +Y outer skin into the bay
-    cx = (BAY_X0 + BAY_X1) / 2
-    cz = (bay_z0 + bay_z1) / 2
-    x0 = cx - (STATIC_HOLE_COLS - 1) * STATIC_HOLE_PITCH_X / 2
-    z0 = cz - (STATIC_HOLE_ROWS - 1) * STATIC_HOLE_PITCH_Z / 2
+    body = _union_if_solid(body, plate.cut(window))
+    for fx, fz in _static_cover_screws():
+        for cut in insert_stack_cuts(fx, fz, y0, STATIC_FRAME_T):
+            body = body.cut(cut)
+    bmp = BOARDS["BMP581"]
+    cx = bmp["x0"] + 0.5 * bmp["xl"]
+    cz = bmp["z0"] + 0.5 * bmp["zl"]
+    hx0 = cx - (STATIC_HOLE_COLS - 1) * STATIC_HOLE_PITCH_X / 2
+    hz0 = cz - (STATIC_HOLE_ROWS - 1) * STATIC_HOLE_PITCH_Z / 2
     for i in range(STATIC_HOLE_COLS):
         for j in range(STATIC_HOLE_ROWS):
-            hx = x0 + i * STATIC_HOLE_PITCH_X
-            hz = z0 + j * STATIC_HOLE_PITCH_Z
-            hole = (
-                cq.Workplane("XZ")
-                .workplane(offset=HALF_W + 0.1)
-                .center(hx, hz)
-                .circle(STATIC_HOLE_D / 2)
-                .extrude(-(WALL + 3.0))
+            body = body.cut(
+                _cyl_y(
+                    hx0 + i * STATIC_HOLE_PITCH_X,
+                    hz0 + j * STATIC_HOLE_PITCH_Z,
+                    RIGHT_EXTENT + 0.2,
+                    -(WALL + WALL_LAND_T + 4.0),
+                    STATIC_HOLE_D / 2,
+                )
             )
-            body = body.cut(hole)
     return body
 
 
-def add_charge_port_cutout(body: cq.Workplane) -> cq.Workplane:
+def build_pm_tray() -> cq.Workplane:
     """
-    Micro-USB charge window for the Battery Babysitter through the +Y skin.
-    Connector sits on the board's +Y edge (faces the outer wall).  A shallow
-    outer recess accepts a COTS rubber USB dust plug / flap door.
+    Printed tray for the castellated Pro Micro (no OEM holes).  Four M2.5
+    clearance holes line up with clamp_posts (Z-overhangs — Baby is 1 mm in −X).
+    PCB drops into a shallow pocket; screws clamp the tray to the standoffs.
     """
-    baby = BOARDS["BABY"]
-    ux = baby["x0"] + baby["xl"] / 2
-    uz = baby["z0"] + PCB_T + USB_CHARGE_H / 2 - 0.5
-    # Through-hole for the plug
-    cut = (
-        cq.Workplane("XZ")
-        .workplane(offset=HALF_W + 0.1)
-        .center(ux, uz)
-        .rect(USB_CHARGE_W, USB_CHARGE_H, centered=True)
-        .extrude(-(WALL + 4.0))
+    b = BOARDS["PROMICRO"]
+    t = 2.2
+    lip_z = 5.0
+    cover = (
+        cq.Workplane("XY")
+        .transformed(offset=(b["x0"], 0.0, b["z0"] - lip_z))
+        .box(b["xl"], t, b["zl"] + 2 * lip_z, centered=(False, False, False))
     )
-    # Outer recess for rubber door / dust plug (larger than the hole)
-    recess = (
-        cq.Workplane("XZ")
-        .workplane(offset=HALF_W + 0.1)
-        .center(ux, uz)
-        .rect(USB_CHARGE_W + 4.0, USB_CHARGE_H + 3.0, centered=True)
-        .extrude(-1.2)
+    pocket = (
+        cq.Workplane("XY")
+        .transformed(offset=(b["x0"] + 0.4, t - 1.2, b["z0"] + 0.4))
+        .box(b["xl"] - 0.8, 1.4, b["zl"] - 0.8, centered=(False, False, False))
     )
-    return body.cut(cut).cut(recess)
+    cover = cover.cut(pocket)
+    for hx, hz in board_standoffs(b):
+        fx, fz = b["x0"] + hx, b["z0"] + hz
+        cover = cover.cut(_cyl_y(fx, fz, -0.1, t + 0.3, LID_SCREW_D / 2))
+        cover = cover.cut(_cyl_y(fx, fz, -0.05, LID_CB_DEPTH, LID_CB_D / 2))
+    return cover
+
+
+def build_static_cover() -> cq.Workplane:
+    """Separate PETG plate: closes the static-bay tool window after install."""
+    wx0, wx1, wz0, wz1 = _static_window()
+    overlap = STATIC_FRAME_LIP - 1.0
+    t = STATIC_COVER_T
+    cover = (
+        cq.Workplane("XY")
+        .transformed(offset=(wx0 - overlap, 0.0, wz0 - overlap))
+        .box(
+            (wx1 - wx0) + 2 * overlap,
+            t,
+            (wz1 - wz0) + 2 * overlap,
+            centered=(False, False, False),
+        )
+    )
+    # Qwiic gland toward Pro Micro (forward / bottom of the window)
+    cover = cover.cut(
+        cq.Workplane("XY")
+        .transformed(offset=(wx0 + 3.0, -0.1, wz0 + 3.0))
+        .box(6.0, t + 0.3, 4.0, centered=(False, False, False))
+    )
+    for fx, fz in _static_cover_screws():
+        cover = cover.cut(_cyl_y(fx, fz, -0.1, t + 0.3, LID_SCREW_D / 2))
+        cover = cover.cut(_cyl_y(fx, fz, -0.05, LID_CB_DEPTH, LID_CB_D / 2))
+    return cover
+
+
+def add_panel_cutouts(body: cq.Workplane) -> cq.Workplane:
+    """
+    Cluster: +Y skin mid-body (S1 allow-list), above the boards:
+
+      • COM-08837 / R1966A snap-in rocker (SYSOFF)
+      • CAB-15464 eared Micro-B (M3 through + nuts inside, RTV under flange)
+      • 2× Ø8.2 holes for 5 mm chrome LED holders (power red, charge blue)
+
+    The electronics land would refill the pad to ~8 mm — too thick for R1966A
+    clips (max 3 mm). Rebate the interior so the remaining wall is PANEL_T.
+    """
+    x0, x1, z0, z1 = panel_pad_xz()
+    y_in = PANEL_Y - PANEL_T
+    rebate = (
+        cq.Workplane("XY")
+        .transformed(offset=(x0, Y_LAND - 2.0, z0))
+        .box(x1 - x0, (y_in - (Y_LAND - 2.0)) + 0.08, z1 - z0, centered=(False, False, False))
+    )
+    body = body.cut(rebate)
+
+    y0 = Y_LAND - 4.0
+    dy = (PANEL_Y + 3.0) - y0
+
+    def _xz_box(cx: float, cz: float, sx: float, sz: float) -> cq.Workplane:
+        return (
+            cq.Workplane("XY")
+            .transformed(offset=(cx - sx / 2, y0, cz - sz / 2))
+            .box(sx, dy, sz, centered=(False, False, False))
+        )
+
+    body = body.cut(_xz_box(SW_X, SW_Z, SW_CUT_X, SW_CUT_Z))
+    body = body.cut(_xz_box(USB_X, USB_Z, USB_WIN_X, USB_WIN_Z))
+    for lx, lz in ((LED_PWR_X, LED_Z), (LED_CHG_X, LED_Z)):
+        body = body.cut(_cyl_y(lx, lz, PANEL_Y + 2.0, -(PANEL_T + WALL_LAND_T + 8.0), LED_HOLE_D / 2))
+    for ex, ez in usb_ear_xz():
+        body = body.cut(
+            _cyl_y(ex, ez, PANEL_Y + 2.0, -(PANEL_T + WALL_LAND_T + 8.0), M3_CLR_D / 2)
+        )
+    return body
 
 
 def build_right() -> cq.Workplane:
@@ -1202,9 +1587,9 @@ def build_right() -> cq.Workplane:
     body = add_pitot_cradle(body, +1)
     body = add_battery_pocket(body)
     body = add_flange_fasteners(body, +1)
-    body = add_electronics_deck(body)
+    body = add_electronics_wall(body)
     body = add_static_bay(body)
-    body = add_charge_port_cutout(body)
+    body = add_panel_cutouts(body)
     return body
 
 
@@ -1322,7 +1707,7 @@ def render_right_interior_png(right: cq.Workplane | None = None) -> str:
 
     if right is None:
         right = as_single_solid(build_right(), "pod_right")
-    out = f"pod_v2_{OUTER_L:.0f}x{OUTER_W:.0f}x{OUTER_H:.0f}_right_interior.png"
+    out = f"pod_v2_{OUTER_L:.0f}x{OUTER_W:.0f}x{OUTER_H:.0f}_panel_interior.png"
 
     palette = {
         "MS4525": (0.15, 0.45, 0.85, 1.0),
@@ -1387,8 +1772,8 @@ def render_right_interior_png(right: cq.Workplane | None = None) -> str:
     for name, b in BOARDS.items():
         pcb = (
             cq.Workplane("XY")
-            .transformed(offset=(b["x0"], DECK_Y0 + b["y0"], b["z0"]))
-            .box(b["xl"], b["yl"], 2.0, centered=(False, False, False))
+            .transformed(offset=(b["x0"], Y_PCB - PCB_T, b["z0"]))
+            .box(b["xl"], PCB_T, b["zl"], centered=(False, False, False))
         )
         ax.add_collection3d(
             Poly3DCollection(
@@ -1398,15 +1783,43 @@ def render_right_interior_png(right: cq.Workplane | None = None) -> str:
                 linewidths=0.3,
             )
         )
+        # Raised standoffs (visible gap between land and PCB)
+        posts = board_standoffs(b)
+        if posts:
+            for hx, hz in posts:
+                post = _cyl_y(b["x0"] + hx, b["z0"] + hz, Y_PCB, STANDOFF_H, BOARD_POST_D / 2)
+                ax.add_collection3d(
+                    Poly3DCollection(
+                        tessellate(post, 0.6),
+                        facecolors=(0.45, 0.32, 0.18, 0.95),
+                        edgecolors=(0.2, 0.15, 0.1, 0.4),
+                        linewidths=0.15,
+                    )
+                )
         ax.text(
             b["x0"] + b["xl"] / 2,
-            DECK_Y0 + b["y0"] + b["yl"] / 2,
-            b["z0"] + 4.0,
+            Y_PCB + 2.0,
+            b["z0"] + b["zl"] / 2,
             name,
             fontsize=7,
             ha="center",
-            va="bottom",
+            va="center",
             color="black",
+        )
+
+    route_colors = {
+        "hose": (0.10, 0.45, 0.85, 0.95),
+        "wire": (0.15, 0.15, 0.15, 0.85),
+    }
+    for route in build_routes():
+        pts = route["pts"]
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        zs = [p[2] for p in pts]
+        lw = 2.4 if route["kind"] == "hose" else 1.4
+        ax.plot(xs, ys, zs, color=route_colors[route["kind"]], lw=lw, alpha=0.9)
+        ax.text(
+            xs[-1], ys[-1], zs[-1] + 2.5, route["name"], fontsize=6, color="navy"
         )
 
     bx0, by0, bz0 = BATT_X0, BATT_Y0, BATT_Z0
@@ -1420,6 +1833,25 @@ def render_right_interior_png(right: cq.Workplane | None = None) -> str:
     ):
         p, q = corners[i], corners[j]
         ax.plot([p[0], q[0]], [p[1], q[1]], [p[2], q[2]], color="black", lw=1.1, alpha=0.85)
+
+    x0, x1, y0, y1, z0, z1 = _static_bay_box()
+    bay_corners = list(product([x0, x1], [y0, y1], [z0, z1]))
+    for i, j in (
+        (0, 1), (0, 2), (0, 4), (1, 3), (1, 5), (2, 3),
+        (2, 6), (3, 7), (4, 5), (4, 6), (5, 7), (6, 7),
+    ):
+        p, q = bay_corners[i], bay_corners[j]
+        ax.plot([p[0], q[0]], [p[1], q[1]], [p[2], q[2]], color="0.25", lw=0.9, ls="--", alpha=0.8)
+
+    baby = BOARDS["BABY"]
+    ax.plot(
+        [USB_X, USB_X], [Y_LAND, PANEL_Y], [USB_Z, USB_Z],
+        color="crimson", lw=2.0, alpha=0.85,
+    )
+    ax.text(USB_X, RIGHT_EXTENT - 1, USB_Z + 4, "USB", fontsize=6, color="crimson")
+    ax.text(SW_X, RIGHT_EXTENT - 1, SW_Z + 4, "SW", fontsize=6, color="crimson")
+    ax.text(LED_PWR_X, RIGHT_EXTENT - 1, LED_Z + 4, "LED PWR", fontsize=6, color="crimson")
+    ax.text(LED_CHG_X, RIGHT_EXTENT - 1, LED_Z + 4, "LED CHG", fontsize=6, color="crimson")
 
     for x, label in (
         (SUN_SMOOTH_X0, "shoulder\nseat"),
@@ -1441,18 +1873,201 @@ def render_right_interior_png(right: cq.Workplane | None = None) -> str:
     ax.set_ylabel("Y right (mm)")
     ax.set_zlabel("Z up (mm)")
     ax.set_title(
-        "Right half interior — orthogonal (−Y → +Y)\n"
-        f"SUN tip @ {SUN_TIP_X0:.1f}; shoulder seat @ {SUN_SMOOTH_X0:.1f}; "
-        f"clamp ~{CLAMP_X0:.0f}–{CLAMP_X0 + CLAMP_LEN:.0f}; aft @ {SUN_AFT_X:.0f}"
+        "Right half interior — panel pad + raised standoffs + isolated static bay\n"
+        f"SUN tip @ {SUN_TIP_X0:.1f}; Y_LAND={Y_LAND:.0f}; "
+        f"standoff {STANDOFF_H:.0f} → Y_PCB={Y_PCB:.0f}"
     )
     ax.grid(True, alpha=0.25)
     handles = [
         Patch(facecolor=(0.93, 0.78, 0.42, 0.5), label="pod_right"),
         *[Patch(facecolor=c[:3], label=lab) for _, c, lab in sun_segs],
         Patch(facecolor="black", label="battery pocket"),
+        Patch(facecolor=(0.45, 0.32, 0.18), label="board standoffs"),
+        Patch(facecolor="0.4", label="static bay"),
     ] + [Patch(facecolor=palette[n], label=n) for n in palette]
     ax.legend(handles=handles, loc="upper right", fontsize=7.5, framealpha=0.92)
     plt.tight_layout()
+    fig.savefig(out, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    print(f"wrote {out}")
+    return out
+
+
+def render_routing_png() -> str:
+    """2D X–Z (wall face) + X–Y (plan) QC of boards and named routes."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Circle, Rectangle
+
+    out = f"pod_v2_{OUTER_L:.0f}x{OUTER_W:.0f}x{OUTER_H:.0f}_panel_routing.png"
+    palette = {
+        "MS4525": "#2673d9",
+        "BOOST": "#e64d26",
+        "BABY": "#33b34d",
+        "PROMICRO": "#8c4dcc",
+        "BMP581": "#f2bf1a",
+        "MAG": "#cc3399",
+    }
+    route_style = {
+        "hose": dict(color="#1a73e8", lw=2.2),
+        "wire": dict(color="#222222", lw=1.3, ls="--"),
+    }
+
+    fig, (ax_xz, ax_xy) = plt.subplots(2, 1, figsize=(14, 9), dpi=140)
+    for name, b in BOARDS.items():
+        ax_xz.add_patch(
+            Rectangle(
+                (b["x0"], b["z0"]),
+                b["xl"],
+                b["zl"],
+                facecolor=palette[name],
+                edgecolor="black",
+                alpha=0.85,
+                lw=0.6,
+            )
+        )
+        ax_xz.text(
+            b["x0"] + b["xl"] / 2,
+            b["z0"] + b["zl"] / 2,
+            name,
+            ha="center",
+            va="center",
+            fontsize=8,
+        )
+        for hx, hz in board_standoffs(b):
+            ax_xz.add_patch(
+                Circle(
+                    (b["x0"] + hx, b["z0"] + hz),
+                    BOARD_POST_D / 2,
+                    facecolor="none",
+                    edgecolor="#6b4a28",
+                    lw=0.9,
+                )
+            )
+        ax_xy.add_patch(
+            Rectangle(
+                (b["x0"], Y_PCB - PCB_T - b["comp_h"]),
+                b["xl"],
+                PCB_T + b["comp_h"],
+                facecolor=palette[name],
+                edgecolor="black",
+                alpha=0.85,
+                lw=0.6,
+            )
+        )
+    ax_xy.axhline(Y_LAND, color="0.35", lw=0.9, label="wall land")
+    ax_xy.axhline(PANEL_Y, color="crimson", lw=0.8, ls=":", label="panel pad")
+    ax_xy.axhline(Y_PCB, color="0.35", lw=0.8, ls="--", label="PCB / standoff face")
+    ax_xy.axhline(CRADLE_LAND_Y, color="0.6", lw=0.8, ls=":", label="cradle land")
+    x0, x1, y0, y1, z0, z1 = _static_bay_box()
+    ax_xz.add_patch(
+        Rectangle(
+            (x0, z0),
+            x1 - x0,
+            z1 - z0,
+            fill=False,
+            edgecolor="0.25",
+            lw=1.0,
+            ls="--",
+            label="static bay",
+        )
+    )
+    wx0, wx1, wz0, wz1 = _static_window()
+    ax_xz.add_patch(
+        Rectangle(
+            (wx0, wz0),
+            wx1 - wx0,
+            wz1 - wz0,
+            fill=False,
+            edgecolor="#1a73e8",
+            lw=0.8,
+            label="iron window",
+        )
+    )
+    px0, px1, pz0, pz1 = panel_pad_xz()
+    ax_xz.add_patch(
+        Rectangle(
+            (px0, pz0),
+            px1 - px0,
+            pz1 - pz0,
+            fill=False,
+            edgecolor="0.4",
+            lw=0.7,
+            ls=":",
+            label="panel pad",
+        )
+    )
+    ax_xz.add_patch(
+        Rectangle(
+            (SW_X - SW_CUT_X / 2, SW_Z - SW_CUT_Z / 2),
+            SW_CUT_X,
+            SW_CUT_Z,
+            fill=False,
+            edgecolor="crimson",
+            lw=1.0,
+            label="rocker",
+        )
+    )
+    ax_xz.add_patch(
+        Rectangle(
+            (USB_X - USB_WIN_X / 2, USB_Z - USB_WIN_Z / 2),
+            USB_WIN_X,
+            USB_WIN_Z,
+            fill=False,
+            edgecolor="crimson",
+            lw=1.0,
+            label="USB",
+        )
+    )
+    for ex, ez in usb_ear_xz():
+        ax_xz.add_patch(Circle((ex, ez), M3_CLR_D / 2, facecolor="none", edgecolor="crimson", lw=0.8))
+    for lx, lab in ((LED_PWR_X, "PWR"), (LED_CHG_X, "CHG")):
+        ax_xz.add_patch(
+            Circle((lx, LED_Z), LED_HOLE_D / 2, facecolor="none", edgecolor="crimson", lw=0.9)
+        )
+        ax_xz.annotate(lab, (lx, LED_Z + 5), fontsize=7, color="crimson", ha="center")
+    ax_xy.add_patch(
+        Rectangle(
+            (BATT_X0, BATT_Y0),
+            BATT_POCKET_X,
+            BATT_POCKET_Y,
+            fill=False,
+            edgecolor="black",
+            lw=1.2,
+            label="battery",
+        )
+    )
+    for route in build_routes():
+        st = route_style[route["kind"]]
+        xs = [p[0] for p in route["pts"]]
+        ys = [p[1] for p in route["pts"]]
+        zs = [p[2] for p in route["pts"]]
+        ax_xz.plot(xs, zs, **st)
+        ax_xy.plot(xs, ys, **st)
+        ax_xz.annotate(route["name"], (xs[-1], zs[-1]), fontsize=7, color=st["color"])
+
+    ax_xz.axvline(SUN_SMOOTH_X0, color="crimson", lw=0.7, alpha=0.6)
+    ax_xz.axvline(SUN_AFT_X, color="crimson", lw=0.7, alpha=0.6)
+    ax_xz.set_xlim(SUN_TIP_X0 - 5, OUTER_L + 5)
+    ax_xz.set_ylim(-2, OUTER_H + 2)
+    ax_xz.set_aspect("equal", adjustable="box")
+    ax_xz.set_xlabel("X aft (mm)")
+    ax_xz.set_ylabel("Z up (mm)")
+    ax_xz.set_title("Wall face (X–Z): boards, standoffs, static bay, panel cluster")
+    ax_xz.grid(True, alpha=0.25)
+    ax_xz.legend(loc="upper right", fontsize=7)
+
+    ax_xy.set_xlim(SUN_TIP_X0 - 5, OUTER_L + 5)
+    ax_xy.set_ylim(-LEFT_EXTENT - 2, RIGHT_EXTENT + 2)
+    ax_xy.set_aspect("equal", adjustable="box")
+    ax_xy.set_xlabel("X aft (mm)")
+    ax_xy.set_ylabel("Y right (mm)")
+    ax_xy.set_title("Plan (X–Y): standoffs raise PCBs off the land")
+    ax_xy.grid(True, alpha=0.25)
+    ax_xy.legend(loc="upper right", fontsize=8)
+    fig.tight_layout()
     fig.savefig(out, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"wrote {out}")
@@ -1498,8 +2113,31 @@ if __name__ == "__main__":
     cq.exporters.export(asm, "pod_assembly.step")
     print("exported pod_left/right STL/STEP + pod_assembly.step (with SUN placeholder)")
 
-    # QC interior layout (ortho into open right half) — every revision.
+    cover = as_single_solid(build_static_cover(), "static_cover")
+    cover_print = cover.rotate((0, 0, 0), (1, 0, 0), -90)
+    bb = cover_print.val().BoundingBox()
+    cover_print = cover_print.translate((-bb.xmin, -bb.ymin, -bb.zmin))
+    cq.exporters.export(cover_print, "static_cover.stl", tolerance=tol, angularTolerance=ang)
+    n_tri, n_bound = _stl_boundary_edges("static_cover.stl")
+    print(f"static_cover.stl: {n_tri} tris, {n_bound} boundary edges")
+    assert n_bound == 0, f"static_cover.stl not watertight ({n_bound} boundary edges)"
+    cq.exporters.export(cover, "static_cover.step")
+    print("exported static_cover.stl / .step")
+
+    tray = as_single_solid(build_pm_tray(), "pm_tray")
+    tray_print = tray.rotate((0, 0, 0), (1, 0, 0), -90)
+    bb = tray_print.val().BoundingBox()
+    tray_print = tray_print.translate((-bb.xmin, -bb.ymin, -bb.zmin))
+    cq.exporters.export(tray_print, "pm_tray.stl", tolerance=tol, angularTolerance=ang)
+    n_tri, n_bound = _stl_boundary_edges("pm_tray.stl")
+    print(f"pm_tray.stl: {n_tri} tris, {n_bound} boundary edges")
+    assert n_bound == 0, f"pm_tray.stl not watertight ({n_bound} boundary edges)"
+    cq.exporters.export(tray, "pm_tray.step")
+    print("exported pm_tray.stl / .step")
+
+    # QC interior layout + routing (unique names per revision).
     render_right_interior_png(right)
+    render_routing_png()
 
     # Full requirements gate (STL + geometry).  See REQUIREMENTS.md / validate_pod.py.
     from validate_pod import validate_all
