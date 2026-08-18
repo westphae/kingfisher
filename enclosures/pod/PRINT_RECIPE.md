@@ -1,8 +1,9 @@
 # Wing pod v2 — AnkerMake print recipe
 
-Slicer settings for `pod_left.stl` and `pod_right.stl` on an **AnkerMake M5C**
-in **PETG**. STLs do not carry support or slice settings — use this recipe in
-AnkerMake Studio (or PrusaSlicer with an M5C profile).
+Slicer settings for `pod_left.stl`, `pod_right.stl`, `static_cover.stl`, and
+`pm_tray.stl` on an **AnkerMake M5C** in **PETG**. STLs do not carry support or
+slice settings — use this recipe in AnkerMake Studio (or PrusaSlicer with an
+M5C profile).
 
 Geometry / export contracts: [`REQUIREMENTS.md`](REQUIREMENTS.md). Layout:
 [`pod_enclosure.md`](pod_enclosure.md). SUN-B fit: [`SUN_B_CALIPERS.md`](SUN_B_CALIPERS.md).
@@ -27,6 +28,8 @@ Geometry / export contracts: [`REQUIREMENTS.md`](REQUIREMENTS.md). Layout:
 |------|------------|--------|
 | `pod_right.stl` | Mating flange down, curved outer up, **45°** diagonal | Electronics half |
 | `pod_left.stl` | Same | Cover half |
+| `static_cover.stl` | Large face down (thickness is Z as-exported) | BMP-bay window plate |
+| `pm_tray.stl` | Large face down | Pro Micro clamp tray |
 
 Print one half at a time if the diagonal + skirt crowds the bed. The SUN-B
 adapter is purchased metal — not printed.
@@ -35,7 +38,9 @@ adapter is purchased metal — not printed.
 
 | Part | Supports | Why |
 |------|----------|-----|
-| `pod_left` / `pod_right` | **On** | Ogive outer, hollow shell, SUN cradle, deck/posts (right) leave overhangs above ~45° |
+| `pod_left` / `pod_right` | **On** | Ogive outer, hollow shell, SUN cradle, standoffs (right) leave overhangs above ~45° |
+| `static_cover` | **Off** | Flat plate |
+| `pm_tray` | **Off** | Flat tray |
 
 Suggested support settings (tune after first preview):
 
@@ -70,11 +75,19 @@ skin looks fuzzy or stringy.
 ## After print
 
 1. Remove supports carefully from the outer skin (cosmetic + aero face).
-2. Deburr mating flange, SUN cradle bore / barb bay, charge USB, static holes,
-   screw paths.
-3. Install **M2.5 heat-set inserts** in the **right** flange + right board
-   posts (no self-tap). Left cover is clearance only. Same pilot/depth scheme
-   as the hub case.
+2. Deburr mating flange, SUN cradle bore / barb bay, panel USB/rocker/LED holes,
+   static holes, screw paths.
+3. Install **M2.5 heat-set inserts** in the **right** flange + **every board
+   standoff** (including Pro Micro clamp posts) + static-cover frame (no
+   self-tap, no nubs). Heat-set from the **open mating face** (iron along Y)
+   before installing PCBs — BMP/mag through the static-bay window. Left cover is
+   clearance only. Same pilot/depth/screw-relief scheme as the hub case. Seat
+   the Pro Micro in `pm_tray.stl` and screw the tray down. Then screw
+   `static_cover.stl` over a foam/RTV gasket. Snap in the COM-08837 rocker
+   (SYSOFF → JP12 / GND; leave onboard S1 OFF). RTV the CAB-15464 flange and
+   fasten with M3 + nuts (trim the included 14 mm screws or use M3×8). Press
+   the 5 mm LEDs into the chrome holders: red = VOUT (pod powered), blue =
+   `!CHG!`.
 4. Dry-fit L/R halves around the **SUN-B** (barbs up; tip protruding; aft recess
    on the locating boss) before final assembly. Plumb 6 mm hose → COTS reducer
    → MS4525; cap the forward TE barb.

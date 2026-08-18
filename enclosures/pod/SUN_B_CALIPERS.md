@@ -167,3 +167,8 @@ photos) — looks like sealant at an end-piece joint; ignore for cradle OD.
 
 - [x] L7, E2=`n/a`, E4=E1 filled (2026-08-09)
 - [x] Params consumed by `wing_pod_v2.py` SUN-B cradle
+- [x] Print-1 (2026-08): caliper *lengths* OK (shoulder/aft lined up after
+      shaving the pin). Aft pin was ~2 mm too long vs usable cup depth — CAD
+      now leaves ≥2.5 mm unused. Printed *radii* at tip / x≈20 smooth / x≈30
+      clamp were tight; aft barrel at x≈95 with 0.20 mm radial was OK. CAD
+      now uses per-station FDM allowance (clamp still tighter than slip).

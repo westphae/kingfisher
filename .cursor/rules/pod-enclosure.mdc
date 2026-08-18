@@ -19,6 +19,6 @@ cd enclosures/pod && uv run --project .. python validate_pod.py
 ```
 
 5. **Do not** claim STLs are AnkerMake-ready unless `validate_pod.py` exits 0 (watertight single-solid mesh + geometry checks).
-6. Preview PNGs: use a **unique filename per shape revision**. Every regen must write `pod_v2_*_right_interior.png` (ortho into open `pod_right` with SUN + boards) via `render_right_interior_png()`. Never reuse a stale cached name like `pod_v2_shape.png`.
-7. Print contracts: flange-down, 45° diagonal baked into STL export; M2.5 heat-set (no self-tap); boards/charge-USB/static bay on `pod_right` only. Pitot is **ESA SUN-B** (`SUN_B_CALIPERS.md`) — not tubes-in-tube / printed plug. Shell must stay sealed (S1/S2): tip + static array + Babysitter charge port only; no exterior battery slot; mating-face rubber/RTV seal. Mating face stays **open for install** (I4): perimeter rail + screw bosses, not a solid bulkhead.
+6. Preview PNGs: use a **unique filename per shape revision**. Every regen must write `pod_v2_*_panel_interior.png` and `pod_v2_*_panel_routing.png`. Never reuse a stale cached name like `pod_v2_shape.png`.
+7. Print contracts: flange-down, 45° diagonal baked into STL export; **all printed-joint screws are M2.5 into heat-set inserts** (P6) with screw-relief past the insert; **every board on raised standoffs** (I8 — fail empty `holes=[]` / nubs). Boards/panel cluster/static holes on `pod_right` only. Isolated static bay + `static_cover.stl` (S3). Pro Micro uses `pm_tray.stl` (L7). Panel COTS locked (L6): COM-08837 / CAB-15464 / Ø8.2 LED holders on a 2.5 mm planar pad. Pitot is **ESA SUN-B**. Mating face stays **open for install** (I4).
 8. Enclosure-only work continues on **`master`** (no PR) unless the user asks otherwise.
