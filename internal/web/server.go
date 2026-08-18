@@ -540,7 +540,7 @@ func (s *Server) deviceAttrViews(device string) []sensors.AttrView {
 				mah = dm
 			}
 		}
-		base = mergeBatteryCapacityAttr(base, mah)
+		base = mergeBatteryCapacityAttr(base, mah, s.cfg.Get().PodLearnedQmaxMah(mah))
 	}
 	if !s.isIIODevice(device) {
 		return base
@@ -692,23 +692,57 @@ func (s *Server) persistPodBatteryCapacity(value string) error {
 	return config.Save(s.cfg.Path(), &cp)
 }
 
-func mergeBatteryCapacityAttr(base []sensors.AttrView, mah uint16) []sensors.AttrView {
+func mergeBatteryCapacityAttr(base []sensors.AttrView, mah uint16, learned uint16) []sensors.AttrView {
 	if mah == 0 {
 		mah = config.DefaultPodBatteryCapacityMah
 	}
 	val := strconv.FormatUint(uint64(mah), 10)
+	opts := make([]string, 0, len(config.StandardPodBatteryMah)+1)
+	seen := map[string]bool{}
+	for _, p := range config.StandardPodBatteryMah {
+		s := strconv.FormatUint(uint64(p), 10)
+		opts = append(opts, s)
+		seen[s] = true
+	}
+	if !seen[val] {
+		opts = append([]string{val}, opts...)
+	}
+	found := false
 	for i := range base {
 		if base[i].Channel == "" && base[i].Attr == pod.AttrDesignCapacityMah {
 			base[i].Value = val
 			base[i].Writable = true
+			base[i].Options = opts
+			found = true
+			break
+		}
+	}
+	if !found {
+		base = append(base, sensors.AttrView{
+			Channel:  "",
+			Attr:     pod.AttrDesignCapacityMah,
+			Value:    val,
+			Writable: true,
+			Options:  opts,
+			Location: location.Pod,
+		})
+	}
+	learnedVal := "—"
+	if learned > 0 {
+		learnedVal = strconv.FormatUint(uint64(learned), 10)
+	}
+	for i := range base {
+		if base[i].Channel == "" && base[i].Attr == pod.AttrLearnedCapacityMah {
+			base[i].Value = learnedVal
+			base[i].Writable = false
 			return base
 		}
 	}
 	return append(base, sensors.AttrView{
 		Channel:  "",
-		Attr:     pod.AttrDesignCapacityMah,
-		Value:    val,
-		Writable: true,
+		Attr:     pod.AttrLearnedCapacityMah,
+		Value:    learnedVal,
+		Writable: false,
 		Location: location.Pod,
 	})
 }
@@ -759,6 +793,7 @@ func copyPod(p config.Pod) config.Pod {
 			out.Attrs[k] = v
 		}
 	}
+	out.BatteryLearnedMah = config.CopyBatteryLearnedMah(p.BatteryLearnedMah)
 	return out
 }
 

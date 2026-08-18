@@ -104,3 +104,22 @@ func TestMigrateCompassMounts_DefaultForMagnetometer(t *testing.T) {
 		t.Fatalf("default mmc5983 mount z,z=%v want -1", got[2][2])
 	}
 }
+
+func TestPodLearnedQmaxMah(t *testing.T) {
+	c := &Config{Pod: Pod{
+		BatteryCapacityMah: 2000,
+		BatteryLearnedMah:  map[string]uint16{"2000": 1840, "750": 710},
+	}}
+	if got := c.PodLearnedQmaxMah(2000); got != 1840 {
+		t.Fatalf("2000 pack: got %d", got)
+	}
+	if got := c.PodLearnedQmaxMah(750); got != 710 {
+		t.Fatalf("750 pack: got %d", got)
+	}
+	if got := c.PodLearnedQmaxMah(850); got != 0 {
+		t.Fatalf("unknown pack: got %d", got)
+	}
+	if CopyBatteryLearnedMah(nil) != nil {
+		t.Fatal("nil map should stay nil")
+	}
+}

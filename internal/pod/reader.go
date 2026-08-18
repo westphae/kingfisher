@@ -39,6 +39,9 @@ const (
 // AttrDesignCapacityMah is the UI/config key for BQ27441 design capacity (mAh).
 const AttrDesignCapacityMah = "design_capacity_mah"
 
+// AttrLearnedCapacityMah is the last saved FullChargeCapacity for the selected pack.
+const AttrLearnedCapacityMah = "learned_capacity_mah"
+
 // BatteryDeviceName is the default wing-tab name for the fuel gauge.
 const BatteryDeviceName = "bq27441"
 

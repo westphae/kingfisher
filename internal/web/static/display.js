@@ -853,7 +853,6 @@ const KFDisplay = (function () {
     if (!values || values.battery_gauge_learned !== 0) return false;
     return channel === 'battery_soc_pct'
       || channel === 'battery_capacity_remain_mah'
-      || channel === 'battery_capacity_full_mah'
       || channel === 'battery_time_remain_s';
   }
 
@@ -924,7 +923,7 @@ const KFDisplay = (function () {
 
   function bq27441Footnote(values) {
     if (!values || values.battery_gauge_learned !== 0) return '';
-    return '<div class="gaugeFootnote dim">Fuel gauge not learned — state of charge and capacity are unavailable until the BQ27441 completes a charge/discharge learning cycle. Design capacity is set under Settings.</div>';
+    return '<div class="gaugeFootnote dim">Fuel gauge not learned — SOC and remaining capacity are hidden until FullChargeCapacity matches this pack. Full capacity is shown as the last saved value (or design) so the pod does not treat a factory 1340 mAh leftover as empty.</div>';
   }
 
   function cell(_keys, _values, key, header) {

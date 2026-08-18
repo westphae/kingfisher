@@ -1,7 +1,9 @@
 //! SparkFun Battery Babysitter / TI BQ27441-G1A fuel gauge (I²C).
 //!
-//! Standard command reads only; design capacity is written once when the
-//! ITPOR flag indicates the gauge lost power.
+//! Design Capacity and Qmax are written together when ITPOR is set (RAM lost)
+//! or when the Pi asks for a pack change. The G1A data memory is RAM-only, so
+//! a battery unplug forgets both; we restore from the last learned FullCharge
+//! Capacity (seeded as Qmax).
 
 use embassy_time::{block_for, Duration, Instant};
 use esp_println::println;
@@ -32,6 +34,7 @@ const EXT_BLOCKDATA: u8 = 0x40;
 const EXT_CHECKSUM: u8 = 0x60;
 
 const ID_STATE: u8 = 82;
+const QMAX_OFFSET: u8 = 0;
 const DESIGN_CAPACITY_OFFSET: u8 = 10;
 
 /// State subclass stores 16-bit fields MSB-first (TI TRM / SparkFun library).
@@ -91,18 +94,19 @@ impl Bq27441 {
         let fcc = read_word(bus, self.addr, CMD_FULL_CAPACITY)?;
         let design_reg = read_design_capacity(bus, self.addr)?;
         let itpor = flags & FLAG_ITPOR != 0;
-        // The gauge's data memory (0x3C) is the source of truth: report it and
-        // trust it. Only seed the build-time default when the gauge is blank.
+        // Data memory is RAM: ITPOR means factory defaults (Design ~1340,
+        // Qmax ~1340). Restore the baked pack size; Hello can override
+        // with the pack the user selected and a learned Qmax.
         crate::battery_cfg::note_chip(design_reg);
-        if design_reg == 0 {
+        if itpor || design_reg == 0 {
             let seed = crate::battery_cfg::baked_default();
             println!(
-                "pod: bq27441 design_reg=0 (itpor={itpor} fcc={fcc}); seeding {seed} mAh"
+                "pod: bq27441 design_reg={design_reg} (itpor={itpor} fcc={fcc}); restoring {seed} mAh + Qmax"
             );
             let _ = crate::battery_cfg::request_design_mah(seed);
         } else {
             println!(
-                "pod: bq27441 design capacity {design_reg} mAh (itpor={itpor} fcc={fcc}); trusting gauge NVM"
+                "pod: bq27441 design capacity {design_reg} mAh (itpor={itpor} fcc={fcc}); trusting gauge RAM"
             );
         }
         self.last_read_at = None;
@@ -110,9 +114,9 @@ impl Bq27441 {
         Ok(())
     }
 
-    /// Reprogram design capacity (mAh) while running; called from the poll loop.
-    pub fn program_design_capacity(&self, bus: &mut I2cBus, mah: u16) -> Result<(), ()> {
-        set_design_capacity(bus, self.addr, mah)
+    /// Reprogram design capacity and Qmax (mAh) while running.
+    pub fn program_capacity(&self, bus: &mut I2cBus, design_mah: u16, qmax_mah: u16) -> Result<(), ()> {
+        set_capacity_params(bus, self.addr, design_mah, qmax_mah)
     }
 
     /// Read all headline metrics when the BQ27441 rate limit allows.
@@ -263,36 +267,70 @@ fn select_data_block(bus: &mut I2cBus, addr: u8, class_id: u8, offset: u8) -> Re
     Ok(())
 }
 
-fn write_extended_bytes(
+fn set_capacity_params(bus: &mut I2cBus, addr: u8, design_mah: u16, qmax_mah: u16) -> Result<(), ()> {
+    let energy = design_energy_mwh(design_mah);
+
+    if enter_config(bus, addr).is_err() {
+        log_program_fail(design_mah, qmax_mah, ProgramFail::EnterConfig, 0);
+        return Err(());
+    }
+    if write_state_capacities(bus, addr, design_mah, energy, qmax_mah).is_err() {
+        log_program_fail(design_mah, qmax_mah, ProgramFail::WriteBlock, 0);
+        let _ = exit_config_resim(bus, addr);
+        return Err(());
+    }
+    if exit_config_resim(bus, addr).is_err() {
+        log_program_fail(design_mah, qmax_mah, ProgramFail::ExitConfig, 0);
+        return Err(());
+    }
+    block_for(Duration::from_millis(500));
+    for attempt in 0..40 {
+        match read_design_capacity(bus, addr) {
+            Ok(reg) if reg == design_mah => return Ok(()),
+            Ok(reg) => {
+                if attempt == 39 {
+                    log_program_fail(design_mah, qmax_mah, ProgramFail::Verify, reg);
+                }
+            }
+            Err(()) => {
+                if attempt == 39 {
+                    log_program_fail(design_mah, qmax_mah, ProgramFail::Verify, 0);
+                }
+            }
+        }
+        block_for(Duration::from_millis(50));
+    }
+    Err(())
+}
+
+fn write_state_capacities(
     bus: &mut I2cBus,
     addr: u8,
-    class_id: u8,
-    offset: u8,
-    data: &[u8],
+    design_mah: u16,
+    energy_mwh: u16,
+    qmax_mah: u16,
 ) -> Result<(), ()> {
-    if data.is_empty() || data.len() > 32 {
-        return Err(());
-    }
-    let base = (offset % 32) as usize;
-    if base + data.len() > 32 {
-        return Err(());
-    }
+    select_data_block(bus, addr, ID_STATE, 0)?;
+    let mut block = read_block_window(bus, addr)?;
+    let qmax = u16_be_bytes(qmax_mah);
+    let design = u16_be_bytes(design_mah);
+    let energy = u16_be_bytes(energy_mwh);
+    block[QMAX_OFFSET as usize] = qmax[0];
+    block[QMAX_OFFSET as usize + 1] = qmax[1];
+    block[DESIGN_CAPACITY_OFFSET as usize] = design[0];
+    block[DESIGN_CAPACITY_OFFSET as usize + 1] = design[1];
+    block[DESIGN_CAPACITY_OFFSET as usize + 2] = energy[0];
+    block[DESIGN_CAPACITY_OFFSET as usize + 3] = energy[1];
 
-    select_data_block(bus, addr, class_id, offset)?;
-    let _ = read_block_window(bus, addr)?;
-
-    for (i, &b) in data.iter().enumerate() {
-        write_byte(bus, addr, EXT_BLOCKDATA + base as u8 + i as u8, b)?;
+    for (i, &b) in block.iter().enumerate() {
+        write_byte(bus, addr, EXT_BLOCKDATA + i as u8, b)?;
     }
-
-    let block = read_block_window(bus, addr)?;
     let mut sum: u8 = 0;
     for b in block {
         sum = sum.wrapping_add(b);
     }
     let csum = 255_u8.wrapping_sub(sum);
-    write_byte(bus, addr, EXT_CHECKSUM, csum)?;
-    Ok(())
+    write_byte(bus, addr, EXT_CHECKSUM, csum)
 }
 
 #[derive(Copy, Clone)]
@@ -303,46 +341,7 @@ enum ProgramFail {
     Verify,
 }
 
-fn set_design_capacity(bus: &mut I2cBus, addr: u8, mah: u16) -> Result<(), ()> {
-    let energy = design_energy_mwh(mah);
-    let mut payload = [0u8; 4];
-    payload[0..2].copy_from_slice(&u16_be_bytes(mah));
-    payload[2..4].copy_from_slice(&u16_be_bytes(energy));
-
-    if enter_config(bus, addr).is_err() {
-        log_program_fail(addr, mah, ProgramFail::EnterConfig, 0);
-        return Err(());
-    }
-    if write_extended_bytes(bus, addr, ID_STATE, DESIGN_CAPACITY_OFFSET, &payload).is_err() {
-        log_program_fail(addr, mah, ProgramFail::WriteBlock, 0);
-        let _ = exit_config_resim(bus, addr);
-        return Err(());
-    }
-    if exit_config_resim(bus, addr).is_err() {
-        log_program_fail(addr, mah, ProgramFail::ExitConfig, 0);
-        return Err(());
-    }
-    block_for(Duration::from_millis(500));
-    for attempt in 0..40 {
-        match read_design_capacity(bus, addr) {
-            Ok(reg) if reg == mah => return Ok(()),
-            Ok(reg) => {
-                if attempt == 39 {
-                    log_program_fail(addr, mah, ProgramFail::Verify, reg);
-                }
-            }
-            Err(()) => {
-                if attempt == 39 {
-                    log_program_fail(addr, mah, ProgramFail::Verify, 0);
-                }
-            }
-        }
-        block_for(Duration::from_millis(50));
-    }
-    Err(())
-}
-
-fn log_program_fail(_addr: u8, target_mah: u16, stage: ProgramFail, design_reg: u16) {
+fn log_program_fail(target_mah: u16, qmax_mah: u16, stage: ProgramFail, design_reg: u16) {
     let stage_s = match stage {
         ProgramFail::EnterConfig => "enter_config",
         ProgramFail::WriteBlock => "write_block",
@@ -350,6 +349,6 @@ fn log_program_fail(_addr: u8, target_mah: u16, stage: ProgramFail, design_reg: 
         ProgramFail::Verify => "verify_design_reg",
     };
     println!(
-        "pod: bq27441 design program fail stage={stage_s} target={target_mah} design_reg=0x{design_reg:04x} ({design_reg})"
+        "pod: bq27441 capacity program fail stage={stage_s} design={target_mah} qmax={qmax_mah} design_reg=0x{design_reg:04x} ({design_reg})"
     );
 }

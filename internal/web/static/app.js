@@ -727,7 +727,10 @@ function attrLabel(device, a) {
     return 'Kollsman (inHg)';
   }
   if (device === 'bq27441' && !a.channel && a.attr === 'design_capacity_mah') {
-    return 'Design capacity (mAh)';
+    return 'Battery (mAh)';
+  }
+  if (device === 'bq27441' && !a.channel && a.attr === 'learned_capacity_mah') {
+    return 'Last learned full (mAh)';
   }
   return a.channel ? `${a.channel} ${a.attr}` : a.attr;
 }

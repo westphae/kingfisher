@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -434,6 +435,10 @@ type Pod struct {
 	WiFiPassword       string `json:"wifi_password,omitempty"`
 	UDPAddr            string `json:"udp_addr,omitempty"` // Pi host:port pod sends to; kingfisher binds :port on all ifaces
 	BatteryCapacityMah uint16 `json:"battery_capacity_mah,omitempty"`
+	// BatteryLearnedMah maps design capacity (decimal string, e.g. "2000") to
+	// last observed FullChargeCapacity / Qmax seed (mAh). Restored to the
+	// BQ27441 after ITPOR so the gauge is not starting from factory 1340.
+	BatteryLearnedMah map[string]uint16 `json:"battery_learned_mah,omitempty"`
 	// Three-stage power protocol thresholds; consumed by firmware build.rs
 	// (compile-time) and by the Pi for burst-quiet link expectations.
 	BurstSocPct       uint8             `json:"burst_soc_pct,omitempty"`
@@ -451,6 +456,24 @@ const (
 	DefaultPodBatteryCapacityMah = 850
 	DefaultPodBurstWindowS       = 60
 )
+
+// StandardPodBatteryMah are the pack sizes offered in cockpit Settings.
+var StandardPodBatteryMah = []uint16{750, 2000}
+
+func BatteryMahKey(mah uint16) string {
+	return strconv.FormatUint(uint64(mah), 10)
+}
+
+func CopyBatteryLearnedMah(src map[string]uint16) map[string]uint16 {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string]uint16, len(src))
+	for k, v := range src {
+		out[k] = v
+	}
+	return out
+}
 
 // PodDeviceName is the registry / UI device id for the wing pod.
 const PodDeviceName = "pod"
@@ -906,6 +929,14 @@ func (c *Config) PodBatteryCapacityMah() uint16 {
 		return DefaultPodBatteryCapacityMah
 	}
 	return c.Pod.BatteryCapacityMah
+}
+
+// PodLearnedQmaxMah is the last saved FullChargeCapacity for this design, or 0.
+func (c *Config) PodLearnedQmaxMah(design uint16) uint16 {
+	if c == nil || design == 0 || c.Pod.BatteryLearnedMah == nil {
+		return 0
+	}
+	return c.Pod.BatteryLearnedMah[BatteryMahKey(design)]
 }
 
 // PodBurstWindowS returns the pod's burst-mode collect window (seconds); the

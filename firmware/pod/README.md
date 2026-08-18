@@ -47,7 +47,7 @@ ship 2.2 kΩ — cut **I2C** on one board if the bus misbehaves when daisy-chain
 
 Desk bench with [SparkFun Pro Micro ESP32-C3](https://docs.sparkfun.com/SparkFun_Pro_Micro-ESP32C3/hardware_overview/) + Qwiic cable: firmware uses **IO5/IO6** (matches SparkFun `pins_arduino.h`). A plug-in Qwiic BMP581 (SEN-20170, default **0x47**) needs no extra wiring.
 
-**Battery Babysitter (PRT-13777):** connect the Qwiic port to the same bus. Tie **VPU** to **3.3 V** (ESP `3V3`). A LiPo must be plugged into the Babysitter for the BQ27441 to respond. Design capacity (mAh) is baked into firmware at build time from `pod.battery_capacity_mah` in kingfisher config (default **850**); the gauge is programmed on first power-up after battery insert (`ITPOR`).
+**Battery Babysitter (PRT-13777):** connect the Qwiic port to the same bus. Tie **VPU** to **3.3 V** (ESP `3V3`). A LiPo must be plugged into the Babysitter for the BQ27441 to respond. Pick **750** or **2000** mAh (or type a custom value) in cockpit Settings on the `bq27441` tab. The G1A data memory is RAM-only: unplugging the pack (ITPOR) forgets Design Capacity **and** learned Qmax. Firmware restores both from the last saved FullChargeCapacity for that pack (Pi `pod.battery_learned_mah`, pushed on Hello).
 
 Planned wing pod PCB may move the bus to **IO4/IO5**; update `main.rs` when that layout is fixed.
 | `IO8`        | `LED`   | Status LED (active-low, with 1 kΩ)    |
@@ -211,11 +211,13 @@ Active):
 
 ### BQ27441 gauge learning
 
-Design capacity (`pod.battery_capacity_mah`, default **850**) is a **config write** to
-the gauge (ITPOR / `SetAttr`). Each battery telemetry frame includes **0x3C** so the
-Pi Settings field tracks the chip. **Impedance Track learning** (Qmax, resistance profile)
-happens separately during real charge/discharge at representative load — the ROM
-gauge does not need a BQStudio “golden image” cycle.
+Design capacity (`pod.battery_capacity_mah`, 750 or 2000 typically) is a **config write** to
+the gauge (ITPOR / `SetAttr`), together with **Qmax** seeded from the last learned
+FullChargeCapacity (`pod.battery_learned_mah`). The G1A has **no flash** for these
+parameters — they live in gauge RAM, ESP32 RAM this boot, and the Pi config file.
+**Impedance Track learning** (Qmax, resistance profile) still happens during real
+charge/discharge at representative load; saving FCC just means the next power-on
+is not starting from the factory 1340 mAh defaults.
 
 **Calibration run (bench or wing, pod at normal WiFi/sensor load):**
 
@@ -228,8 +230,8 @@ gauge does not need a BQStudio “golden image” cycle.
 One or two such cycles is usually enough. After that, partial cycles maintain
 accuracy; repeat a full anchor cycle every few months or after long storage.
 
-**Pass criteria:** serial `bq27441 design capacity programmed 850 mAh` (data memory
-`DesignCapacity` at 0x3C, not learned `FullChargeCapacity` at 0x0E); kingfisher
+**Pass criteria:** serial `bq27441 capacity programmed design=2000 qmax=1840 mAh` (data memory
+`DesignCapacity` at 0x3C plus Qmax at State offset 0); kingfisher
 `battery_gauge_learned` and `battery_capacity_full_mah` within ~±15% of design after
 Impedance Track cycles; SOC tracks voltage sensibly on the next partial cycle.
 

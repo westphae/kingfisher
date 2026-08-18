@@ -26,7 +26,11 @@
       "in_mmc5983_sampling_frequency": "20",
       "in_mmc5983_bandwidth": "100"
     },
-    "battery_capacity_mah": 850,
+    "battery_capacity_mah": 2000,
+    "battery_learned_mah": {
+      "750": 710,
+      "2000": 1840
+    },
     "sleep_soc_pct": 20,
     "sleep_voltage_v_uncalibrated": 3.60,
     "sleep_debounce_s": 45,

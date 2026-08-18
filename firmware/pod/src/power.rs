@@ -205,6 +205,25 @@ pub fn note_battery_sample(
         return;
     }
 
+    // Leave Protect when the pack is clearly healthy. After a rundown the
+    // charger often tapers below CHARGE_CURRENT_A (or is unplugged) at ~4.2 V;
+    // an unlearned gauge must not keep us in Protect on a bogus low SOC.
+    if m == PowerMode::ProtectPending || m == PowerMode::Protect {
+        let volt_ok = voltage_v > cfg::BURST_VOLTAGE_UNCALIBRATED + WAKE_VOLTAGE_MARGIN_V;
+        let soc_ok =
+            !gauge_trusted || soc_pct > cfg::PROTECT_SOC_PCT as f32 + WAKE_SOC_MARGIN_PCT;
+        if volt_ok && soc_ok {
+            println!(
+                "pod: power -> active (pack recovered {:.2} V, soc {:.0}%)",
+                voltage_v, soc_pct
+            );
+            set_mode(PowerMode::Active, now_us);
+            set_reason(PowerReason::None);
+            clear_low_since();
+            return;
+        }
+    }
+
     // Protect: immediate below the emergency floor, debounced at the
     // configured threshold. Voltage always counts; SOC needs a trusted gauge.
     if m != PowerMode::ProtectPending && m != PowerMode::Protect {

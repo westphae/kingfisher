@@ -58,6 +58,11 @@ type Client struct {
 	registry  *sensors.Registry
 	cfg       *config.Holder
 
+	learnedSaveMu   sync.Mutex
+	lastSavedQmax   uint16
+	lastSavedDesign uint16
+	lastSavedAt     time.Time
+
 	reader *reader
 
 	// protoWarned is the last pod proto_version we logged a wire-mismatch
@@ -145,7 +150,7 @@ func New(addr string, transport Transport, hub *live.Hub, buf *store.Buffer, st 
 		}
 	}
 	if cfg != nil {
-		c.reader.SetDesignCapacityFromConfig(cfg.Get().PodBatteryCapacityMah())
+	c.reader.SetDesignCapacityFromConfig(cfg.Get().PodBatteryCapacityMah())
 		c.applySavedSettings(false)
 		c.refreshRegistryViews()
 	}
@@ -381,13 +386,20 @@ func (c *Client) onBatch(b wire.SampleBatch) {
 				}
 				designMah = raw.DesignCapacityMah
 			}
+			var learnedQmax uint16
+			if c.cfg != nil {
+				learnedQmax = c.cfg.Get().PodLearnedQmaxMah(designMah)
+			}
 			learned = BatteryGaugeLearned(raw, designMah)
-			br, _ := NormalizeBatteryReading(raw, designMah)
+			br, _ := NormalizeBatteryReading(raw, designMah, learnedQmax)
 			dev, values, ok = c.reader.sampleBatteryValues(br, learned)
 			rd = br
 			if ok {
 				c.noteBatteryTelemetry(br, learned)
 				c.reader.applyReading(br, learned)
+				if learned {
+					c.maybePersistLearnedQmax(designMah, br.CapacityFullMah)
+				}
 			}
 		default:
 			rd = NormalizeReading(rd, designMah)
@@ -462,7 +474,38 @@ func (c *Client) applySavedSettings(sendCmd bool) {
 		for _, o := range outs {
 			c.enqueueOutbound(o)
 		}
+		for _, o := range c.batteryCapacityCmds() {
+			c.enqueueOutbound(o)
+		}
 	}
+}
+
+func (c *Client) batteryCapacityCmds() []outboundCmd {
+	if c.cfg == nil {
+		return nil
+	}
+	cfg := c.cfg.Get()
+	mah := cfg.PodBatteryCapacityMah()
+	if mah == 0 {
+		return nil
+	}
+	outs := []outboundCmd{{
+		Cmd: wire.CmdSetAttr{
+			Sensor: wire.SensorBattery,
+			Key:    wire.AttrDesignCapacity,
+			Value:  float32(mah),
+		},
+	}}
+	if qmax := cfg.PodLearnedQmaxMah(mah); qmax > 0 {
+		outs = append(outs, outboundCmd{
+			Cmd: wire.CmdSetAttr{
+				Sensor: wire.SensorBattery,
+				Key:    wire.AttrQmaxCapacity,
+				Value:  float32(qmax),
+			},
+		})
+	}
+	return outs
 }
 
 func (c *Client) enqueueOutbound(o outboundCmd) {

@@ -19,12 +19,15 @@ pub const PI_IP: [u8; 4] = PI_EP.0;
 /// Parsed UDP port from [`PI_ADDR`].
 pub const PI_PORT: u16 = PI_EP.1;
 
+// 0x0004_0009: do not SOC-sleep until FCC matches the pack; leave Protect
+// on healthy voltage; re-seed Qmax when FCC looks like factory leftover.
+// 0x0004_0008: BQ27441 restores Design Capacity + Qmax after ITPOR.
 // 0x0004_0007: bound all uplink_task UDP sends (SEND_TIMEOUT) and gate cmd
 // replies on radio-up — an unbounded send after the burst radio-stop wedged
 // the power state machine for 53 min on 2026-07-15.
 // 0x0004_0006: three-stage power protocol (burst/protect), Ping keepalive
 // fix, MMC5983 spread-poll harvesting at configured rate.
-pub const FW_VERSION: u32 = 0x0004_0007;
+pub const FW_VERSION: u32 = 0x0004_0009;
 
 /// Sensor poll / uplink cadence (Hz). Mag 50 Hz is a later stretch goal.
 pub const TICK_MS: u64 = 100;
@@ -33,6 +36,8 @@ pub const TICK_MS: u64 = 100;
 pub const BASE_HZ: u16 = (1000 / TICK_MS) as u16;
 
 /// LiPo design capacity (mAh) for BQ27441 gauge configuration at build time.
+/// Learned FullChargeCapacity per pack is persisted on the Pi and restored
+/// over SetAttr; ESP32 NVS for that map is still deferred.
 pub const BATTERY_CAPACITY_MAH: u16 = parse_env_u16(env!("BATTERY_CAPACITY_MAH"));
 
 // Three-stage power protocol thresholds (see power.rs).

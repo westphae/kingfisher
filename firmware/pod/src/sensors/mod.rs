@@ -549,12 +549,22 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
                         // Feed the live DesignCapacity (0x3C) readback to the
                         // config tracker; it confirms/clears any pending write.
                         crate::battery_cfg::note_chip(s.design_capacity_mah);
+                        crate::battery_cfg::restore_if_fcc_implausible(
+                            s.design_capacity_mah,
+                            s.capacity_full_mah as u16,
+                            cap_us,
+                        );
+                        let fcc = if s.capacity_full_mah > 0.0 {
+                            s.capacity_full_mah as u16
+                        } else {
+                            0
+                        };
                         power::note_battery_sample(
                             cap_us,
                             s.voltage_v,
                             s.current_a,
                             s.soc_pct,
-                            crate::battery_cfg::gauge_trusted(),
+                            crate::battery_cfg::gauge_trusted(fcc),
                         );
                         rates::note_read_ok(SensorId::Battery);
                         push_battery(
@@ -582,16 +592,16 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
                 }
             }
             // Config update needs a quiet bus; run even when quiesced for sleep.
-            if let Some(mah) = crate::battery_cfg::should_program_design(tick_us) {
-                match bq27441.program_design_capacity(bus, mah) {
+            if let Some((mah, qmax)) = crate::battery_cfg::should_program_capacity(tick_us) {
+                match bq27441.program_capacity(bus, mah, qmax) {
                     Ok(()) => {
-                        println!("pod: bq27441 design capacity programmed {mah} mAh");
-                        crate::battery_cfg::note_program_ok(mah);
+                        println!("pod: bq27441 capacity programmed design={mah} qmax={qmax} mAh");
+                        crate::battery_cfg::note_program_ok(mah, qmax);
                     }
                     Err(()) => {
                         crate::battery_cfg::note_program_fail(tick_us);
                         if crate::battery_cfg::should_log_program_fail() {
-                            println!("pod: bq27441 design capacity program failed; retry in 60s");
+                            println!("pod: bq27441 capacity program failed; retry in 60s");
                         }
                     }
                 }

@@ -27,8 +27,8 @@ power choice.
 
 1. **Active** — live streaming, exactly as before.
 2. **Burst** — on battery with SOC ≤ `burst_soc_pct` (default 30%; voltage
-   fallback `burst_voltage_v_uncalibrated` 3.60 V when the gauge is not
-   trusted), debounced `low_debounce_s` (45 s): the radio is stopped
+   fallback `burst_voltage_v_uncalibrated` 3.60 V when FullChargeCapacity does
+   **not** match the configured pack), debounced `low_debounce_s` (45 s): the radio is stopped
    (`esp_wifi_stop` via `radio.rs` — esp-radio 0.18 has no public stop/start;
    its event-driven state machine stays coherent with the raw calls). Sensors
    keep sampling at full rate into `burst.rs` — compact per-sensor rings
@@ -38,12 +38,12 @@ power choice.
    Ring overflow overwrites oldest and is counted in `dropped_readings`.
    Hysteresis +5% SOC / +0.05 V to return to Active; charging returns
    instantly.
-3. **Protect** — voltage ≤ `protect_voltage_v` (3.50) or SOC ≤
-   `protect_soc_pct` (5%), debounced; immediate below 3.40 V: final drain +
-   Status, then true deep sleep (~5 µA) waking every 10 min for a minimal
-   pre-WiFi gauge check (`bq27441::quick_check` in main.rs). Resumes on
-   charging or recovery; otherwise sleeps again. This is the LiPo protection —
-   and the only stage that stops collecting.
+3. **Protect** — voltage ≤ `protect_voltage_v` (3.50) or (only if FCC matches
+   the pack) SOC ≤ `protect_soc_pct` (5%), debounced; immediate below 3.40 V:
+   final drain + Status, then true deep sleep. Unlearned FCC is treated as
+   design/last-learned capacity — a factory 1340 mAh leftover must not SOC-trip
+   Protect on a full 2000 mAh pack. Healthy voltage (above burst + 0.05 V)
+   leaves Protect even if charging current has tapered off.
 
 ## Wire / Pi contract
 

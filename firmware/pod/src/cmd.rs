@@ -53,6 +53,13 @@ pub fn handle(envelope: CmdEnvelope) -> Ack {
                     battery_cfg::request_design_mah(value as u16)
                 }
             }
+            (SensorId::Battery, AttrKey::QmaxCapacity) => {
+                if !sensor_attached(SensorId::Battery) {
+                    false
+                } else {
+                    battery_cfg::request_qmax_mah(value as u16)
+                }
+            }
             (SensorId::Static, AttrKey::BmpOsrPress) => {
                 sensor_attached(SensorId::Static) && bmp_cfg::request_osr_p_mult(value)
             }
