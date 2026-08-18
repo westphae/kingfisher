@@ -16,7 +16,7 @@ from collections import Counter
 from pathlib import Path
 
 POD_DIR = Path(__file__).resolve().parent
-STL_FILES = ("pod_right.stl", "pod_left.stl")
+STL_FILES = ("pod_right.stl", "pod_left.stl", "static_cover.stl", "pm_tray.stl")
 
 # Tolerances (mm / mm²)
 EXTRA_OUTSIDE_MAX = 50.0  # right half may have tiny static-bay scraps; left must be ~0
@@ -79,7 +79,8 @@ def check_stls(r: CheckResult, directory: Path = POD_DIR) -> None:
         if n_bound == -2:
             r.fail(f"P2 {name}: binary size mismatch vs triangle count")
             continue
-        if n_tri < 100:
+        min_tri = 20 if name in ("static_cover.stl", "pm_tray.stl") else 100
+        if n_tri < min_tri:
             r.fail(f"P2 {name}: only {n_tri} triangles")
             continue
         if n_bound != 0:
@@ -243,53 +244,225 @@ def check_geometry(r: CheckResult) -> None:
     else:
         r.ok("I4 mating bay open for install (rail + bosses only)")
 
-    # I5 — boards clear cradle land + mutual BOARD_GAP
-    cradle_plates = [
-        (0.0, pod.SHOULDER_BH_T),
-        (pod.SUN_SMOOTH_X0 + pod.SUN_SMOOTH_LEN * 0.55, 3.0),
-        (pod.SUN_AFT_X - 8.0, 3.0),
-        (pod.SUN_AFT_X + 0.2, 3.0),
-    ]
-    clamp_x0 = pod.CLAMP_X0
-    clamp_x1 = pod.CLAMP_X0 + pod.CLAMP_LEN
+    # I5/I6 — wall-mount boards; 3D keepouts vs cradle, battery, shell, neighbors
     y_clear = pod.CRADLE_LAND_Y + pod.BOARD_GAP
     board_boxes = []
+    inner_ok = True
     for name, b in pod.BOARDS.items():
-        x0, x1 = b["x0"], b["x0"] + b["xl"]
-        y0 = pod.DECK_Y0 + b["y0"]
-        y1 = y0 + b["yl"]
-        board_boxes.append((name, x0, x1, y0, y1))
-        for px, plen in cradle_plates:
-            p0, p1 = px, px + plen
-            if x1 > p0 and x0 < p1 and y0 < y_clear - 0.05:
+        x0, x1, y0, y1, z0, z1 = pod.board_keepout(b)
+        board_boxes.append((name, x0, x1, y0, y1, z0, z1))
+        if y1 > y_clear - 0.05 and y0 < pod.CRADLE_LAND_Y:
+            # keepout inboard of land may extend toward cradle; fail if it
+            # actually enters the cradle Y band.
+            if y0 < pod.CRADLE_LAND_Y - 0.05:
                 r.fail(
-                    f"I5 {name} collides cradle plate x={p0:.1f}..{p1:.1f} "
-                    f"(board y0={y0:.1f} < clear Y={y_clear:.1f})"
+                    f"I6 {name} keepout y={y0:.1f}..{y1:.1f} enters cradle "
+                    f"(CRADLE_LAND_Y={pod.CRADLE_LAND_Y:.1f})"
                 )
-        # Clamp land is a thick cylinder over the knurled band — boards under it
-        # in X must sit outboard with cable clearance (not merely miss the PCB).
-        if x1 > clamp_x0 and x0 < clamp_x1 and y0 < y_clear - 0.05:
-            r.fail(
-                f"I5 {name} under clamp land without Y clearance "
-                f"(board y0={y0:.1f} < {y_clear:.1f})"
-            )
-    # Pairwise clearance: X-neighbors need BOARD_GAP; X-overlap OK if Y-separated.
-    for i, (n1, a0, a1, ay0, ay1) in enumerate(board_boxes):
-        for n2, b0, b1, by0, by1 in board_boxes[i + 1 :]:
+                inner_ok = False
+        # PCB plane must be the wall land, not the floor.
+        if abs(b.get("z0", -1) - getattr(pod, "Y_PCB", -99)) < 0.01:
+            r.fail(f"I5 {name} still looks floor-mounted (z0==Y_PCB?)")
+        # Wall plane: keepout y1 is the raised standoff face.
+        if abs(y1 - pod.Y_PCB) > 0.2:
+            r.fail(f"I5 {name} not on standoffs (keepout y1={y1:.1f}, Y_PCB={pod.Y_PCB:.1f})")
+            inner_ok = False
+        for z in (z0, z1):
+            yi = pod.ellipse_y_plus(z, pod.WALL)
+            if yi < pod.Y_LAND + 1.0:
+                r.fail(
+                    f"I6 {name} z={z:.1f}: inner +Y wall {yi:.1f} < land {pod.Y_LAND:.1f}+1"
+                )
+                inner_ok = False
+        # Battery overlap in X and Z at battery Y
+        if (
+            x1 > pod.BATT_X0
+            and x0 < pod.BATT_X0 + pod.BATT_POCKET_X
+            and z1 > pod.BATT_Z0
+            and z0 < pod.BATT_Z0 + pod.BATT_POCKET_Z
+            and y0 < pod.BATT_Y0 + pod.BATT_POCKET_Y
+            and y1 > pod.BATT_Y0
+        ):
+            r.fail(f"I6 {name} keepout intersects battery pocket")
+            inner_ok = False
+    # Pairwise: overlap in X and Z needs BOARD_GAP in Y (or vice versa).
+    for i, (n1, a0, a1, ay0, ay1, az0, az1) in enumerate(board_boxes):
+        for n2, b0, b1, by0, by1, bz0, bz1 in board_boxes[i + 1 :]:
             x_overlap = a1 > b0 and a0 < b1
+            z_overlap = az1 > bz0 and az0 < bz1
             y_overlap = ay1 > by0 and ay0 < by1
-            if x_overlap and y_overlap:
-                r.fail(f"I5 {n1}/{n2} footprints overlap in X and Y")
+            if x_overlap and z_overlap and y_overlap:
+                r.fail(f"I6 {n1}/{n2} keepouts overlap in X, Y, and Z")
+                inner_ok = False
+                continue
+            if x_overlap and z_overlap:
+                r.fail(f"I6 {n1}/{n2} footprints overlap on the wall (X and Z)")
+                inner_ok = False
                 continue
             if x_overlap:
-                continue  # stacked in Y (e.g. BMP + mag)
+                zgap = bz0 - az1 if az1 <= bz0 else az0 - bz1
+                if 0.0 <= zgap < pod.BOARD_GAP - 0.05:
+                    r.fail(
+                        f"I6 {n1}/{n2} Z-gap {zgap:.1f} < BOARD_GAP {pod.BOARD_GAP}"
+                    )
+                    inner_ok = False
+                continue
             gap = b0 - a1 if a1 <= b0 else a0 - b1
-            if 0.0 <= gap < pod.BOARD_GAP - 0.05 and not (
-                {n1, n2} == {"BABY", "PROMICRO"}  # tight Qwiic hop by design
+            if 0.0 <= gap < pod.BOARD_GAP - 0.05 and z_overlap and not (
+                {n1, n2} == {"BABY", "PROMICRO"}
             ):
-                r.fail(f"I5 {n1}/{n2} X-gap {gap:.1f} < BOARD_GAP {pod.BOARD_GAP}")
-    if not any(n.startswith("FAIL I5") for n in r.notes):
-        r.ok("I5 boards clear cradle land + BOARD_GAP")
+                r.fail(f"I6 {n1}/{n2} X-gap {gap:.1f} < BOARD_GAP {pod.BOARD_GAP}")
+                inner_ok = False
+    # I5 — raised off the wall land (hub-case standoffs, not flush)
+    if pod.Y_PCB > pod.Y_LAND - pod.STANDOFF_H + 0.05 or pod.STANDOFF_H < 4.0:
+        r.fail(
+            f"I5/I8 PCBs not raised (Y_PCB={pod.Y_PCB:.1f}, Y_LAND={pod.Y_LAND:.1f}, "
+            f"STANDOFF_H={pod.STANDOFF_H:.1f})"
+        )
+        inner_ok = False
+    # P6/I8 — every board has ≥2 M2.5 insert standoffs + screw relief past insert.
+    # Empty holes=[] used to skip P6 (wall-mount nubs) — that must fail.
+    p6_ok = True
+    for name, b in pod.BOARDS.items():
+        posts = pod.board_standoffs(b)
+        if len(posts) < 2:
+            r.fail(
+                f"P6/I8 {name} has {len(posts)} insert standoffs "
+                "(need ≥2 M2.5 through-hole or clamp posts; no nubs)"
+            )
+            p6_ok = False
+            continue
+        for hx, hz in posts:
+            z = b["z0"] + hz
+            relief = pod.board_relief_depth(z)
+            if relief < pod.INS_DEPTH + 1.5:
+                r.fail(
+                    f"P6 {name} z={z:.1f}: screw relief {relief:.1f} mm "
+                    f"not past insert {pod.INS_DEPTH:.1f}"
+                )
+                p6_ok = False
+    if p6_ok:
+        r.ok(
+            f"P6/I8 every board ≥2 M2.5 standoffs; insert {pod.INS_DEPTH:.2f} mm "
+            f"+ relief extra {pod.SCREW_RELIEF_EXTRA:.1f}"
+        )
+    # I7 — iron corridor from the mating face to each board insert.
+    # BMP/mag holes must sit in the static-bay window (serviceable cage).
+    wx0, wx1, wz0, wz1 = pod._static_window()
+    shp_r = right.val().wrapped
+    i7_ok = True
+    if getattr(pod, "Y_PCB", 0) < 20:
+        r.fail("I7 Y_PCB too close to seam for mating-face heat-set")
+        i7_ok = False
+        inner_ok = False
+    for name, b in pod.BOARDS.items():
+        for hx, hz in pod.board_standoffs(b):
+            x = b["x0"] + hx
+            z = b["z0"] + hz
+            if name in ("BMP581", "MAG"):
+                if not (wx0 + 0.2 <= x <= wx1 - 0.2 and wz0 + 0.2 <= z <= wz1 - 0.2):
+                    r.fail(
+                        f"I7 {name} insert ({x:.1f},{z:.1f}) not in static-bay window"
+                    )
+                    i7_ok = False
+            y = 2.0
+            while y < pod.Y_PCB - 0.4:
+                if (
+                    BRepClass3d_SolidClassifier(
+                        shp_r, gp_Pnt(x, y, z), 1e-4
+                    ).State()
+                    == TopAbs_IN
+                ):
+                    r.fail(
+                        f"I7 {name} iron corridor blocked at "
+                        f"({x:.1f},{y:.1f},{z:.1f})"
+                    )
+                    i7_ok = False
+                    break
+                y += 3.0
+    if inner_ok and not any(n.startswith("FAIL I5") or n.startswith("FAIL I6") for n in r.notes):
+        r.ok("I5 wall-mount boards on raised standoffs (XZ, inserts along Y)")
+        r.ok("I6 board keepouts clear cradle / battery / neighbors / inner wall")
+    if i7_ok:
+        r.ok("I7 insert iron corridor (static bay has a tool window + cover)")
+
+    # S3/L3 — isolated static plenum; holes only in that bay
+    bx0, bx1, by0, by1, bz0, bz1 = pod._static_bay_box()
+    s3_ok = True
+    if by0 >= pod.Y_PCB - 1.0:
+        r.fail("S3 static bay -Y wall missing (plenum not isolated)")
+        s3_ok = False
+    if bz1 - bz0 < 20.0 or bx1 - bx0 < 20.0:
+        r.fail("S3 static bay too small to enclose BMP/mag")
+        s3_ok = False
+    for hx, hz in pod.static_hole_centers():
+        if not (bx0 <= hx <= bx1 and bz0 <= hz <= bz1):
+            r.fail(f"S3 static hole ({hx:.1f},{hz:.1f}) outside isolated bay")
+            s3_ok = False
+    if s3_ok:
+        r.ok("S3/L3 static holes open into isolated BMP bay (serviceable cover)")
+
+    # P5/L2 — aft pin shorter than cup; print-fit clamp
+    if pod.SUN_RECESS_BOSS_LEN > pod.SUN_RECESS_DEPTH - 2.45:
+        r.fail(
+            f"P5 aft pin {pod.SUN_RECESS_BOSS_LEN:.2f} mm into "
+            f"{pod.SUN_RECESS_DEPTH:.2f} mm cup (need ≥2.5 mm unused)"
+        )
+    else:
+        r.ok(
+            f"P5 aft pin {pod.SUN_RECESS_BOSS_LEN:.1f} mm "
+            f"(cup {pod.SUN_RECESS_DEPTH:.1f}, clr "
+            f"{pod.SUN_RECESS_DEPTH - pod.SUN_RECESS_BOSS_LEN:.1f})"
+        )
+    if pod.CLAMP_CLEAR < 0.20:
+        r.fail(f"L2 clamp radial clearance {pod.CLAMP_CLEAR:.2f} < 0.20 (print-1 tight)")
+    else:
+        r.ok(
+            f"L2 bores tip/smooth/clamp/barrel "
+            f"+{pod.CRADLE_CLEAR_TIP:.2f}/+{pod.CRADLE_CLEAR_SMOOTH:.2f}/"
+            f"+{pod.CLAMP_CLEAR:.2f}/+{pod.CRADLE_CLEAR_BARREL:.2f} radial"
+        )
+    if pod.NOSE_LIP_WALL < 1.5:
+        r.fail(f"P7 nose lip {pod.NOSE_LIP_WALL:.2f} mm < 1.5")
+    else:
+        r.ok(f"P7 nose lip {pod.NOSE_LIP_WALL:.2f} mm radial")
+
+    # L5 — route polylines stay in the cavity envelope (coarse AABB)
+    for route in pod.build_routes():
+        bad = False
+        for (px, py, pz) in route["pts"]:
+            if py < -pod.LEFT_EXTENT or py > pod.RIGHT_EXTENT:
+                r.fail(f"L5 {route['name']} point y={py:.1f} outside pod")
+                bad = True
+                break
+            if pz < 0.0 or pz > pod.OUTER_H:
+                r.fail(f"L5 {route['name']} point z={pz:.1f} outside height")
+                bad = True
+                break
+            # Hose must not run through the battery slab
+            if (
+                route["kind"] == "hose"
+                and pod.BATT_X0 <= px <= pod.BATT_X0 + pod.BATT_POCKET_X
+                and pod.BATT_Y0 <= py <= pod.BATT_Y0 + pod.BATT_POCKET_Y
+                and pod.BATT_Z0 <= pz <= pod.BATT_Z0 + pod.BATT_POCKET_Z
+            ):
+                r.fail(f"L5 {route['name']} pierces battery pocket")
+                bad = True
+                break
+        if not bad:
+            r.ok(f"L5 {route['name']} {len(route['pts'])} pts in envelope")
+
+    # L6 — locked panel COTS cutouts
+    if abs(pod.SW_CUT_X - 19.6) > 0.05 or abs(pod.SW_CUT_Z - 13.0) > 0.05:
+        r.fail(f"L6 rocker cutout {pod.SW_CUT_X:.1f}×{pod.SW_CUT_Z:.1f} ≠ 19.6×13 (R1966A / 2–3 mm panel)")
+    elif abs(pod.USB_EAR_PITCH - 17.0) > 0.05:
+        r.fail(f"L6 USB ear pitch {pod.USB_EAR_PITCH:.1f} ≠ 17 (CAB-15464)")
+    elif not (8.0 <= pod.LED_HOLE_D <= 8.4):
+        r.fail(f"L6 LED holder hole Ø{pod.LED_HOLE_D:.1f} not 8.0–8.4 mm")
+    elif not (2.0 <= pod.WALL <= 3.0) or abs(pod.PANEL_T - pod.WALL) > 0.05:
+        r.fail(f"L6 panel thickness WALL={pod.WALL:.2f} PANEL_T={pod.PANEL_T:.2f} not 2–3 mm")
+    else:
+        r.ok("L6 panel COM-08837 / CAB-15464 / Ø8.2 LED holders")
 
     # A9 — ogive tip stays fused (a disconnected tip scrap used to leave a flat nub)
     rbb = right.val().BoundingBox()
@@ -350,7 +523,7 @@ def check_geometry(r: CheckResult) -> None:
 
 def check_shell_seal(r: CheckResult, pod, left, right) -> None:
     """
-    S1 — sealed cavity except intentional openings (tip, static array, charge USB).
+    S1 — sealed cavity except intentional openings (tip, static array, panel).
 
     Seal the mating face, then ray-cast from a cavity point to a grid of
     exterior samples near the bottom-side fairings.  Zero wall hits ⇒ leak.
@@ -385,14 +558,14 @@ def check_shell_seal(r: CheckResult, pod, left, right) -> None:
             != TopAbs_IN
         )
 
-    def n_hits(dst: tuple[float, float, float]) -> int:
-        dx = dst[0] - cavity[0]
-        dy = dst[1] - cavity[1]
-        dz = dst[2] - cavity[2]
+    def n_hits_from(src: tuple[float, float, float], dst: tuple[float, float, float]) -> int:
+        dx = dst[0] - src[0]
+        dy = dst[1] - src[1]
+        dz = dst[2] - src[2]
         length = math.sqrt(dx * dx + dy * dy + dz * dz)
         if length < 1e-6:
             return 0
-        lin = gp_Lin(gp_Pnt(*cavity), gp_Dir(dx / length, dy / length, dz / length))
+        lin = gp_Lin(gp_Pnt(*src), gp_Dir(dx / length, dy / length, dz / length))
         inter = BRepIntCurveSurface_Inter()
         inter.Init(shp, lin, 1e-4)
         n = 0
@@ -403,31 +576,36 @@ def check_shell_seal(r: CheckResult, pod, left, right) -> None:
             inter.Next()
         return n
 
+    def n_hits(dst: tuple[float, float, float]) -> int:
+        return n_hits_from(cavity, dst)
+
     # Allowed exterior piercings — skip samples that aim into these windows.
-    baby = pod.BOARDS["BABY"]
-    charge_x = baby["x0"] + baby["xl"] / 2
-    charge_z = baby["z0"] + pod.PCB_T + pod.USB_CHARGE_H / 2 - 0.5
-    static_x0 = (pod.BAY_X0 + pod.BAY_X1) / 2 - (
-        (pod.STATIC_HOLE_COLS - 1) * pod.STATIC_HOLE_PITCH_X / 2 + 4.0
-    )
-    static_x1 = (pod.BAY_X0 + pod.BAY_X1) / 2 + (
-        (pod.STATIC_HOLE_COLS - 1) * pod.STATIC_HOLE_PITCH_X / 2 + 4.0
-    )
+    bay_x0, bay_x1, _, _, bay_z0, bay_z1 = pod._static_bay_box()
 
     def allowed(x: float, y: float, z: float) -> bool:
         # Tip mouth
         if x < 5.0 and abs(z - pod.PITOT_AXIS_Z) < pod.CRADLE_R_TIP + 3.0:
             return True
         # Static array on +Y skin
-        if y > pod.RIGHT_EXTENT - 3.0 and static_x0 <= x <= static_x1:
-            return True
-        # Babysitter charge port on +Y skin
         if (
             y > pod.RIGHT_EXTENT - 3.0
-            and abs(x - charge_x) < pod.USB_CHARGE_W / 2 + 2.0
-            and abs(z - charge_z) < pod.USB_CHARGE_H / 2 + 2.0
+            and bay_x0 <= x <= bay_x1
+            and bay_z0 <= z <= bay_z1
         ):
             return True
+        if y <= min(pod.RIGHT_EXTENT, pod.PANEL_Y) - 3.0:
+            return False
+        # Panel cluster
+        if abs(x - pod.SW_X) <= pod.SW_CUT_X / 2 + 1.5 and abs(z - pod.SW_Z) <= pod.SW_CUT_Z / 2 + 1.5:
+            return True
+        if abs(x - pod.USB_X) <= pod.USB_WIN_X / 2 + 1.5 and abs(z - pod.USB_Z) <= pod.USB_WIN_Z / 2 + 1.5:
+            return True
+        for ex, ez in pod.usb_ear_xz():
+            if (x - ex) ** 2 + (z - ez) ** 2 <= (pod.M3_CLR_D / 2 + 1.5) ** 2:
+                return True
+        for lx in (pod.LED_PWR_X, pod.LED_CHG_X):
+            if (x - lx) ** 2 + (z - pod.LED_Z) ** 2 <= (pod.LED_HOLE_D / 2 + 1.5) ** 2:
+                return True
         return False
 
     leaks: list[tuple[float, float, float]] = []
@@ -459,7 +637,32 @@ def check_shell_seal(r: CheckResult, pod, left, right) -> None:
             f"(e.g. ({ex[0]:.0f},{ex[1]:.1f},{ex[2]:.1f}); {len(leaks)} samples)"
         )
     else:
-        r.ok("S1 sealed cavity (tip / static / charge USB only)")
+        r.ok("S1 sealed cavity (tip / static / USB / rocker / LEDs)")
+
+    y_src = pod.Y_LAND - 6.0
+    y_dst = pod.PANEL_Y + 10.0
+    for name, x, z in (
+        ("rocker", pod.SW_X, pod.SW_Z),
+        ("USB", pod.USB_X, pod.USB_Z),
+        ("LED pwr", pod.LED_PWR_X, pod.LED_Z),
+        ("LED chg", pod.LED_CHG_X, pod.LED_Z),
+    ):
+        src = (x, y_src, z)
+        dst = (x, y_dst, z)
+        if not is_freestream(dst):
+            r.fail(f"L6 {name} probe not in freestream")
+            continue
+        if (
+            BRepClass3d_SolidClassifier(shp, gp_Pnt(*src), 1e-4).State()
+            == TopAbs_IN
+        ):
+            r.fail(f"L6 {name} interior rebate blocked at y={y_src:.1f}")
+            continue
+        hits = n_hits_from(src, dst)
+        if hits != 0:
+            r.fail(f"L6 {name} cutout blocked ({hits} wall hits)")
+        else:
+            r.ok(f"L6 {name} cutout opens to freestream")
 
     # Battery pocket must not pierce the outer envelope (no freestream slot).
     pocket = (
