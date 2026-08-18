@@ -27,5 +27,5 @@ Group=eric
 Nice=10
 IOSchedulingClass=idle
 ExecStart=/usr/local/bin/kingfisher-flight-backup.sh
-# Big first sync over wifi can take a while; the flock guards against overlap.
-TimeoutStartSec=3600
+# No start timeout: a multi-GB wifi rsync can run for hours. flock serializes overlap.
+TimeoutStartSec=infinity

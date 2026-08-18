@@ -118,5 +118,7 @@ journalctl -u kingfisher-flight-backup.service -n 10 --no-pager
   the flight closes. Sidecars are never copied, so closed DBs are consistent
   snapshots (the store's startup sweep + graceful-close cleanup keep closed DBs
   sidecar-free anyway).
-- **First sync** copies the whole backlog and may take a while over wifi;
-  `--partial` makes it resumable across dropped connections.
+- **First sync** copies the whole backlog and may take hours over wifi;
+  `--partial` makes it resumable across dropped connections. The oneshot has
+  `TimeoutStartSec=infinity` so a long rsync is not killed at the hourly timer
+  tick (`flock` still skips overlapping starts).
