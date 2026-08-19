@@ -308,3 +308,75 @@ def check_drain(r, pod, closed) -> None:
     else:
         r.ok(f"L8 labyrinth drain baffled: {hits} crossings above the outer hole "
              "(channel roof intact, no straight path to the cavity)")
+
+
+def check_open_bay(r, pod, left, right) -> None:
+    """I4 — the mating face must stay OPEN for install.
+
+    Every existing check looks for missing material (holes, thin walls,
+    detached features) or material in the wrong place (I2 protrusion).  None of
+    them notice UNWANTED material sitting in the cavity, which is how a flange
+    rail that filled the entire left cover with a 2.5 mm plate passed a green
+    validator: watertight, single solid, nothing outside the envelope, no leak.
+
+    Two tests, both physical:
+      * the left cover's bay must be empty — it is a cover, so between the SUN
+        aft bulkhead and the tail rim it may contain nothing at all;
+      * the battery and the SUN must have clear insertion volume in BOTH
+        halves, since they go in through the seam before close-up.
+    """
+    from OCP.BRepClass3d import BRepClass3d_SolidClassifier
+    from OCP.gp import gp_Pnt
+    from OCP.TopAbs import TopAbs_IN, TopAbs_ON
+
+    cls = BRepClass3d_SolidClassifier(left.val().wrapped)
+    blocked = []
+    x0, x1 = pod.AFT_BH_X1 + 5.0, pod.FLANGE_X1 - 5.0
+    for i in range(14):
+        x = x0 + (x1 - x0) * i / 13
+        for j in range(9):
+            z = (pod.INNER_Z0 + 12.0) + ((pod.INNER_Z1 - 12.0) - (pod.INNER_Z0 + 12.0)) * j / 8
+            # Follow the LOCAL inner skin: the boattail draws the left flank
+            # inboard, so a constant LEFT_EXTENT samples inside the skin and
+            # reports material that is simply the wall.
+            y_in = pod.skin_y_minus(x, z, pod.WALL)
+            for k in range(5):
+                y = y_in + 0.8 + k * 0.9
+                if y > -0.8:
+                    continue
+                cls.Perform(gp_Pnt(x, y, z), 1e-7)
+                if cls.State() in (TopAbs_IN, TopAbs_ON):
+                    blocked.append((x, y, z))
+    if blocked:
+        bx, by, bz = blocked[0]
+        r.fail(f"I4 pod_left bay obstructed at {len(blocked)} sample points, e.g. "
+               f"({bx:.0f},{by:.1f},{bz:.0f}) — the cover must be hollow between "
+               "the SUN aft bulkhead and the tail rim")
+    else:
+        r.ok("I4 pod_left bay clear for install")
+
+    import cadquery as cq
+    batt = (cq.Workplane("XY")
+            .transformed(offset=(pod.BATT_X0, pod.BATT_Y0, pod.BATT_Z0))
+            .box(pod.BATT_POCKET_X, pod.BATT_POCKET_Y, pod.BATT_POCKET_Z,
+                 centered=(False, False, False)))
+    # Stop short of the aft locating boss and use the smallest bore radius:
+    # the boss is SUPPOSED to sit inside the SUN's aft cup, and the nose
+    # bulkhead bore is tighter than the barrel, so neither is interference.
+    sun = (cq.Workplane("XY")
+           .transformed(offset=(0.0, 0.0, pod.PITOT_AXIS_Z), rotate=(0, 90, 0))
+           .circle(pod.CRADLE_R_SMOOTH)
+           .extrude(pod.AFT_BH_X0 - pod.SUN_RECESS_BOSS_LEN - 1.0))
+    # The flange screw bosses legitimately survive inside the battery pocket —
+    # add_battery_pocket protects them so the clamshell keeps its fasteners.
+    for sx, sz in pod.FLANGE_SCREWS:
+        if pod.BATT_X0 - pod.BOSS_D <= sx <= pod.BATT_X0 + pod.BATT_POCKET_X + pod.BOSS_D:
+            batt = batt.cut(pod._cyl_y(sx, sz, -pod.FLANGE_W - 1.0,
+                                       2 * pod.FLANGE_W + 2.0, pod.BOSS_D / 2))
+    for name, half in (("pod_left", left), ("pod_right", right)):
+        for what, tool in (("battery", batt), ("SUN barrel", sun)):
+            v = half.val().intersect(tool.val()).Volume()
+            if v > 50.0:
+                r.fail(f"I4/I6 {what} insertion volume fouled in {name} by {v:.0f} mm^3")
+            else:
+                r.ok(f"I4 {what} clear in {name} ({v:.1f} mm^3)")

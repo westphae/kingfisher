@@ -464,6 +464,16 @@ assert _ERR <= STATION_ERR_MAX, (
 _ENVELOPE_CACHE: dict[float, cq.Solid] = {}
 
 
+MIN_SECTION = 2.0  # smallest width/height an inset section may retain
+
+
+def _section_ok(x: float, inset: float) -> bool:
+    """Does the section still have real area once inset by `inset`?"""
+    y0, y1, z0, z1 = section_params(x)[:4]
+    return ((y1 - inset) - (y0 + inset) > MIN_SECTION
+            and (z1 - inset) - (z0 + inset) > MIN_SECTION)
+
+
 def full_body_solid(inset: float = 0.0) -> cq.Workplane:
     """The whole OML as ONE loft — nose, midbody and boattail are stations of
     the same section family, not separate solids fused together.
@@ -482,9 +492,27 @@ def full_body_solid(inset: float = 0.0) -> cq.Workplane:
     """
     key = round(inset, 6)
     if key not in _ENVELOPE_CACHE:
-        _ENVELOPE_CACHE[key] = cq.Solid.makeLoft(
-            [section_wire(x, inset) for x in _STATIONS], ruled=True
+        # Drop stations where the inset would invert the section.  The nose
+        # mouth is only 2 x NOSE_MOUTH_R across, so any inset past that turns
+        # the wire inside out and makeLoft returns a solid with NEGATIVE
+        # volume.  Cutting with such a solid ADDS material: at inset 7.5 the
+        # tail rim's _rail_shell came out at 763 cm^3 from a 522 cm^3 body and
+        # dumped a 2.5 mm plate down the whole seam of the left cover.  An
+        # inset body legitimately does not reach the mouth; truncating is the
+        # correct geometry, not a workaround.
+        xs = [x for x in _STATIONS if _section_ok(x, inset)]
+        assert len(xs) >= 2, (
+            f"full_body_solid(inset={inset}): the section collapses at every "
+            "station — inset is larger than the body"
         )
+        solid = cq.Solid.makeLoft([section_wire(x, inset) for x in xs], ruled=True)
+        vol = solid.Volume()
+        assert vol > 0.0, (
+            f"full_body_solid(inset={inset}) has volume {vol / 1000:.1f} cm^3. "
+            "A negative volume means the loft is inverted; any cut against it "
+            "will add material instead of removing it."
+        )
+        _ENVELOPE_CACHE[key] = solid
     return cq.Workplane("XY").newObject([_ENVELOPE_CACHE[key]])
 
 
@@ -516,6 +544,22 @@ def skin_y_plus(x: float, z: float, inset: float = 0.0) -> float:
     if z > z1 - r11:
         return (y1 - r11) + math.sqrt(max(0.0, r11 ** 2 - (z - (z1 - r11)) ** 2))
     return y1
+
+
+def skin_y_minus(x: float, z: float, inset: float = 0.0) -> float:
+    """-Y coordinate of the section boundary at (x, z).  Mirror of
+    skin_y_plus, needed wherever a check must follow the left flank as the
+    boattail draws it inboard rather than assuming a constant LEFT_EXTENT."""
+    y0, y1, z0, z1, r00, r10, r11, r01 = section_params(x)
+    y0, z0, z1 = y0 + inset, z0 + inset, z1 - inset
+    r00, r01 = max(r00 - inset, 0.30), max(r01 - inset, 0.30)
+    if z <= z0 or z >= z1:
+        return y0 + min(r00, r01)
+    if z < z0 + r00:
+        return (y0 + r00) - math.sqrt(max(0.0, r00 ** 2 - (z0 + r00 - z) ** 2))
+    if z > z1 - r01:
+        return (y0 + r01) - math.sqrt(max(0.0, r01 ** 2 - (z - (z1 - r01)) ** 2))
+    return y0
 
 
 def frontal_area() -> float:
@@ -802,6 +846,32 @@ def _rail_shell(inner_inset: float, outer_inset: float) -> cq.Workplane:
     return full_body_solid(inner_inset).cut(full_body_solid(outer_inset))
 
 
+def _seam_zone(thick: float) -> cq.Workplane:
+    """Where the shell actually crosses the seam plane: the top and bottom
+    strips, following the section at every station.
+
+    The flange rail must be clipped to this.  A band offset inward from the
+    skin exists on the FLANKS too, and on the 10 mm-deep left cover that flank
+    band (y -7.5..-3.5) falls inside the +/-FLANGE_W clip and comes through as
+    a 2.5 mm plate filling the whole cavity — 30.9 cm^3 of it, blocking the
+    battery and SUN install (I4).  The right half never showed it because its
+    flank sits at y=+39.5, far outside the clip, which is exactly why the bug
+    survived: the halves are asymmetric and only one of them was wrong.
+    """
+    def zone(which: str) -> cq.Workplane:
+        wires = []
+        for x in _STATIONS:
+            _y0, _y1, z0, z1 = section_params(x)[:4]
+            za, zb = (z1 - thick, z1 + 2.0) if which == "top" else (z0 - 2.0, z0 + thick)
+            wires.append(cq.Wire.makePolygon([
+                cq.Vector(x, -OUTER_W, za), cq.Vector(x, 2 * OUTER_W, za),
+                cq.Vector(x, 2 * OUTER_W, zb), cq.Vector(x, -OUTER_W, zb),
+            ], close=True))
+        return cq.Workplane("XY").newObject([cq.Solid.makeLoft(wires, ruled=True)])
+
+    return zone("top").union(zone("bottom"))
+
+
 def hollow_half(side: int) -> cq.Workplane:
     """Shell + mating flange rail (+ gasket groove on the right)."""
     shell = full_body_solid(0.0).cut(full_body_solid(WALL))
@@ -813,6 +883,7 @@ def hollow_half(side: int) -> cq.Workplane:
         _rail_shell(WALL, WALL + FLANGE_RAIL)
         .intersect(_x_slab(FLANGE_X0, FLANGE_X1))
         .intersect(_y_band(0.0, FLANGE_W) if side > 0 else _y_band(-FLANGE_W, 0.0))
+        .intersect(_seam_zone(WALL + FLANGE_RAIL + 1.0))
     )
     body = _union_if_solid(body, rail)
 

@@ -184,6 +184,7 @@ def check_geometry(r: CheckResult) -> None:
     right = pod.as_single_solid(pod.build_right(), "pod_right")
     left = pod.as_single_solid(pod.build_left(), "pod_left")
     g.check_tips(r, pod, left, right)
+    g.check_open_bay(r, pod, left, right)
 
     # I2 — nothing may poke outside the envelope.
     outer = pod.full_body_solid(0.0)
