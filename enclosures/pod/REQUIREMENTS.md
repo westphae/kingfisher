@@ -96,4 +96,9 @@ Slicer settings live in [`PRINT_RECIPE.md`](PRINT_RECIPE.md) — not in the STLs
    change, change `section_params` / the scale laws.
 4. After regen: `validate_pod.py` green; unique preview PNG name per revision.
 5. Do not call STLs print-ready unless validate exits 0.
-6. Enclosure-only work stays on `master` (no PR) unless the user asks otherwise.
+6. **Printed artifacts (`.stl` / `.step`) are committed only at a working
+   version**, not on every change — they are large binaries that churn even
+   when the geometry is unchanged. The QC PNGs are small and meaningful, so
+   they travel with the code. Verify reproducibility before an artifact
+   commit: a fresh run must reproduce the STLs byte-for-byte.
+7. Enclosure-only work stays on `master` (no PR) unless the user asks otherwise.
