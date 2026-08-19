@@ -139,9 +139,26 @@ def check_min_wall(r, pod, closed) -> None:
         if abs(q[1]) < 0.6:
             continue
         cls.Perform(gp_Pnt(*q), 1e-7)
-        if cls.State() not in (TopAbs_IN, TopAbs_ON):
-            bad.append(pt)
-            bad_area += area
+        if cls.State() in (TopAbs_IN, TopAbs_ON):
+            continue
+        # Confirm with an independent inward direction before calling it a
+        # defect.  A triangle normal is a heuristic and goes wrong on slivers
+        # and at high curvature; on the smooth loft that produced 2 false
+        # positives out of 4774 at a spot where the wall measures exactly
+        # 2.50 mm.  The vector toward the section centre is reliable for this
+        # convex-ish family, and a REAL hole fails both tests — stepping
+        # toward the centre from a hole still lands in the cavity.
+        sy0, sy1, sz0, sz1 = pod.section_params(pt[0])[:4]
+        cy, cz = 0.5 * (sy0 + sy1), 0.5 * (sz0 + sz1)
+        dy, dz = cy - pt[1], cz - pt[2]
+        mag = math.hypot(dy, dz)
+        if mag > 1e-6:
+            q2 = (pt[0], pt[1] + dy / mag * probe, pt[2] + dz / mag * probe)
+            cls.Perform(gp_Pnt(*q2), 1e-7)
+            if cls.State() in (TopAbs_IN, TopAbs_ON):
+                continue
+        bad.append(pt)
+        bad_area += area
     if bad:
         x, y, z = bad[0]
         r.fail(

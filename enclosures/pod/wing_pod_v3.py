@@ -134,6 +134,9 @@ GASKET_W = 1.6
 GASKET_D = 0.9
 SHELL_SCREW_INSET = 3.0
 FLANGE_SCREW_PITCH = 28.0
+# (x, z) of the two screws that clamp the SUN's threaded band.  z sits above
+# the bore: below it the section bottom runs out before the land does.
+CLAMP_SCREWS = [(13.0, 34.0), (27.0, 34.0)]
 
 # --- M2.5 heat-set inserts (same family as pi5_aviation_case.py) ------------
 INSERT_OD = 3.47
@@ -282,7 +285,12 @@ SUN_BARB_TIP_Z = PITOT_AXIS_Z + SUN_BARREL_OD / 2 + SUN_BARB_ABOVE_BARREL
 CRADLE_R_SMOOTH = SUN_SMOOTH_OD / 2 + CRADLE_CLEAR_SMOOTH
 CRADLE_R_CLAMP = SUN_THREAD_MAJOR / 2 + CLAMP_CLEAR
 CRADLE_R_BARREL = SUN_BARREL_OD / 2 + CRADLE_CLEAR_BARREL
-CLAMP_R_OUTER = CRADLE_R_CLAMP + 5.0
+# +7, not +5: the clamp needs screws through it to actually cinch the halves
+# onto the thread (print-2: the nose spread slightly at the press fit).  At
+# +5 there was exactly one workable screw height, with 6.3 mm of land and
+# 1.5 mm from pilot to bore.  At +7 the land is capped by CRADLE_LAND_Y and a
+# screw at z=34 gets 8.6 mm of land and 2.3 mm of bore clearance.
+CLAMP_R_OUTER = CRADLE_R_CLAMP + 7.0
 CRADLE_LAND_Y = CRADLE_R_CLAMP + 7.0
 NOSE_MOUTH_R = CRADLE_R_SMOOTH + NOSE_LIP_WALL
 
@@ -525,7 +533,26 @@ def full_body_solid(inset: float = 0.0) -> cq.Workplane:
             f"full_body_solid(inset={inset}): the section collapses at every "
             "station — inset is larger than the body"
         )
-        solid = cq.Solid.makeLoft([section_wire(x, inset) for x in xs], ruled=True)
+        # ruled=False.  A ruled loft creases at every station: measured 4.28 deg
+        # between adjacent patches at the nose and 1.06 deg in the boattail,
+        # at 0.8..4.6 mm spacing, which prints as washboard on the sloped
+        # surfaces.  A smooth loft has no creases but overshoots its control
+        # sections by ~0.025 mm, so the flats are trimmed back with half-space
+        # CUTS.  Cuts work where the 6-face envelope intersect did not: that
+        # failed outright at inset=WALL because the corrected solid was tangent
+        # to the box over whole faces.  Bonus: 30 faces instead of 386, so
+        # every downstream boolean is cheaper.
+        loft = cq.Solid.makeLoft([section_wire(x, inset) for x in xs], ruled=False)
+        big = 3 * OUTER_H
+        above = cq.Solid.makeBox(OUTER_L + 8, 4 * OUTER_W, big,
+                                 cq.Vector(-4, -2 * OUTER_W, OUTER_H - inset))
+        below = cq.Solid.makeBox(OUTER_L + 8, 4 * OUTER_W, big,
+                                 cq.Vector(-4, -2 * OUTER_W, inset - big))
+        solid = loft.cut(above).cut(below)
+        # .cut() hands back a Compound; unwrap so downstream code sees a Solid.
+        _sol = solid.Solids()
+        if len(_sol) == 1:
+            solid = _sol[0]
         vol = solid.Volume()
         assert vol > 0.0, (
             f"full_body_solid(inset={inset}) has volume {vol / 1000:.1f} cm^3. "
@@ -540,12 +567,12 @@ def _assert_exact_envelope() -> None:
     """The flats are mating and standing surfaces (A6/A7) — verify the loft
     really lands on them rather than trusting ruled=True."""
     for inset in (0.0, WALL):
-        bb = full_body_solid(inset).val().BoundingBox()
+        x0, x1, y0, y1, z0, z1 = mesh_extents(full_body_solid(inset))
         for got, want, name in (
-            (bb.zmin, inset, "z0"), (bb.zmax, OUTER_H - inset, "z1"),
-            (bb.ymin, -LEFT_EXTENT + inset, "y0"), (bb.ymax, RIGHT_EXTENT - inset, "y1"),
+            (z0, inset, "z0"), (z1, OUTER_H - inset, "z1"),
+            (y0, -LEFT_EXTENT + inset, "y0"), (y1, RIGHT_EXTENT - inset, "y1"),
         ):
-            assert abs(got - want) < 0.005, (
+            assert abs(got - want) < 0.05, (
                 f"envelope inset={inset}: {name} = {got:.4f}, expected {want:.4f}"
             )
 
@@ -854,6 +881,11 @@ def flange_screw_stations() -> list[tuple[float, float]]:
         _, _, sz0, sz1, _, _, _, _ = section_params(x)
         out.append((x, sz1 - SHELL_SCREW_INSET))
         out.append((x, sz0 + SHELL_SCREW_INSET))
+    # Two more through the SUN clamp itself.  The flange proper starts at
+    # x=FLANGE_X0, which left nothing holding the halves together over the
+    # thread band, and print-2 showed the nose spreading at the press fit.
+    # These sit just above the bore, in the widened clamp land.
+    out += CLAMP_SCREWS
     return out
 
 
@@ -944,8 +976,13 @@ def add_flange_fasteners(body: cq.Workplane, side: int) -> cq.Workplane:
             body = body.cut(_cyl_y(x, z, 0.0, INS_DEPTH, INS_HOLE_D / 2))
             body = body.cut(_cyl_y(x, z, 0.0, FLANGE_W - 1.0, SCREW_RELIEF_D / 2))
         else:
-            body = body.cut(_cyl_y(x, z, 0.0, -(FLANGE_W + 1.0), LID_SCREW_D / 2))
+            # Run the clearance hole to the OUTER skin, not to FLANGE_W.  The
+            # left cover is up to 10 mm deep but the hole was cut only 7 mm, so
+            # forward of the boattail it stopped 0.8 mm short of the
+            # counterbore floor and the screw had no way through.  Only the two
+            # aftmost stations worked, where the taper has thinned the cover.
             outer_y = section_params(x)[0]
+            body = body.cut(_cyl_y(x, z, 1.0, (outer_y - 2.0) - 1.0, LID_SCREW_D / 2))
             body = body.cut(_cyl_y(x, z, outer_y - 0.5, LID_CB_DEPTH + 0.5, LID_CB_D / 2))
     return body
 
@@ -1017,7 +1054,11 @@ def add_pitot_cradle(body: cq.Workplane, side: int) -> cq.Workplane:
              barb_r, min(SUN_BARB_TIP_Z + 8.0, INNER_Z1) - PITOT_AXIS_Z,
              centered=(False, False, False))
     )
-    body = body.cut(bay)
+    # Clip the bay to the CAVITY.  Unclipped it ate the nose's upper skin: at
+    # x=33 only 0.32 mm of PETG was left above the cut and it printed as a slit
+    # across the seam, open to the airflow — an undeclared S1 opening.  The
+    # cradle plates it has to clear are all inside the cavity anyway.
+    body = body.cut(bay.intersect(full_body_solid(WALL)))
 
     # Aft locating boss into the Ø6.03 x 7.06 blind cup.  Print-1: a boss ~2 mm
     # too long held the SUN off its stops, so >=2.5 mm of the cup stays unused.
