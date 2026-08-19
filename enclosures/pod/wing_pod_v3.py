@@ -1604,7 +1604,8 @@ def main() -> None:
         print(f"  P0 {name} print AABB {dx:.1f} x {dy:.1f} x {dz:.1f} mm "
               f"(bed {BED_LIMIT:.0f} x {BED_LIMIT:.0f} x {BED_Z:.0f})")
 
-    for fn in (render_profile_png, render_interior_png, render_aft_panel_png):
+    for fn in (render_layout_png, render_profile_png, render_interior_png,
+               render_aft_panel_png):
         lap(f"wrote {fn()}")
 
     asm = right.union(left).union(build_sun_placeholder())
@@ -1620,6 +1621,45 @@ def main() -> None:
     lap("validate_pod green")
 
 
+
+
+def build_routes() -> list[dict]:
+    """Named harness/hose polylines, in (x, y, z).
+
+    A layout aid, not geometry — nothing here cuts a solid.  Their job is to
+    prove on paper that every run has somewhere to go before the pod is closed,
+    and to be drawn on the assembly render.  The long runs deliberately use the
+    corridor at y ~5..15, which is clear between the battery slab on the seam
+    (y -4..4) and the boards and static cup on the wall (y >= 15.4).
+    """
+    baby = BOARDS["BABY"]
+    ms_z = BOARDS["MS4525"]["z0"] + 12.0
+    return [
+        dict(name="pitot (total)", colour="tab:red", pts=[
+            (SUN_BARB_X[2], 0.0, SUN_BARB_TIP_Z), (SUN_BARB_X[2], 7.0, SUN_BARB_TIP_Z - 2),
+            (66.0, 14.0, 32.0), (62.0, 19.0, ms_z)]),
+        dict(name="static (airspeed)", colour="tab:orange", pts=[
+            (SUN_BARB_X[1], 0.0, SUN_BARB_TIP_Z), (SUN_BARB_X[1], 7.0, SUN_BARB_TIP_Z - 2),
+            (57.0, 14.0, 32.0), (57.0, 19.0, ms_z)]),
+        dict(name="TE (capped)", colour="0.5", pts=[
+            (SUN_BARB_X[0], 0.0, SUN_BARB_TIP_Z), (SUN_BARB_X[0], 0.0, SUN_BARB_TIP_Z + 4)]),
+        dict(name="qwiic: BMP -> Pro Micro", colour="tab:blue", pts=[
+            (0.5 * (BAY_X0 + BAY_X1), 18.0, BAY_Z1 - 3.0),
+            (0.5 * (BAY_X0 + BAY_X1), 13.0, CUP_Z1 + 2.0),
+            (CUP_X0 - 4.0, 11.0, CUP_Z1 + 3.0), (104.0, 16.0, 50.0),
+            (100.0, 20.0, PM_Z0 + 4.0)]),
+        dict(name="qwiic: MAG -> Boost", colour="tab:cyan", pts=[
+            (60.0, 20.0, MAG_Z0 + 4.0), (68.0, 13.0, 34.0), (74.0, 20.0, 30.0)]),
+        dict(name="battery leads", colour="black", pts=[
+            (BATT_X0 + BATT_POCKET_X, 0.0, 30.0), (158.0, 8.0, 28.0),
+            (baby["x0"] + 6.0, 19.0, 26.0)]),
+        dict(name="Baby VOUT -> Boost", colour="tab:green", pts=[
+            (baby["x0"] + 3.0, 20.0, 20.0), (140.0, 9.0, 10.0), (100.0, 9.0, 10.0),
+            (94.0, 19.0, 14.0)]),
+        dict(name="aft panel harness", colour="tab:purple", pts=[
+            (OUTER_L - 2.0, PANEL_CY, USB_Z), (215.0, 12.0, 28.0), (195.0, 9.0, 24.0),
+            (182.0, 14.0, 22.0), (baby["x0"] + 20.0, 19.0, 20.0)]),
+    ]
 
 
 def insert_inventory() -> list[dict]:
@@ -1715,6 +1755,105 @@ def _section_polyline(x: float, inset: float = 0.0, n: int = 24) -> list[tuple[f
 
 def _tag() -> str:
     return f"pod_v3_{OUTER_L:.0f}x{OUTER_W:.0f}x{OUTER_H:.0f}"
+
+
+def render_layout_png() -> str:
+    """Assembly view: looking down -Y at the open right half.
+
+    This is the sheet you work from with the pod open on the bench — the pod in
+    outline, every boss you have to put an insert in, where each board lands,
+    and where every hose and wire runs.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Circle, Rectangle
+
+    fig, ax = plt.subplots(figsize=(16, 6.0))
+    xs = [OUTER_L * i / 500 for i in range(501)]
+    sp = [section_params(x) for x in xs]
+    ax.plot(xs, [q[3] for q in sp], "k-", lw=1.8)
+    ax.plot(xs, [q[2] for q in sp], "k-", lw=1.8)
+    ax.plot(xs, [q[3] - WALL for q in sp], "0.65", lw=1.0)
+    ax.plot(xs, [q[2] + WALL for q in sp], "0.65", lw=1.0)
+    for zline, lab in ((INSERT_Z_MIN, None), (INSERT_Z_MAX, "insert band (flange rails)")):
+        ax.axhline(zline, color="tab:red", ls=":", lw=0.9, alpha=0.55, label=lab)
+
+    colours = {"MS4525": "tab:blue", "BOOST": "tab:orange", "BABY": "tab:green",
+               "PROMICRO": "tab:purple", "BMP581": "gold", "MAG": "tab:pink"}
+    for name, b in BOARDS.items():
+        ax.add_patch(Rectangle((b["x0"], b["z0"]), b["L"], b["W"],
+                               fc=colours[name], ec="k", alpha=0.40, lw=1.0, zorder=2))
+        for hx, hz in board_standoffs(b):
+            ax.add_patch(Circle((b["x0"] + hx, b["z0"] + hz), BOARD_POST_D / 2,
+                                fc="white", ec="saddlebrown", lw=0.9, alpha=0.9, zorder=4))
+            ax.plot(b["x0"] + hx, b["z0"] + hz, "+", color="saddlebrown", ms=4,
+                    mew=0.9, zorder=5)
+        ax.annotate(f"{name}  {b['L']:.0f}x{b['W']:.1f}",
+                    (b["x0"] + b["L"] / 2, b["z0"] + b["W"] + 0.8),
+                    ha="center", va="bottom", fontsize=7, zorder=9,
+                    bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.85))
+
+    ax.add_patch(Rectangle((CUP_X0, CUP_Z0), CUP_X1 - CUP_X0, CUP_Z1 - CUP_Z0,
+                           fc="none", ec="k", ls="--", lw=1.2, zorder=3))
+    ax.annotate("static_bay cup", (CUP_X0 + 2.0, CUP_Z0 + 1.2), fontsize=7, zorder=9,
+                bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.85))
+    for cx, cz in cup_screws():
+        ax.add_patch(Circle((cx, cz), BOARD_POST_D / 2, fc="white", ec="saddlebrown",
+                            lw=0.9, alpha=0.9, zorder=4))
+        ax.plot(cx, cz, "+", color="saddlebrown", ms=4, mew=0.9, zorder=5)
+    for hx, hz in static_hole_centers():
+        ax.plot(hx, hz, "x", color="k", ms=4, zorder=6)
+
+    ax.add_patch(Rectangle((BATT_X0, BATT_Z0), BATT_POCKET_X, BATT_POCKET_Z,
+                           fc="none", ec="0.35", lw=1.3, ls="-.", zorder=1))
+    ax.annotate(f"battery {BATT_X:.1f} x {BATT_Y:.1f} x {BATT_Z:.1f} — on the seam, behind",
+                xy=(BATT_X0 + 20, BATT_Z0), xytext=(BATT_X0 + 8, -3.6),
+                fontsize=7, color="0.35", zorder=9,
+                arrowprops=dict(arrowstyle="-", color="0.6", lw=0.8))
+
+    ax.plot([SUN_TIP_X0, SUN_AFT_X], [PITOT_AXIS_Z] * 2, color="tab:blue",
+            lw=9, alpha=0.35, solid_capstyle="butt", zorder=1)
+    ax.annotate("ESA SUN-B", (10, PITOT_AXIS_Z - 5), fontsize=7, color="tab:blue")
+    for bx in SUN_BARB_X:
+        ax.plot([bx, bx], [PITOT_AXIS_Z, SUN_BARB_TIP_Z], color="tab:blue", lw=2.2, zorder=2)
+    ax.plot(0, 0, alpha=0)
+
+    for x, z in FLANGE_SCREWS:
+        ax.plot(x, z, "+", color="tab:red", ms=8, mew=1.4, zorder=6)
+    ax.add_patch(Rectangle((DRAIN_X0, INNER_Z0), DRAIN_X1 - DRAIN_X0,
+                           DRAIN_ROOF - INNER_Z0, fc="tab:cyan", ec="k", alpha=0.5, lw=0.8))
+    ax.annotate("labyrinth drain", (DRAIN_X0, DRAIN_ROOF + 1.5), fontsize=7)
+    ax.plot([OUTER_L, OUTER_L], [BASE_Z0, OUTER_H], color="crimson", lw=2.5)
+    ax.annotate("aft panel\n(rocker/USB/LEDs)", (OUTER_L - 3, (BASE_Z0 + OUTER_H) / 2),
+                fontsize=7, color="crimson", ha="right", va="center")
+
+    for r in build_routes():
+        px = [q[0] for q in r["pts"]]
+        pz = [q[2] for q in r["pts"]]
+        ax.plot(px, pz, ls="--", lw=1.5, color=r["colour"], zorder=7, label=r["name"])
+        ax.plot(px[0], pz[0], "o", color=r["colour"], ms=3.5, zorder=8)
+
+    handles = [Line2D([], [], marker="o", ls="none", mfc="white", mec="saddlebrown",
+                      ms=9, label=f"M2.5 insert boss (Ø{BOARD_POST_D:.0f})"),
+               Line2D([], [], marker="+", ls="none", color="tab:red", ms=9,
+                      label="clamshell flange screw"),
+               Line2D([], [], marker="x", ls="none", color="k", ms=7,
+                      label="static port")]
+    leg1 = ax.legend(handles=handles, loc="upper left", fontsize=7, framealpha=0.9)
+    ax.add_artist(leg1)
+    ax.legend(loc="upper right", fontsize=7, ncol=2, framealpha=0.9)
+
+    ax.set_title(f"Wing pod v3 — assembly layout, looking down -Y into the open right half"
+                 f"   ({OUTER_L:.0f} x {OUTER_W:.0f} x {OUTER_H:.0f} mm)")
+    ax.set_xlabel("X aft (mm)"); ax.set_ylabel("Z up (mm)")
+    ax.set_aspect("equal"); ax.grid(alpha=0.25)
+    ax.set_xlim(SUN_TIP_X0 - 5, OUTER_L + 14); ax.set_ylim(-5, OUTER_H + 13)
+    fig.tight_layout()
+    out = f"{_tag()}_layout.png"
+    fig.savefig(out, dpi=130); plt.close(fig)
+    return out
 
 
 def render_profile_png() -> str:

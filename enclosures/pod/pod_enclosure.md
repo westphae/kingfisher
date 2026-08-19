@@ -87,7 +87,8 @@ rejects the job. The `.step` files carry the same print orientation as the
 | `static_bay.stl` / `.step` | Isolated BMP plenum — a cup that seals to the wall land |
 | `pm_tray.stl` / `.step` | Pro Micro clamp tray (no OEM holes) |
 | `pod_assembly.step` | Assembled + SUN-B placeholder |
-| `pod_v3_*.png` | QC previews — unique name per revision |
+| `pod_v3_*_layout.png` | **Assembly sheet** — looking down −Y into the open right half: pod outline, every insert boss, board positions, and the hose/harness routes |
+| `pod_v3_*.png` | Other QC previews (profile/sections, interior, aft panel) — unique name per revision |
 
 ## Interior, nose → aft
 
