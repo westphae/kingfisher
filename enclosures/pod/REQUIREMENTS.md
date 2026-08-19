@@ -42,7 +42,7 @@ v2: 216 + 77 = 293 (and a 12 mm tail). v3: 235 + 61 = 296, 45° AABB 209.3 mm.
 |----|-------------|
 | S1 | The closed L+R cavity has **no freestream openings** except: (1) Prandtl/SUN tip mouth, (2) multi-hole static array into the isolated BMP bay, (3) the **aft service panel** opening and its cluster cuts, (4) the **labyrinth drain**. **Nothing pierces the +Y skin except the static array** — the service cluster moved to the aft face precisely so the side skin has no cutouts and no local pad. No exterior battery door: the pack goes in from the open mating face before close-up. |
 | S2 | Mating faces seal with an O-cord in the right-half groove and/or RTV on the flange. The groove **hugs the skin** (`WALL + GASKET_W/2`) so the battery notch cannot reach it. |
-| S3 | Static-port holes open **only** into an isolated BMP plenum, sealed from the electronics cavity by printed walls + a serviceable `static_cover.stl` (foam/RTV gasket; Qwiic gland). Not an inaccessible cage. |
+| S3 | Static-port holes open **only** into an isolated BMP plenum, formed by a **separate cup** (`static_bay.stl`) that seals to a flat land on the +Y wall with a foam/RTV gasket and four M2.5 into inserts (Qwiic gland in the cup). The BMP mounts and its inserts are heat-set on a **completely open wall** before the cup goes on. Integral walls plus a service window cannot do both jobs: the window must pass a heat-set iron yet leave a sealing frame, and at that board size it does neither — all four BMP bosses ended up behind the frame and the cover screws landed inside the board footprint. |
 | W1 | **Minimum wall.** Stepping inward from the outer skin by `0.55 × WALL` along the surface normal must land in material at every sampled point, except inside a declared S1 opening. This is the direct gate on the v2 failure. |
 
 ## Interior must stay interior
@@ -55,21 +55,21 @@ v2: 216 + 77 = 293 (and a 12 mm tail). v3: 235 + 61 = 296, 45° AABB 209.3 mm.
 | I4 | Mating face stays **open for install**. The flange is a **perimeter rail + local screw bosses**, not a bulkhead across the bay. |
 | I5 | Boards **wall-mount** on the right +Y inner skin (XZ plane) on **raised standoffs** (PCB not flush on the land). Standoff/insert axes are **±Y** so heat-set irons enter from the open mating face — no floor posts in wells. |
 | I6 | Each board's **3-D keepout** stays inside the cavity and clear of neighbours, the battery and the cradle, with `BOARD_GAP` between columns. |
-| I7 | Insert pilots are reachable from y≈0. The static bay has a **tool window** in its −Y wall (closed later by `static_cover.stl`). |
+| I7 | Insert pilots are reachable from y≈0. The static bay needs no tool window: its walls are a separate cup, so the BMP's pilots sit on an open wall. |
 | I8 | **Every board** mounts with M2.5 screws into heat-set inserts on standoffs (`STANDOFF_H` ≥ 4 mm), ≥2 insert positions each. The validator **fails** an empty `holes=[]` — that skip is how v2's wall-mount rework silently dropped the Pro Micro's fasteners. |
 
 ## Print / export (AnkerMake M5C)
 
 | ID | Requirement |
 |----|-------------|
-| P1 | Each of `pod_left.stl`, `pod_right.stl`, `tail_panel.stl`, `static_cover.stl`, `pm_tray.stl` is a **single solid**. |
+| P1 | Each of `pod_left.stl`, `pod_right.stl`, `tail_panel.stl`, `static_bay.stl`, `pm_tray.stl` is a **single solid**. |
 | P2 | Each STL is **watertight** (zero boundary edges after tessellation). |
 | P3 | Tessellation tight enough for P2 (`tol ≤ 0.03`, `ang ≤ 0.05`). |
 | P4 | Body halves export **flange/mating-face down**, curved outer up, **rotated 45°** for the bed diagonal. Signs are per-side; v2 shipped them swapped once and printed the flange on top. |
 | P5 | SUN-B protrudes **45 mm** and is stopped by the Ø10.65→Ø11.76 step on the nose bulkhead's aft face. The aft pin must not bottom in the cup before that step seats: `SUN_RECESS_BOSS_LEN` ≤ cup depth − 2.5 mm (print-1: 0.5 mm extra was ~2 mm too long). |
 | P6 | **All printed-joint screws** (clamshell, board, tray, static cover, aft panel) are **M2.5 into heat-set inserts** with **screw relief deeper than the insert**. No self-tap into PETG. LED holders use their own jam nuts. CAB-15464 USB ears are **M3 through-holes Ø3.3 + nuts behind the plate**. Rocker is snap-in. |
 | P7 | Nose lip survives print/handling (`NOSE_LIP_WALL` ≥ 1.5 mm). |
-| P8 | `static_cover.stl` is a single watertight solid. |
+| P8 | `static_bay.stl` is a single watertight solid, and prints **closed face down** so its flange tabs are a short overhang rather than a 29 mm bridge. |
 | P9 | `pm_tray.stl` is a single watertight solid. |
 | P10 | `tail_panel.stl` is a single watertight solid and prints flat, no supports. |
 
@@ -85,7 +85,7 @@ Slicer settings live in [`PRINT_RECIPE.md`](PRINT_RECIPE.md) — not in the STLs
 | L4 | SUN barbs: **6 mm ID** hose → COTS reducer → MS4525 3/32″ ID (~2.38 mm). |
 | L5 | Hose/Qwiic/USB **routes are a layout aid**, not geometry. `build_routes()` polylines are drawn in the QC PNGs and cut nothing, so the validator does not pretend to test them against real solids — v2's L5 check compared imaginary routes with real geometry. If a route ever needs real clearance, cut it and say so here. |
 | L6 | Service cluster **locked and on the aft face**, on `tail_panel.stl`: SparkFun **COM-08837** rocker (E-Switch R1966A, snap-in **19.6 × 13.0** for a 2.0–3.0 mm panel — plate is 3.0 mm, no rebate), SparkFun **CAB-15464** Micro-B (10.5 × 7.5 window, M3 ears at **17 mm**, through-holes + nuts, RTV under the flange), two **Ø8.2 mm** holes for 5 mm chrome ABS LED holders. Stacked in Z: rocker high, USB centre, LEDs low. Switch → Babysitter **SYSOFF** (JP12 + GND); red LED = VOUT; blue = `!CHG!`. |
-| L7 | SparkFun Pro Micro has **no OEM mounting holes**. It sits in `pm_tray.stl`, screwed to M2.5 insert standoffs. |
+| L7 | SparkFun Pro Micro has **no OEM mounting holes**. It sits in `pm_tray.stl`, screwed to M2.5 insert standoffs. The tray's retaining rim runs in **-Y**, away from the wall — the board drops in from the open mating face. A rim running +Y retains nothing and fouls the land it bolts against. |
 | L8 | **Labyrinth drain** at the aft end of the flat bottom (the cavity low point), clear of the battery and the flange rails: cavity → floor-level slot in the aft end wall → channel → down through the skin. No straight path from freestream to interior. |
 
 ## Process for agents

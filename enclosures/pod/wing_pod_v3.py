@@ -225,11 +225,17 @@ Y_LAND = 32.0
 Y_PCB = Y_LAND - STANDOFF_H
 
 # --- isolated static bay (S3) ----------------------------------------------
-BAY_WALL = 2.0
+# The plenum is a SEPARATE cup that seals to the wall land, not walls moulded
+# into the right half with a service window through them.  With integral walls
+# the window has to be big enough to pass a heat-set iron yet small enough to
+# leave a sealing frame, and those two demands do not both fit: all four BMP
+# bosses ended up behind the frame, and the cover screws landed inside the
+# board footprint.  A cup leaves the BMP standing on a completely open wall.
+CUP_WALL = 2.0
+CUP_CLR = 2.0       # plenum clearance around the BMP board
+CUP_TAB = 4.5       # screw tab reach beyond the cup wall
+CUP_FLANGE = 2.5    # flange thickness where it seals to the land
 STATIC_COVER_T = 2.2
-STATIC_FRAME_T = INS_DEPTH + SCREW_RELIEF_EXTRA + SCREW_RELIEF_FLOOR
-STATIC_WINDOW_MARGIN = 2.0
-STATIC_FRAME_LIP = 8.0
 STATIC_HOLE_D = 1.6
 STATIC_HOLE_ROWS = 2
 STATIC_HOLE_COLS = 5
@@ -303,13 +309,17 @@ BOOST_X0, BOOST_Z0 = COL_B_X0, 4.0
 PM_X0, PM_Z0 = COL_B_X0, 33.5
 COL_B_W = max(BOOST_L, PM_L)
 
-BAY_X0 = COL_B_X0 + COL_B_W + BOARD_GAP            # isolated static bay
-BMP_X0, BMP_Z0 = BAY_X0 + BAY_WALL + 1.5, 16.0
-BAY_X1 = BMP_X0 + BMP581_L + 1.5 + BAY_WALL
-BAY_Z0 = BMP_Z0 - 1.5 - BAY_WALL
-BAY_Z1 = BMP_Z0 + BMP581_W + 1.5 + BAY_WALL
+CUP_X0 = COL_B_X0 + COL_B_W + BOARD_GAP            # isolated static bay (cup)
+BMP_X0, BMP_Z0 = CUP_X0 + CUP_WALL + CUP_CLR, 16.0
+# BAY_* is the PLENUM volume (cup interior); CUP_* is the cup's outer shell.
+BAY_X0, BAY_X1 = BMP_X0 - CUP_CLR, BMP_X0 + BMP581_L + CUP_CLR
+BAY_Z0, BAY_Z1 = BMP_Z0 - CUP_CLR, BMP_Z0 + BMP581_W + CUP_CLR
+CUP_X1 = BAY_X1 + CUP_WALL
+CUP_Z0, CUP_Z1 = BAY_Z0 - CUP_WALL, BAY_Z1 + CUP_WALL
+CUP_Y0 = Y_PCB - PCB_T - COMP_H - 3.0              # inner face, 1 mm over the BMP
+BAY_Y0 = CUP_Y0
 
-BABY_X0, BABY_Z0 = BAY_X1 + BOARD_GAP, 12.0        # Babysitter, full column
+BABY_X0, BABY_Z0 = CUP_X1 + BOARD_GAP, 12.0        # Babysitter, full column
 
 # Battery: laid down on the seam, clear of the SUN aft bulkhead.
 BATT_X0 = AFT_BH_X1 + 2.5
@@ -1074,51 +1084,32 @@ def static_hole_centers() -> list[tuple[float, float]]:
     return out
 
 
-BAY_Y0 = Y_PCB - PCB_T - COMP_H - 2.0
+def cup_screws() -> list[tuple[float, float]]:
+    """Cup screw stations — on the +/-Z tabs, clear of the BMP footprint.
+
+    Z has 9.5 mm free below the plenum and 13 above, so tabs there cost
+    nothing.  On +/-X they would push the Babysitter ~9 mm aft.
+    """
+    cx = 0.5 * (BAY_X0 + BAY_X1)
+    return [(cx - 11.0, CUP_Z0 - CUP_TAB), (cx + 11.0, CUP_Z0 - CUP_TAB),
+            (cx - 11.0, CUP_Z1 + CUP_TAB), (cx + 11.0, CUP_Z1 + CUP_TAB)]
 
 
 def add_static_bay(body: cq.Workplane) -> cq.Workplane:
-    """S3/L3: the static array opens ONLY into an isolated BMP plenum, and that
-    plenum stays serviceable — a -Y tool window (closed later by
-    static_cover.stl) keeps the BMP inserts reachable, so it is not a cage."""
-    outer = full_body_solid(0.0)
-    walls = [
-        _box(BAY_X0, BAY_Y0, BAY_Z0, BAY_WALL, RIGHT_EXTENT - BAY_Y0, BAY_Z1 - BAY_Z0),
-        _box(BAY_X1 - BAY_WALL, BAY_Y0, BAY_Z0, BAY_WALL, RIGHT_EXTENT - BAY_Y0, BAY_Z1 - BAY_Z0),
-        _box(BAY_X0, BAY_Y0, BAY_Z0, BAY_X1 - BAY_X0, RIGHT_EXTENT - BAY_Y0, BAY_WALL),
-        _box(BAY_X0, BAY_Y0, BAY_Z1 - BAY_WALL, BAY_X1 - BAY_X0, RIGHT_EXTENT - BAY_Y0, BAY_WALL),
-        # -Y frame: thick enough to host the cover screws, then windowed.
-        _box(BAY_X0, BAY_Y0, BAY_Z0, BAY_X1 - BAY_X0, STATIC_FRAME_T, BAY_Z1 - BAY_Z0),
-    ]
-    for w in walls:
-        body = _union_if_solid(body, w.intersect(outer))
-
-    win = _box(BAY_X0 + BAY_WALL + STATIC_WINDOW_MARGIN,
-               BAY_Y0 - 1.0,
-               BAY_Z0 + STATIC_FRAME_LIP,
-               (BAY_X1 - BAY_WALL - STATIC_WINDOW_MARGIN)
-               - (BAY_X0 + BAY_WALL + STATIC_WINDOW_MARGIN),
-               STATIC_FRAME_T + 2.0,
-               (BAY_Z1 - STATIC_FRAME_LIP) - (BAY_Z0 + STATIC_FRAME_LIP))
-    body = body.cut(win)
-
-    for cx, cz in _static_cover_screws():
-        body = body.cut(_cyl_y(cx, cz, BAY_Y0, INS_DEPTH, INS_HOLE_D / 2))
-        body = body.cut(_cyl_y(cx, cz, BAY_Y0, INS_DEPTH + SCREW_RELIEF_EXTRA, SCREW_RELIEF_D / 2))
-
+    """S3/L3: the right half provides a flat sealing land, four inserts and the
+    static port array.  The plenum walls belong to static_bay.stl, so the BMP
+    stands on a completely open wall while its inserts go in."""
+    for cx, cz in cup_screws():
+        body = body.cut(_cyl_y(cx, cz, Y_LAND, INS_DEPTH, INS_HOLE_D / 2))
+        skin = skin_y_plus(cx, cz, WALL)
+        relief = min(INS_DEPTH + SCREW_RELIEF_EXTRA, skin - SCREW_RELIEF_FLOOR - Y_LAND)
+        if relief > INS_DEPTH:
+            body = body.cut(_cyl_y(cx, cz, Y_LAND, relief, SCREW_RELIEF_D / 2))
     for hx, hz in static_hole_centers():
         body = body.cut(_cyl_y(hx, hz, RIGHT_EXTENT + 1.0,
-                               -(RIGHT_EXTENT + 1.0 - BAY_Y0), STATIC_HOLE_D / 2))
+                               -(RIGHT_EXTENT + 1.0 - (Y_LAND - 1.0)),
+                               STATIC_HOLE_D / 2))
     return body
-
-
-def _static_cover_screws() -> list[tuple[float, float]]:
-    return [
-        (BAY_X0 + 4.0, BAY_Z0 + STATIC_FRAME_LIP / 2),
-        (BAY_X1 - 4.0, BAY_Z0 + STATIC_FRAME_LIP / 2),
-        (BAY_X0 + 4.0, BAY_Z1 - STATIC_FRAME_LIP / 2),
-        (BAY_X1 - 4.0, BAY_Z1 - STATIC_FRAME_LIP / 2),
-    ]
 
 
 # =============================================================================
@@ -1347,36 +1338,56 @@ def build_tail_panel() -> cq.Workplane:
     return body
 
 
-def build_static_cover() -> cq.Workplane:
-    """S3: closes the BMP bay tool window after the inserts are heat-set."""
-    x0 = BAY_X0 + 1.0
-    z0 = BAY_Z0 + 1.0
-    body = _box(x0, BAY_Y0 - STATIC_COVER_T, z0,
-                (BAY_X1 - 1.0) - x0, STATIC_COVER_T, (BAY_Z1 - 1.0) - z0)
-    for cx, cz in _static_cover_screws():
-        body = body.cut(_cyl_y(cx, cz, BAY_Y0 - STATIC_COVER_T - 1.0,
-                               STATIC_COVER_T + 2.0, LID_SCREW_D / 2))
-        body = body.cut(_cyl_y(cx, cz, BAY_Y0 - STATIC_COVER_T - 0.1,
+def build_static_bay_cup() -> cq.Workplane:
+    """S3: the isolated BMP plenum, as a cup that seals to the wall land.
+
+    Replaces the old integral walls + tool window + cover plate.  The BMP is
+    mounted and its inserts heat-set on a completely open wall first; the cup
+    then goes over it on a foam/RTV gasket with four M2.5 into the land.
+    Print it CLOSED FACE DOWN — the flange tabs are then a short overhang at
+    the top rather than a 29 mm bridge over the roof.
+    """
+    body = _box(CUP_X0, CUP_Y0, CUP_Z0,
+                CUP_X1 - CUP_X0, Y_LAND - CUP_Y0, CUP_Z1 - CUP_Z0)
+    body = body.cut(_box(BAY_X0, CUP_Y0 + CUP_WALL, BAY_Z0,
+                         BAY_X1 - BAY_X0, (Y_LAND - CUP_Y0 - CUP_WALL) + 1.0,
+                         BAY_Z1 - BAY_Z0))
+    for z0, z1 in ((CUP_Z0 - CUP_TAB - 3.5, CUP_Z0), (CUP_Z1, CUP_Z1 + CUP_TAB + 3.5)):
+        body = body.union(_box(CUP_X0, Y_LAND - CUP_FLANGE, z0,
+                               CUP_X1 - CUP_X0, CUP_FLANGE, z1 - z0))
+    for cx, cz in cup_screws():
+        body = body.cut(_cyl_y(cx, cz, Y_LAND - CUP_FLANGE - 1.0,
+                               CUP_FLANGE + 2.0, LID_SCREW_D / 2))
+        body = body.cut(_cyl_y(cx, cz, Y_LAND - CUP_FLANGE - 0.1,
                                LID_CB_DEPTH + 0.1, LID_CB_D / 2))
     # Qwiic gland so the I2C tail leaves the sealed plenum.
-    body = body.cut(_box(0.5 * (BAY_X0 + BAY_X1) - 3.0, BAY_Y0 - STATIC_COVER_T - 1.0,
-                         BAY_Z1 - 1.0 - 4.0, 6.0, STATIC_COVER_T + 2.0, 4.0))
+    body = body.cut(_box(0.5 * (BAY_X0 + BAY_X1) - 3.0, CUP_Y0 - 1.0,
+                         BAY_Z1 - 4.0, 6.0, CUP_WALL + 2.0, 4.0))
     return body
 
 
 def build_pm_tray() -> cq.Workplane:
     """L7: the SparkFun Pro Micro has no OEM mounting holes, so it is clamped
-    in a tray and the TRAY is what screws to the standoffs."""
+    in a tray and the TRAY screws to the standoffs.
+
+    The retaining rim runs in -Y, away from the wall: the board drops into the
+    tray from the open mating face.  It used to run +Y, straight into the wall
+    land it is bolted against, which retained nothing and fouled the land by
+    1 mm.
+    """
     b = BOARDS["PROMICRO"]
-    t, lip = 2.2, 5.0
-    body = _box(b["x0"], Y_PCB - t, b["z0"], b["L"], t, b["W"])
-    for dz in (0.0, b["W"] - 1.6):
-        body = body.union(_box(b["x0"], Y_PCB - t, b["z0"] + dz, b["L"], t + lip, 1.6))
-    body = body.cut(_box(b["x0"] + 4.0, Y_PCB - t - 1.0, b["z0"] + 3.0,
+    t, rim = 2.2, 3.2
+    base_y = Y_PCB - t
+    body = _box(b["x0"], base_y, b["z0"], b["L"], t, b["W"])
+    for dx, dz, sx, sz in ((0.0, 0.0, b["L"], 1.6), (0.0, b["W"] - 1.6, b["L"], 1.6),
+                           (0.0, 0.0, 1.6, b["W"]), (b["L"] - 1.6, 0.0, 1.6, b["W"])):
+        body = body.union(_box(b["x0"] + dx, base_y - rim, b["z0"] + dz, sx, rim, sz))
+    # window so the Pro Micro's underside parts and its USB tail clear the tray
+    body = body.cut(_box(b["x0"] + 4.0, base_y - 1.0, b["z0"] + 3.0,
                          b["L"] - 8.0, t + 2.0, b["W"] - 6.0))
     for hx, hz in board_standoffs(b):
-        body = body.cut(_cyl_y(b["x0"] + hx, b["z0"] + hz, Y_PCB - t - 1.0,
-                               t + 2.0, LID_SCREW_D / 2))
+        body = body.cut(_cyl_y(b["x0"] + hx, b["z0"] + hz, base_y - rim - 1.0,
+                               t + rim + 2.0, LID_SCREW_D / 2))
     return body
 
 
@@ -1560,13 +1571,13 @@ def main() -> None:
         lap(f"I2 {name} outside envelope {extra:.2f} mm^3")
 
     panel = build_tail_panel()
-    cover = build_static_cover()
+    cup = build_static_bay_cup()
     tray = build_pm_tray()
 
     export_part(for_print_half(right, 1), "pod_right")
     export_part(for_print_half(left, -1), "pod_left")
     for name, part, axis in (("tail_panel", panel, "x"),
-                             ("static_cover", cover, "y"),
+                             ("static_bay", cup, "y"),
                              ("pm_tray", tray, "y")):
         flat = flat_for_print(part, axis)
         export_part(flat, name)

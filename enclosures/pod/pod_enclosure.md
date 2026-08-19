@@ -84,7 +84,7 @@ rejects the job. The `.step` files carry the same print orientation as the
 | `pod_left.stl` / `.step` | Left half (cover + pitot cradle), print-oriented |
 | `pod_right.stl` / `.step` | Right half (electronics), print-oriented |
 | `tail_panel.stl` / `.step` | Aft service plate: rocker, USB, two LED holders |
-| `static_cover.stl` / `.step` | Closes the BMP bay tool window after heat-set |
+| `static_bay.stl` / `.step` | Isolated BMP plenum — a cup that seals to the wall land |
 | `pm_tray.stl` / `.step` | Pro Micro clamp tray (no OEM holes) |
 | `pod_assembly.step` | Assembled + SUN-B placeholder |
 | `pod_v3_*.png` | QC previews — unique name per revision |
@@ -99,7 +99,7 @@ rejects the job. The `.step` files carry the same print orientation as the
    |---|---|---|---|
    | A | 44 → 67 | MS4525 (z 4) | MMC5983 (z 26) |
    | B | 71 → 104 | Qwiic Boost (z 4) | Pro Micro on `pm_tray` (z 33.5) |
-   | C | 108 → 140 | isolated static bay: BMP581 (z 16) | |
+   | C | 108 → 140 | isolated static bay cup: BMP581 (z 16) | |
    | D | 144 → 177 | Battery Babysitter (z 12) | |
 
    Battery slab **68.5 × 5.9 × 49.3, laid down**, on the seam at x 85 → 155.5,
@@ -109,6 +109,19 @@ rejects the job. The `.step` files carry the same print orientation as the
    too; it is left with 1.7 mm of spare rather than sized to the measurement,
    because pouch cells swell.
 3. **Boattail** — empty taper, drain at its forward end, service plate at the base.
+
+The **static bay is a separate cup** (`static_bay.stl`), not walls moulded into
+the right half. The half provides a flat sealing land, four M2.5 inserts on
+±Z tabs clear of the board, and the static port array; the BMP581 is mounted
+and heat-set on a completely open wall, then the cup goes over it on a
+foam/RTV gasket. Integral walls plus a service window could not do both jobs —
+the window has to pass a heat-set iron yet leave a sealing frame, and at a
+25.4 mm board it did neither.
+
+The **Pro Micro tray** (`pm_tray.stl`) sits over the four standoffs at
+x 70.9…103.9, z 33.5…51.3, directly above the Qwiic Boost. Its base lands on
+the standoff tops at y=28 and it bolts down with four M2.5; the retaining rim
+runs in −Y so the board drops in from the open mating face.
 
 ## Pitot mount (ESA SUN-B)
 

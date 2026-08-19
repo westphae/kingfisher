@@ -26,8 +26,8 @@ from pathlib import Path
 
 POD_DIR = Path(__file__).resolve().parent
 STL_FILES = ("pod_right.stl", "pod_left.stl", "tail_panel.stl",
-             "static_cover.stl", "pm_tray.stl")
-SMALL_PARTS = ("tail_panel.stl", "static_cover.stl", "pm_tray.stl")
+             "static_bay.stl", "pm_tray.stl")
+SMALL_PARTS = ("tail_panel.stl", "static_bay.stl", "pm_tray.stl")
 
 
 class CheckResult:

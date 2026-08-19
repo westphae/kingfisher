@@ -1,7 +1,7 @@
 # Wing pod v3 — AnkerMake print recipe
 
 Slicer settings for `pod_left.stl`, `pod_right.stl`, `tail_panel.stl`,
-`static_cover.stl`, and `pm_tray.stl` on an **AnkerMake M5C** in **PETG**. STLs do not carry support or
+`static_bay.stl`, and `pm_tray.stl` on an **AnkerMake M5C** in **PETG**. STLs do not carry support or
 slice settings — use this recipe in AnkerMake Studio (or PrusaSlicer with an
 M5C profile).
 
@@ -56,7 +56,7 @@ Geometry / export contracts: [`REQUIREMENTS.md`](REQUIREMENTS.md). Layout:
 | `pod_right.stl` | Mating flange down, curved outer up, **45°** diagonal | Electronics half |
 | `pod_left.stl` | Same | Cover half |
 | `tail_panel.stl` | Large face down | Aft service plate — the face with the counterbores goes **up** |
-| `static_cover.stl` | Large face down (thickness is Z as-exported) | BMP-bay window plate |
+| `static_bay.stl` | **Closed face down** | BMP plenum cup; tabs overhang slightly at the top |
 | `pm_tray.stl` | Large face down | Pro Micro clamp tray |
 
 Print one half at a time if the diagonal + skirt crowds the bed. The SUN-B
@@ -68,7 +68,7 @@ adapter is purchased metal — not printed.
 |------|----------|-----|
 | `pod_left` / `pod_right` | **On** | Ogive outer, hollow shell, SUN cradle, standoffs (right) leave overhangs above ~45° |
 | `tail_panel` | **Off** | Flat plate |
-| `static_cover` | **Off** | Flat plate |
+| `static_bay` | **Off** | Shallow cup, tabs are a short overhang |
 | `pm_tray` | **Off** | Flat tray |
 
 Suggested support settings (tune after first preview):
@@ -107,13 +107,13 @@ skin looks fuzzy or stringy.
 2. Deburr mating flange, SUN cradle bore / barb bay, panel USB/rocker/LED holes,
    static holes, screw paths.
 3. Install **M2.5 heat-set inserts** in the **right** flange + **every board
-   standoff** (including Pro Micro clamp posts) + the static-cover frame + the
+   standoff** (including Pro Micro clamp posts) + the four static-bay land inserts + the
    four **aft-panel** bosses (no self-tap, no nubs). Flange and board inserts go
    in from the **open mating face** (iron along Y) before installing PCBs; BMP
    through the static-bay window; aft-panel inserts from **outside the base**
    (iron along X). Left cover is clearance only. Same pilot/depth/screw-relief
    scheme as the hub case. Seat the Pro Micro in `pm_tray.stl` and screw the
-   tray down, then screw `static_cover.stl` over a foam/RTV gasket.
+   tray down, mount the BMP581 and heat-set its inserts on the OPEN wall, then screw `static_bay.stl` over it on a foam/RTV gasket.
 4. **Populate `tail_panel.stl` on the bench, before it goes on the pod** — this
    is the whole point of it being a separate plate. Snap in the COM-08837
    rocker (SYSOFF → JP12 / GND; leave onboard S1 OFF). RTV the CAB-15464 flange
