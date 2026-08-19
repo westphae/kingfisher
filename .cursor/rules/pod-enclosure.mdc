@@ -1,24 +1,25 @@
 ---
-description: Wing pod v2 enclosure — requirements, validate, export contracts
+description: Wing pod v3 enclosure — requirements, validate, export contracts
 globs: enclosures/pod/**
 alwaysApply: false
 ---
 
-# Wing pod enclosure (v2)
+# Wing pod enclosure (v3)
 
 When editing anything under `enclosures/pod/`:
 
 1. **Read** [`enclosures/pod/REQUIREMENTS.md`](enclosures/pod/REQUIREMENTS.md) first (non-negotiables). Use [`pod_enclosure.md`](enclosures/pod/pod_enclosure.md) for layout/pneumatics detail and [`PRINT_RECIPE.md`](enclosures/pod/PRINT_RECIPE.md) for AnkerMake/PETG slice settings (supports are not in the STL).
-2. **Prefer param tweaks** over inventing a new midsection family. Midsection must stay the **same construction ellipse** as the ogive end-stations (no rectangular mid that butts into the freestream).
-3. **Interior blanks** (flange, bulkheads, deck, posts, nubs) must be `intersect`ed with `full_body_solid(0)` before union — they must not poke through the outer skin.
-4. After geometry changes, regenerate and validate before calling anything print-ready:
+2. **P0 is the governing constraint.** Every part must fit the AnkerMake M5C build volume 220 × 220 × 250 with ≥10 mm X/Y margin. Halves print flange-down and may be rotated 45°, so `OUTER_L + OUTER_H ≤ 297`. **Never buy bed fit by shortening the nose or tail** — that is exactly how v2 ended up with a 12 mm tail. Re-proportion the section, or split the part and say so.
+3. **The outer mold line is ONE loft over ONE section family** (`section_wire`), and the inner cavity is the same call with `inset=WALL`. Do **not** rebuild it as a union of separate solids, and do **not** add a local pad or blister to the skin. v2's `mid ∪ nose ∪ tail ∪ panel-pad` is what produced both an 80 × 3.5 mm hole into the electronics bay and a body with a 12 mm tail. To change the shape, change `section_params` or the scale laws.
+4. **Interior blanks** (flange rail, bulkheads, land, bay walls) must be `intersect`ed with `full_body_solid(0)` before union — they must not poke through the skin. Features that provably stay clear of the skin may be capped analytically with `skin_y_plus()` instead, for speed.
+5. After geometry changes, regenerate and validate before calling anything print-ready:
 
 ```bash
-cd enclosures/pod && uv run --project .. python wing_pod_v2.py
+cd enclosures/pod && uv run --project .. python wing_pod_v3.py
 cd enclosures/pod && uv run --project .. python validate_pod.py
 ```
 
-5. **Do not** claim STLs are AnkerMake-ready unless `validate_pod.py` exits 0 (watertight single-solid mesh + geometry checks).
-6. Preview PNGs: use a **unique filename per shape revision**. Every regen must write `pod_v2_*_panel_interior.png` and `pod_v2_*_panel_routing.png`. Never reuse a stale cached name like `pod_v2_shape.png`.
-7. Print contracts: flange-down, 45° diagonal baked into STL export; **all printed-joint screws are M2.5 into heat-set inserts** (P6) with screw-relief past the insert; **every board on raised standoffs** (I8 — fail empty `holes=[]` / nubs). Boards/panel cluster/static holes on `pod_right` only. Isolated static bay + `static_cover.stl` (S3). Pro Micro uses `pm_tray.stl` (L7). Panel COTS locked (L6): COM-08837 / CAB-15464 / Ø8.2 LED holders on a 2.5 mm planar pad. Pitot is **ESA SUN-B**. Mating face stays **open for install** (I4).
-8. Enclosure-only work continues on **`master`** (no PR) unless the user asks otherwise.
+6. **Do not** claim STLs are AnkerMake-ready unless `validate_pod.py` exits 0. Watch **W1** (minimum wall) and **S1'** (full 3-D leak) in particular — those two exist because v2 passed every check it had while carrying an open slot into the electronics bay.
+7. Preview PNGs: **unique filename per shape revision**. Never reuse a stale cached name.
+8. Print contracts: flange-down, 45° baked into the STL export; **all printed-joint screws are M2.5 into heat-set inserts** (P6) with screw relief past the insert; **every board on raised standoffs** (I8 — fail empty `holes=[]`). Boards, static bay and static holes on `pod_right` only; aft-panel inserts are right-side only too (an X-axis boss would straddle the seam). Isolated static bay + `static_cover.stl` (S3). Pro Micro uses `pm_tray.stl` (L7). Service cluster is on the **aft face** on `tail_panel.stl` (L6) — nothing pierces the +Y skin except the static array. Pitot is **ESA SUN-B**, protruding 45 mm, clamped on its threaded band (L2). Mating face stays **open for install** (I4).
+9. Enclosure-only work continues on **`master`** (no PR) unless the user asks otherwise.

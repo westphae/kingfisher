@@ -24,7 +24,7 @@ uv run --project analysis python scripts/analyze_flights.py all
 
 # Enclosure regen (cwd = script dir so STEP/STL land beside the script)
 cd enclosures/case && uv run --project .. python pi5_aviation_case.py
-cd enclosures/pod  && uv run --project .. python wing_pod_v2.py
+cd enclosures/pod  && uv run --project .. python wing_pod_v3.py
 ```
 
 Do **not** put KiCad’s `pcbnew` module in the uv venv — use Debian/RPi

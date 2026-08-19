@@ -14,7 +14,7 @@ ICM-45686 IMU in a rear bay. One script generates `case_base.{step,stl}`,
 - Archives: `KingfisherCase.zip` = v1, `KingfisherCase2.zip` = v2 as printed
   (85×112×35, Pi + bay only, incl. the old `relief.png` render),
   `KingfisherPod.zip` = wing-pod **v1** insert (archived). Live pod model:
-  [`pod/wing_pod_v2.py`](pod/wing_pod_v2.py) / [`pod/pod_enclosure.md`](pod/pod_enclosure.md).
+  [`pod/wing_pod_v3.py`](pod/wing_pod_v3.py) / [`pod/pod_enclosure.md`](pod/pod_enclosure.md).
 
 ## Regenerating
 

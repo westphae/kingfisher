@@ -1,188 +1,187 @@
-# `wing_pod_v2.py` — wing air-data pod (clamshell)
+# `wing_pod_v3.py` — wing air-data pod (clamshell)
 
-Parametric CadQuery model of the under-wing air-data pod. **v2** replaces the
-v1 rectangular insert (`wing_pod_case.py` / `KingfisherPod.zip`) with a
-left/right aerodynamic clamshell that *is* the outer shell.
+Parametric CadQuery model of the under-wing air-data pod. **v3** is a complete
+redesign of the v2 shell; see "Why v3" below for what actually went wrong.
 
 **Non-negotiables:** see [`REQUIREMENTS.md`](REQUIREMENTS.md). After every
 geometry change, regenerate and run the validator (must exit 0):
 
 ```bash
-cd enclosures/pod && uv run --project .. python wing_pod_v2.py
+cd enclosures/pod && uv run --project .. python wing_pod_v3.py
 cd enclosures/pod && uv run --project .. python validate_pod.py
 ```
 
-- Printer/material: AnkerMake M5C, PETG. Slice recipe (supports, PETG starting
-  points): [`PRINT_RECIPE.md`](PRINT_RECIPE.md). Exported STLs are already
-  **flange / mating-face down**, curved outer up, and **rotated 45°** for the
-  bed diagonal (10 mm margin vs 220 mm — script asserts the print AABB).
-- Shape: **skinny tall ellipse** (~220 × 52 × 77 mm) chopped to a **flat top**
-  (wing-fairing mate, square edge) and **flat bottom** (stands upright) with a
-  **radiused bottom edge** for aero; **rounded ogive nose and tail**
-  (multi-station loft, tip centres near the seam). Midsection uses the *same*
-  ellipse as the fairing end-stations (held through a short overlap) so there
-  is no rectangular freestream-facing step at the junction. Section is
-  asymmetric about the seam (thin left cover, wider right electronics bay).
-- Asymmetry: **board mounts / static bay / panel cluster are on `pod_right` only**;
-- **Seal (S1/S2/S3):** outer skin opens only at the SUN tip mouth, static-hole
-  array (into an **isolated BMP bay**), CAB-15464 panel USB, COM-08837 rocker,
-  and two Ø8.2 LED-holder holes. No Pro Micro wall window; no exterior
-  battery door — install the LiPo from the open mating face, then close. Mating
-  faces: thin rubber strip / O-cord in the right-half groove, and/or a thin RTV
-  coat on the flange. `pod_left` is the cover (pitot cradle + clearance holes).
-  After heat-set, `static_cover.stl` closes the BMP bay tool window (foam/RTV).
-- Fasteners: **12× M2.5** (6 X-stations × top+bottom). Brass heat-set inserts
-  in the **right** flange (pilot = insert OD − melt allowance, plus screw-relief
-  bore below the insert). Left cover is clearance Ø + counterbore only — screws
-  go through the cover into the right-half inserts. **Boards wall-mount** on
-  the right +Y inner land (XZ plane) on **raised standoffs** (PCB not flush on
-  the wall); the same inserts are heat-set from the **open mating face** (iron
-  along Y). Screw-relief continues past each insert into the land (hub-case
-  scheme: long M2.5s can pass the brass). No floor posts.
-- Internal blanks (flange, bulkheads, deck, posts, static-bay walls) are
-  **intersected with the outer envelope** so rectangular stock cannot poke
-  through the curved skin.
+## Why v3
 
-## Regenerating
+v2 built the outer mold line as `mid ∪ nose ∪ tail ∪ panel-pad` — four solids
+fused by boolean. Two classes of defect followed from that:
 
-```bash
-uv sync --all-packages   # from repo root
-cd enclosures/pod && uv run --project .. python wing_pod_v2.py   # also runs validate
-cd enclosures/pod && uv run --project .. python validate_pod.py  # or re-check alone
-# STL-only (fast):  uv run --project .. python validate_pod.py --stl-only
-```
+- **The +Y service panel was an open hole.** `PANEL_Y` was set flush to the
+  construction ellipse at the *bottom* of the rocker cut (z=59.5) while the pad
+  spanned z=57.5…74.5, where the ellipse had receded to y=33.4 — so an 18 mm
+  slab sat up to 6 mm proud of the skin. Worse, the pad used the **same** x/z
+  rectangle for the outer body and the inner cavity, so `outer.cut(inner)` left
+  its perimeter with zero wall: an ~80 × 3.5 mm slot into the electronics bay
+  under the flat top, plus open slots at both X ends. The old seal check missed
+  it because its leak grid only sampled six z levels near the bottom fairing.
+- **The shape was a brick.** 216 mm long with a 28 mm nose and a **12 mm** tail
+  on a 52 × 77 section: fineness ~3.4 and a ~3500 mm² near-flat base.
+  `BOTTOM_EDGE_R` was disabled outright because a post-hoc fillet would not fuse
+  with the ogives, and both fairings had been trimmed to satisfy an unstated
+  bed-diagonal budget.
 
-Exports (CWD):
+v3 makes both impossible rather than fixed:
+
+- The whole OML is **one loft over one parametric section family**
+  (`section_wire`). Nose, midbody and boattail are stations of that family, and
+  the inner cavity is the *same call* with `inset=WALL`. A footprint mismatch
+  like the v2 pad cannot be expressed. Junction steps cannot occur, so the tips
+  now sit on the seam and `BOTTOM_EDGE_R` is section-native.
+- The service cluster moved to the **aft face**, on a bolted, gasketed plate.
+  Nothing pierces the +Y skin except the static array, so there is no local pad
+  to come adrift — and the cuts sit in the base wake, the lowest-pressure and
+  lowest-impingement surface on the body.
+- The bed constraint is now **P0**, stated with its arithmetic, instead of being
+  paid for silently out of the tail.
+
+## Shape
+
+~**235 × 52 × 61 mm**. Flat top (wing-fairing mate, full length aft of the
+nose), flat bottom forward, radiused bottom edges, rounded-rectangle sections
+that degenerate to a circle at the nose mouth.
+
+| Station | x | |
+|---|---|---|
+| Nose fairing | 0 → 52 | mouth on the SUN Ø10.65 barrel, grows to full section |
+| Midbody | 52 → 165 | constant; boards, battery, static bay |
+| Boattail | 165 → 235 | upswept bottom + tapered sides |
+| Base | 235 | 37 × 52, carries `tail_panel.stl` |
+
+Measured: fineness **3.71** (D_eq 62.7 mm), nose 0.82 D, boattail 1.11 D, max
+boattail surface angle **10.9°**, base/frontal **0.61**.
+
+Fineness is payload-limited, not shape-limited: `OUTER_H` is set by the 50 mm
+battery between the flange rails and `OUTER_W` by the board land. Base/frontal
+0.61 is the honest price of an aft-facing service panel — the cluster needs
+~28 × 41 mm of flat. The long, gentle boattail is what keeps base pressure
+recovered.
+
+## Coordinate system
+
+Origin at the outer nose tip on the seam / bottom. **+X aft**, **+Y right**,
+**+Z up** (flat top at `OUTER_H`). Split plane is **Y = 0**.
+
+Print STLs drop on the bed as-exported — **flange down, rotated 45°, and
+centred on the bed at (110, 110)**. No slicer rotation *or repositioning*: a
+corner-parked part puts its skirt/brim at negative coordinates and the slicer
+rejects the job. The `.step` files carry the same print orientation as the
+`.stl` (v2 kept STEPs in model orientation; v3 does not).
+
+## Exports
 
 | File | Role |
 |------|------|
-| `pod_left.stl` / `.step` | Left half, print-oriented |
+| `pod_left.stl` / `.step` | Left half (cover + pitot cradle), print-oriented |
 | `pod_right.stl` / `.step` | Right half (electronics), print-oriented |
-| `pod_assembly.step` | Assembled (model orientation) + SUN-B placeholder |
-| `static_cover.stl` / `.step` | Closes the static-bay tool window after heat-set |
+| `tail_panel.stl` / `.step` | Aft service plate: rocker, USB, two LED holders |
+| `static_cover.stl` / `.step` | Closes the BMP bay tool window after heat-set |
 | `pm_tray.stl` / `.step` | Pro Micro clamp tray (no OEM holes) |
-| `pod_v2_*_*.png` | Shape previews — **unique name per revision** |
-| `pod_v2_*_panel_interior.png` | Ortho into open `pod_right` (standoffs + panel pad) |
-| `pod_v2_*_panel_routing.png` | 2D X–Z / X–Y keepouts + hose/Qwiic/USB/switch/LEDs |
+| `pod_assembly.step` | Assembled + SUN-B placeholder |
+| `pod_v3_*.png` | QC previews — unique name per revision |
 
-## Coordinate system & layout
+## Interior, nose → aft
 
-Assembled frame: origin at outer nose tip on the seam / bottom. **+X aft**,
-**+Y right**, **+Z up** (flat top at `OUTER_H`). Split plane is **Y = 0**.
+1. **SUN-B cradle** on the centreline, protruding 45 mm (see below).
+2. **Midbody**, boards in four columns on the +Y wall land, two rows in Z where
+   the pair fits the 56 mm interior:
 
-Print STLs (`pod_left.stl` / `pod_right.stl`): drop on the bed as-exported —
-no slicer rotation needed. Each STL is a **single solid** (AnkerMake rejects
-multi-body compounds). STEP files stay in model orientation for Fusion.
+   | Column | x | Lower row | Upper row |
+   |---|---|---|---|
+   | A | 44 → 67 | MS4525 (z 4) | MMC5983 (z 26) |
+   | B | 71 → 104 | Qwiic Boost (z 4) | Pro Micro on `pm_tray` (z 33.5) |
+   | C | 108 → 140 | isolated static bay: BMP581 (z 16) | |
+   | D | 144 → 177 | Battery Babysitter (z 12) | |
 
-**Left vs right:** only `pod_right` has the electronics **wall land**, raised
-standoffs + M2.5 inserts (flange + board), isolated static bay, static holes,
-and the +Y panel cluster (USB / rocker / LEDs on a local 2.5 mm planar pad).
-`pod_left` is the cover (shell + pitot cradle + flange clearance holes).
-
-Nose → aft:
-
-1. Lofted nose fairing; **ESA SUN-B** cradle on the centerline (tip protrudes)
-2. Constant midsection: MS4525 + boost **on the +Y wall** beside the cradle;
-   battery slab on the seam; Babysitter + Pro Micro on the wall; BMP581 + mag
-   in an isolated static bay (tool window + `static_cover.stl`)
-3. Lofted tail fairing (empty taper)
-
-## Pneumatics (decoupled)
-
-| Line | Source | Destination |
-|------|--------|-------------|
-| Total | SUN-B **aft** barb (pitot) | 6 mm hose → COTS reducer → MS4525 `+` |
-| Static (airspeed) | SUN-B **middle** barb | 6 mm hose → COTS reducer → MS4525 `−` |
-| TE | SUN-B **forward** barb | Capped / unused (Prandtl) |
-| Static (baro) | Pod multi-hole side array | Isolated BMP581 bay only |
-
-Mount SUN with **barbs up** (ESA water tip). Hose escapes into the right half
-toward the MS4525.
-
-### Tubing sizes
-
-- SUN-B barbs: **6 mm ID** silicone (stem OD ≈ 5.96 mm).
-- TE/Holybro MS4525DO: **1/8″ barbed ports mate with 3/32″ ID tubing**
-  (~2.38 mm ID). v1 calipers: tip Ø**2.1**, shoulder Ø**3.5**, spacing **4.3** mm.
-- Step 6 mm → MS size with a **COTS reducer** (short hop of tiny tubing onto
-  the sensor). Do not rely on nested hose alone.
+   Battery slab **68.5 × 5.9 × 49.3, laid down**, on the seam at x 85 → 155.5,
+   measured 2026-08-18 ([`BATTERY_CALIPERS.md`](BATTERY_CALIPERS.md)), leads on
+   the **aft** edge — the only edge with more than 2.5 mm of clearance. The
+   thickness across the flats sets `OUTER_H` and therefore, via P0, the length
+   too; it is left with 1.7 mm of spare rather than sized to the measurement,
+   because pouch cells swell.
+3. **Boattail** — empty taper, drain at its forward end, service plate at the base.
 
 ## Pitot mount (ESA SUN-B)
 
-Calipers: [`SUN_B_CALIPERS.md`](SUN_B_CALIPERS.md). Printed L/R cradle only
-(no tubes-in-tube, no RTV plug):
+Calipers: [`SUN_B_CALIPERS.md`](SUN_B_CALIPERS.md).
 
-- Outer nose **fairs into tip Ø8.93** with ≥1.5 mm radial PETG at the mouth
-  (print-1 0.7 mm lip tore on the left half); tip-only bore through the nose
-  bulkhead; Ø10.65 shoulder seats on that bulkhead’s **aft face** at
-  `x=SHOULDER_BH_T` (forward stop)
-- **Integral split clamp** on the knurled band (thick L/R land; printed bore
-  uses FDM allowance — print-1 0.08 mm radial was too tight; 0.20 mm slip was
-  OK on the aft barrel)
-- Aft blind recess (Ø6.03 × 7.06) seats on a printed locating boss **shorter
-  than the cup by ≥2.5 mm** (print-1 pin was ~2 mm too long and held the SUN
-  off the shoulder / aft bulkhead)
-- Upward barb bay; hose escapes into the right half
-- Primary flight load is the Prandtl cantilever into the brass SUN
+v3 protrudes **45 mm** and clamps the **Ø11.76 threaded band** — the feature ESA
+put there for mounting — instead of v2's 21.25 mm on the Ø8.93 shoulder:
 
-## Battery
+- Nose mouth sits on the Ø10.65 smooth barrel, with ≥1.5 mm of PETG at the lip
+  (print-1: a 0.7 mm lip tore off the left half).
+- Forward stop is the **Ø10.65 → Ø11.76 step** landing on the nose bulkhead's
+  aft face at x = 7.25. That is a *larger* step than the shoulder it replaces.
+- Integral split clamp on the thread, x 7.25 → 32.6.
+- Aft blind recess (Ø6.03 × 7.06) on a locating boss **4.56 mm** long, so ≥2.5 mm
+  of the cup stays unused (print-1: a boss ~2 mm too long held the SUN off its
+  stops).
+- Barbs **up** (ESA water tip) at x 40 / 55 / 69, tips at z 39.9 with ~17 mm of
+  headroom to the interior ceiling for the 6 mm hose to turn aft.
 
-Pocket sized for **50 × 6 × 70 mm** (X × Y × Z) plus **1 mm** clearance per
-side; wedge with double-sided foam tape. Thickness is across the seam
-(centerline slab). Install the pack (and foam) into the open right/left
-halves **before** fastening and sealing the clamshell — the pocket does not
-open to freestream. Charge in service via the **CAB-15464** panel Micro-B on the +Y skin (pigtail
-to the Babysitter). RTV under the eared flange; M3 screws + nuts (the cable
-includes 14 mm screws — trim or swap to M3×8 if they poke the bay). Snap in
-the **COM-08837** rocker (SYSOFF) and two **5 mm LED holders** (Ø8.2 holes).
+This is what pays for the boattail: it moves the SUN aft face from x=103 to
+x=79, and the freed 24 mm goes into the tail.
 
-## Panel hardware (L6 locked)
+## Pneumatics
 
-| Role | P/N | Skin cut | Notes |
-|------|-----|----------|-------|
-| USB | SparkFun [CAB-15464](https://www.sparkfun.com/panel-mount-usb-micro-b-extension-cable-6.html) | 10.5 × 7.5 mm window + M3 Ø3.3 at **17 mm** | Pigtail to Baby micro-B; RTV under flange; nuts inside |
-| Switch | SparkFun [COM-08837](https://www.sparkfun.com/rocker-switch-spst-right-angle.html) (E-Switch R1966A) | **19.6 × 13.0** mm snap-in | `WALL=2.5` is the 2.0–3.0 mm band. SPST to **JP12 (SYSOFF)** and GND; leave onboard S1 OFF |
-| LED holders | 5 mm chrome ABS (e.g. [cnflin](http://cnflin.en.alibaba.com/product/315036510-212546229/ABS_Chrome_LED_Holder_for_5mm_led.html)) | **Ø8.2 mm** | Standard 8 mm mount. 5 mm LEDs: **red** = VOUT (pod powered), **blue** = parallel D1 / `!CHG!` |
+| Line | Source | Destination |
+|------|--------|-------------|
+| Total | SUN-B **aft** barb | 6 mm hose → COTS reducer → MS4525 `+` |
+| Static (airspeed) | SUN-B **middle** barb | 6 mm hose → COTS reducer → MS4525 `−` |
+| TE | SUN-B **forward** barb | Capped / unused (Prandtl) |
+| Static (baro) | Pod multi-hole side array at **53 % of body length** | Isolated BMP581 bay only |
 
-Cluster is on a **local planar +Y pad** (`PANEL_Y` ≈ 39.4 mm, 2.5 mm thick) at
-**z ≈ 66 mm** (above the boards). Forward→aft: blue charge LED ~x=72, rocker
-~x=94, red power LED ~x=114, USB ~x=132. Orient the rocker so right-angle
-terminals point **+Z** (ceiling), not down into the Boost/Baby keepout.
+## Aft service panel (L6)
 
-### Babysitter wiring (PRT-13777 schematic)
+| Role | P/N | Cut | Notes |
+|------|-----|-----|-------|
+| Switch | SparkFun COM-08837 (E-Switch R1966A) | 19.6 × 13.0 snap-in | Plate is 3.0 mm — inside the 2.0–3.0 mm band, no rebate. SPST to **JP12 (SYSOFF)** + GND; leave onboard S1 OFF |
+| USB | SparkFun CAB-15464 | 10.5 × 7.5 window + M3 Ø3.3 at 17 mm | Pigtail to the Babysitter; RTV under the flange; nuts behind the plate |
+| LEDs | 5 mm chrome ABS holders | 2 × Ø8.2 | **red** = VOUT (pod powered), **blue** = parallel D1 / `!CHG!` |
 
-The onboard slide switch is **S1**: pole `P` = **SYSOFF**, throw `S` = **GND**.
-ON pulls SYSOFF to ground (battery connected to VOUT). OFF lets SYSOFF float
-high (BQ24075 disconnects the battery from the load). **USB still powers VOUT
-with the switch OFF** (power-path). Charging also requires the switch ON.
+Stacked in Z on the base: rocker at z 48, USB at z 33, LEDs at z 20. All four
+plate screws are M2.5 into inserts on the **right** half — an insert boss runs
+along X and would straddle the seam near y=0, so they sit at y ≥ 5.5 and the
+clamshell flange runs aft to x=229 to hold the left tail.
 
-There is **no 0.1″ “EXT SW” header**. There **is** an unsilk-screened PTH
-**JP12** on SYSOFF. External SPST: JP12 ↔ GND, leave S1 **OFF**. Or desolder
-S1 and wire the panel switch in its place.
+### Babysitter wiring (PRT-13777)
 
-Onboard LEDs (both anodes on **OUT** / VOUT):
+The onboard slide switch is **S1**: pole `P` = SYSOFF, throw `S` = GND. ON pulls
+SYSOFF to ground. OFF lets it float high (BQ24075 disconnects the battery from
+the load). **USB still powers VOUT with the switch OFF** (power-path), and
+charging requires the switch ON. There is no 0.1″ "EXT SW" header; there *is* an
+unsilkscreened PTH **JP12** on SYSOFF.
 
-| LED | Colour | Net | Meaning |
-|-----|--------|-----|---------|
-| D1 | Blue | `!CHG!` via R9 (180 Ω) | Charging (open-drain; blinks 2 Hz on timer fault) |
-| D2 | Red | `!PGOOD!` via R10 / SJ5 | **Valid USB/VIN**, not “battery supplying the load” |
+Onboard LEDs (both anodes on VOUT): **D1** blue = `!CHG!` via R9; **D2** red =
+`!PGOOD!` via R10 / SJ5 — that is *valid USB/VIN*, not "battery supplying the
+load". So the remote red "pod powered" LED is VOUT → resistor → LED → GND, not
+a parallel of D2.
 
-Remote **blue charge LED**: parallel D1 (or the CHG pad). Remote **red “pod
-powered” LED**: VOUT → resistor → LED → GND (lit from battery **or** USB).
+## Drain (L8)
 
-## Fairing / wing attach (deferred)
+Labyrinth at the aft end of the flat bottom, the low point of the cavity, clear
+of the battery and the flange rails: cavity → floor-level slot in the aft end
+wall → 8 mm channel → down through the skin. No straight path from freestream
+to interior, so it sheds condensate and equalises pressure without acting as a
+ram-air inlet.
 
-Flat top deck is the mate for a *separate* printed fairing that blends to
-wing curvature and bolts to an inspection plate. Pod↔fairing latch (L-pins
-etc.) and sailplane sealing tape are follow-ons — not in this script yet.
+## Deferred
 
-## U.FL antenna
+- **Pod↔wing fairing latch** and the inspection-plate mount. The flat top deck
+  is the mate for a separate printed fairing; nothing about it is in this script.
+- **U.FL antenna** grommet — PCB antenna is fine for early RF testing.
+- `MS_TUBE_OD = 3.5` is still marked `(VERIFY)`.
 
-Grommet / exit path deferred until an ESP32 module with U.FL is in use.
-PCB antenna is fine for early RF testing.
+## Archive
 
-## v1 archive
-
-`../KingfisherPod.zip` and `wing_pod_case.py` are the old insert-style tray
-(base + lid, socket stubs, sealed bay shared with MS4525). Do not evolve v1;
-tune v2 params instead.
+`wing_pod_v2.py` (and `../KingfisherPod.zip` for the v1 insert-style tray) are
+superseded. Do not evolve them; tune v3 params instead.

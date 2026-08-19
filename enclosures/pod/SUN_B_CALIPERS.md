@@ -149,9 +149,41 @@ a smaller hole at the bottom, note both.
 
 | ID  | Question                                                           | Answer                                                          |
 | --- | ------------------------------------------------------------------ | --------------------------------------------------------------- |
-| F1  | How far should the **SUN nose** stick out of the **pod nose tip**? | **24.75 mm** (= L5): tip protrudes; Ø10.65 step at pod nose tip |
+| F1  | How far should the **SUN nose** stick out of the **pod nose tip**? | **45 mm** (v3) — see below. v2 used 21.25 mm (Ø10.65 shoulder just inside the nose). |
 | F2  | Hose for SUN barbs                                                 | 6 mm ID silicone                                                |
 | F3  | Step-down to MS4525                                                | COTS reducer                                                    |
+
+### F1 changed in v3 (2026-08-18): mount on the thread, not the shoulder
+
+v2 protruded 21.25 mm so the **Ø8.93 → Ø10.65 shoulder** (station 24.75) landed
+just inside the nose on a bulkhead. That put the SUN's aft face at pod x = 103,
+and with the battery unable to start until x ≈ 108 the whole midbody was
+consumed — only ~55 mm was left for a boattail on a 235 mm pod.
+
+v3 protrudes **45 mm** and stops on the **Ø10.65 → Ø11.76 step** (station 52.25,
+the forward end of the threaded band) against the nose bulkhead's aft face at
+pod x = 7.25. Consequences:
+
+- the forward stop is a **bigger** step than the shoulder it replaces
+  (1.11 mm of radius vs 0.86 mm);
+- the nose mouth now sits on the **Ø10.65 smooth barrel**, so the bore is
+  Ø11.05 and the lip is still `NOSE_LIP_WALL` = 1.6 mm of PETG;
+- the split clamp still grips the **thread** — v2 already did
+  (`CLAMP_LEN = SUN_THREAD_LEN - 1.5`), just 21 mm further aft;
+- the SUN aft face moves to pod x = **79**, freeing 24 mm that goes into the
+  boattail;
+- the Prandtl head ends up further out of the pod's own pressure field.
+
+Station map in pod coordinates (pod x = SUN station − 45):
+
+```
+ -45      -20.25    7.25          32.62        40  55  69      79.03
+  |----------|--------|-------------|-----------|---|---|--------|
+   tip Ø8.93 | smooth | thread      | barrel    | barbs (up)     | aft
+             | Ø10.65 | Ø11.76      | Ø11.71    |                | face
+             |        | = CLAMP     |
+                      ^ nose bulkhead aft face = forward stop
+```
 
 
 ---
@@ -166,7 +198,10 @@ photos) — looks like sealant at an end-piece joint; ignore for cradle OD.
 ## Status
 
 - [x] L7, E2=`n/a`, E4=E1 filled (2026-08-09)
-- [x] Params consumed by `wing_pod_v2.py` SUN-B cradle
+- [x] Params consumed by `wing_pod_v3.py` SUN-B cradle
+- [x] v3 (2026-08-18): F1 raised to 45 mm, mount moved to the threaded band
+      (see F1 note). Lengths and ODs unchanged — this is a mounting-feature
+      change, not a re-measurement.
 - [x] Print-1 (2026-08): caliper *lengths* OK (shoulder/aft lined up after
       shaving the pin). Aft pin was ~2 mm too long vs usable cup depth — CAD
       now leaves ≥2.5 mm unused. Printed *radii* at tip / x≈20 smooth / x≈30
