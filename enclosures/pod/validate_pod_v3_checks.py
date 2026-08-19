@@ -380,3 +380,60 @@ def check_open_bay(r, pod, left, right) -> None:
                 r.fail(f"I4/I6 {what} insertion volume fouled in {name} by {v:.0f} mm^3")
             else:
                 r.ok(f"I4 {what} clear in {name} ({v:.1f} mm^3)")
+
+
+def check_insert_access(r, pod, right) -> None:
+    """I7 — a heat-set iron must physically reach every insert pilot.
+
+    For each seam-access insert, sweep a corridor of the boss diameter along
+    the iron's path from the mating face to the pilot and require it empty.
+    This is the check the old static bay would have failed: its -Y frame ran
+    across the whole bay footprint at y 16.4..25.9, so the BMP581's pilots at
+    y=28 had no corridor to them at all, and the fault was invisible to every
+    solid check because the geometry was perfectly valid — just unbuildable.
+    """
+    import cadquery as cq
+
+    blocked = []
+    for ins in pod.insert_inventory():
+        if ins["access"] != "seam":
+            continue                      # aft inserts are entered from outside
+        if ins["y"] <= 0.6:
+            continue                      # flange pilots start at the seam itself
+        corridor = pod._cyl_y(ins["x"], ins["z"], 0.5,
+                              (ins["y"] - 0.2) - 0.5, pod.BOARD_POST_D / 2)
+        v = right.val().intersect(corridor.val()).Volume()
+        if v > 5.0:
+            blocked.append((ins, v))
+    if blocked:
+        worst = sorted(blocked, key=lambda b: -b[1])[:4]
+        detail = "; ".join(f"{i['name']} at ({i['x']:.0f},{i['z']:.0f}) by {v:.0f} mm^3"
+                           for i, v in worst)
+        r.fail(f"I7 heat-set iron cannot reach {len(blocked)} insert pilot(s): {detail}")
+    else:
+        n = sum(1 for i in pod.insert_inventory() if i["access"] == "seam")
+        r.ok(f"I7 clear Ø{pod.BOARD_POST_D:.0f} corridor to all {n} seam-access "
+             f"pilots (+{sum(1 for i in pod.insert_inventory() if i['access'] == 'aft')} "
+             "entered from outside the base)")
+
+
+def check_part_interference(r, pod, left, right) -> None:
+    """I6 — every separately-printed part must fit where it is meant to sit.
+
+    Each part is built in assembly position, so a straight intersection against
+    both halves is the whole test.  pm_tray's retaining rim ran +Y into the
+    wall land it bolts against and overlapped it by 1 mm; nothing caught that,
+    because a part that is not in either half cannot foul either half until
+    somebody checks.
+    """
+    for pname, part in pod.assembly_parts():
+        for hname, half in (("pod_left", left), ("pod_right", right)):
+            try:
+                v = half.val().intersect(part.val()).Volume()
+            except Exception:
+                v = 0.0
+            if v > 5.0:
+                r.fail(f"I6 {pname} interferes with {hname} by {v:.0f} mm^3 "
+                       "in assembly position")
+            else:
+                r.ok(f"I6 {pname} clears {hname} ({v:.1f} mm^3)")

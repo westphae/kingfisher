@@ -233,7 +233,7 @@ Y_PCB = Y_LAND - STANDOFF_H
 # board footprint.  A cup leaves the BMP standing on a completely open wall.
 CUP_WALL = 2.0
 CUP_CLR = 2.0       # plenum clearance around the BMP board
-CUP_TAB = 4.5       # screw tab reach beyond the cup wall
+CUP_TAB = 3.0       # screw tab reach beyond the cup wall
 CUP_FLANGE = 2.5    # flange thickness where it seals to the land
 STATIC_COVER_T = 2.2
 STATIC_HOLE_D = 1.6
@@ -299,18 +299,28 @@ SUN_RECESS_BOSS_D = SUN_RECESS_D - SUN_RECESS_BOSS_DIA_CLR
 # --- board columns on the +Y wall -------------------------------------------
 # Two rows in Z wherever the pair fits the 55 mm interior; the Babysitter and
 # the static bay are tall enough to need a column each.
+# I7: the bottom flange rail fills z up to INNER_Z0 + FLANGE_RAIL at y 0..6,
+# so an insert any lower than this has the rail inside the heat-set iron's
+# corridor for the first 6 mm of its travel.  This is what sets the low row.
+INSERT_Z_MIN = INNER_Z0 + FLANGE_RAIL + BOARD_POST_D / 2 + 0.5
+INSERT_Z_MAX = INNER_Z1 - FLANGE_RAIL - BOARD_POST_D / 2 - 0.5
+LOW_ROW_Z0 = 8.5                                   # -> lower pilots at z=11.0
+
 COL_A_X0 = 44.0                                    # MS4525 low + MMC5983 high
-MS_X0, MS_Z0 = COL_A_X0, 4.0
-MAG_X0, MAG_Z0 = COL_A_X0, 26.0
+MS_X0, MS_Z0 = COL_A_X0, LOW_ROW_Z0
+MAG_X0, MAG_Z0 = COL_A_X0, 30.0
 COL_A_W = max(MS_L, MAG_L)
 
 COL_B_X0 = COL_A_X0 + COL_A_W + BOARD_GAP          # Boost low + Pro Micro high
-BOOST_X0, BOOST_Z0 = COL_B_X0, 4.0
-PM_X0, PM_Z0 = COL_B_X0, 33.5
+BOOST_X0, BOOST_Z0 = COL_B_X0, LOW_ROW_Z0
+PM_X0, PM_Z0 = COL_B_X0, 35.5
 COL_B_W = max(BOOST_L, PM_L)
 
 CUP_X0 = COL_B_X0 + COL_B_W + BOARD_GAP            # isolated static bay (cup)
-BMP_X0, BMP_Z0 = CUP_X0 + CUP_WALL + CUP_CLR, 16.0
+# Centred in the band the flange rails leave: with a 29.4 mm plenum and
+# 3 mm tabs the cup spans 39.4 mm against 40.0 mm of usable height, so
+# there is exactly one place it can sit.
+BMP_X0, BMP_Z0 = CUP_X0 + CUP_WALL + CUP_CLR, 17.8
 # BAY_* is the PLENUM volume (cup interior); CUP_* is the cup's outer shell.
 BAY_X0, BAY_X1 = BMP_X0 - CUP_CLR, BMP_X0 + BMP581_L + CUP_CLR
 BAY_Z0, BAY_Z1 = BMP_Z0 - CUP_CLR, BMP_Z0 + BMP581_W + CUP_CLR
@@ -981,9 +991,14 @@ def add_pitot_cradle(body: cq.Workplane, side: int) -> cq.Workplane:
     )
     body = _union_if_solid(body, clamp)
     # Two barrel bulkheads + the aft bulkhead carrying the locating boss.
+    # ONE barrel bulkhead, not two.  The second sat at x 60.3..63.8, directly
+    # across the heat-set corridor for MS4525's and MAG's aft pilots (I7), and
+    # a cradle plate spans the full Y depth of the cradle land so no approach
+    # angle gets past it.  The SUN is already held by the nose bulkhead, a
+    # 25 mm clamp on the thread, this bulkhead and the aft bulkhead + boss;
+    # the free span it leaves is 46 mm of Ø11.71 brass.
     mid_bh_x = 0.5 * (SUN_BARREL_X0 + SUN_BARB_X[0]) - 1.75
-    for bx in (mid_bh_x, 0.5 * (SUN_BARB_X[1] + SUN_BARB_X[2]) - 1.75):
-        body = _union_if_solid(body, _cradle_plate(bx, 3.5, side))
+    body = _union_if_solid(body, _cradle_plate(mid_bh_x, 3.5, side))
     body = _union_if_solid(body, _cradle_plate(AFT_BH_X0, SHOULDER_BH_T, side))
 
     # Bores, forward to aft.  Mouth lip is NOSE_LIP_WALL of PETG (P7).
@@ -1605,6 +1620,60 @@ def main() -> None:
     lap("validate_pod green")
 
 
+
+
+def insert_inventory() -> list[dict]:
+    """Every heat-set insert in the model, with the axis the iron enters on.
+
+    Written down explicitly because "can a tool actually reach this fastener"
+    is not visible in any solid-geometry check, and it is what has cost the
+    most bench time: the BMP581's four pilots sat behind the old static-bay
+    frame with no corridor to them at all.
+
+    `access` is where the iron comes from.  "seam" means along +Y from the open
+    mating face, so the corridor from y=0 to the pilot must be clear.  "aft"
+    means along -X from outside the base, which is free space by definition.
+    """
+    out: list[dict] = []
+    for x, z in FLANGE_SCREWS:
+        out.append(dict(name="flange", x=x, y=0.0, z=z, access="seam"))
+    for bname, b in BOARDS.items():
+        for hx, hz in board_standoffs(b):
+            out.append(dict(name=f"board:{bname}", x=b["x0"] + hx, y=Y_PCB,
+                            z=b["z0"] + hz, access="seam"))
+    for cx, cz in cup_screws():
+        out.append(dict(name="static_bay_cup", x=cx, y=Y_LAND, z=cz, access="seam"))
+    for cy, cz in TAIL_SCREWS:
+        out.append(dict(name="tail_panel", x=OUTER_L, y=cy, z=cz, access="aft"))
+    return out
+
+
+def assembly_parts() -> list[tuple[str, cq.Workplane]]:
+    """The separately-printed parts, in ASSEMBLY position (not print pose).
+
+    Used to check that none of them foul a half — the pm_tray's retaining rim
+    pointed at the wall land it bolts against and overlapped it by 1 mm, which
+    no check could see because the tray is not part of either half.
+    """
+    return [("pm_tray", build_pm_tray()),
+            ("static_bay", build_static_bay_cup()),
+            ("tail_panel", build_tail_panel())]
+
+
+# I7 as a cheap import-time gate, so a board moved down into the rail is caught
+# without waiting for the full solid build.
+for _i in insert_inventory():
+    if _i["access"] == "seam" and _i["y"] > 0.6:
+        assert _i["z"] >= INSERT_Z_MIN - 0.05, (
+            f"I7 {_i['name']} pilot at z={_i['z']:.1f} is below "
+            f"INSERT_Z_MIN={INSERT_Z_MIN:.1f}; the bottom flange rail sits in "
+            "the heat-set iron's corridor"
+        )
+        assert _i["z"] <= INSERT_Z_MAX + 0.05, (
+            f"I7 {_i['name']} pilot at z={_i['z']:.1f} is above "
+            f"INSERT_Z_MAX={INSERT_Z_MAX:.1f}; the top flange rail sits in "
+            "the heat-set iron's corridor"
+        )
 
 
 # =============================================================================

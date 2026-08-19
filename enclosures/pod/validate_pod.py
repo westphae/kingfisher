@@ -108,12 +108,18 @@ def check_interior(r: CheckResult, pod) -> None:
         r.fail("I5 boards are flush on the land, not on raised standoffs")
     else:
         r.ok(f"I5 boards on {pod.STANDOFF_H:.1f} mm standoffs, inserts along Y")
-    # I7: the iron must reach every pilot from the open mating face.
-    for name, b in pod.BOARDS.items():
-        for hx, hz in pod.board_standoffs(b):
-            if b["x0"] + hx < 0 or pod.Y_PCB < 6.0:
-                r.fail(f"I7 {name} pilot unreachable from the seam")
-    r.ok("I7 insert corridor along -Y to every pilot (static bay has a tool window)")
+    # I7 proper is check_insert_access(), which sweeps a real corridor.  Here we
+    # only gate the band the flange rails leave, so a board dragged down into a
+    # rail is caught at import rather than after a 10 minute solid build.
+    lo = [i for i in pod.insert_inventory()
+          if i["access"] == "seam" and i["y"] > 0.6
+          and not (pod.INSERT_Z_MIN - 0.05 <= i["z"] <= pod.INSERT_Z_MAX + 0.05)]
+    if lo:
+        r.fail(f"I7 {len(lo)} pilot(s) outside the z band "
+               f"{pod.INSERT_Z_MIN:.1f}..{pod.INSERT_Z_MAX:.1f} the flange rails leave")
+    else:
+        r.ok(f"I7 all seam pilots inside the z band {pod.INSERT_Z_MIN:.1f}.."
+             f"{pod.INSERT_Z_MAX:.1f} left by the flange rails")
 
     if not (0.20 <= pod.CLAMP_CLEAR):
         r.fail(f"L2 clamp clearance {pod.CLAMP_CLEAR:.2f} below the print-1 slip fit")
@@ -185,6 +191,8 @@ def check_geometry(r: CheckResult) -> None:
     left = pod.as_single_solid(pod.build_left(), "pod_left")
     g.check_tips(r, pod, left, right)
     g.check_open_bay(r, pod, left, right)
+    g.check_insert_access(r, pod, right)
+    g.check_part_interference(r, pod, left, right)
 
     # I2 — nothing may poke outside the envelope.
     outer = pod.full_body_solid(0.0)
