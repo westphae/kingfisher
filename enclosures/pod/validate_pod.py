@@ -65,6 +65,34 @@ def stl_boundary_edges(path: Path, ndigits: int = 5) -> tuple[int, int]:
     return n, sum(1 for c in edges.values() if c == 1)
 
 
+def check_fresh(r: CheckResult, directory: Path = POD_DIR) -> None:
+    """P11: the exported artifacts must not predate the model that made them.
+
+    Printed artifacts are committed only at a working version, so between those
+    commits the tracked .stl/.step legitimately lag the script — and nothing
+    otherwise tells you.  Printing a stale STL is the expensive mistake this
+    catches: the parts on the bed silently miss every fix made since.
+    """
+    import hashlib
+    model = directory / "wing_pod_v3.py"
+    if not model.is_file():
+        return
+    want = f"kingfisher wing_pod_v3 {hashlib.sha256(model.read_bytes()).hexdigest()[:16]}"
+    stale = []
+    for name in STL_FILES:
+        f = directory / name
+        if not f.is_file():
+            continue
+        got = f.read_bytes()[:80].rstrip(b"\0").decode("ascii", "replace")
+        if got != want:
+            stale.append(name)
+    if stale:
+        r.fail(f"P11 {len(stale)} STL(s) were not built from the current "
+               f"wing_pod_v3.py — rerun before printing: {', '.join(sorted(stale))}")
+    else:
+        r.ok(f"P11 all {len(STL_FILES)} STLs stamped with the current model hash")
+
+
 def check_stls(r: CheckResult, directory: Path = POD_DIR) -> None:
     """P1-P3: present, watertight, tessellated tightly enough."""
     for name in STL_FILES:
@@ -221,6 +249,7 @@ def check_geometry(r: CheckResult) -> None:
 
 def validate_all(*, stl_only: bool = False, directory: Path = POD_DIR) -> CheckResult:
     r = CheckResult()
+    check_fresh(r, directory)
     check_stls(r, directory)
     if not stl_only:
         try:

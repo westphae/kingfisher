@@ -63,6 +63,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import cadquery as cq
 
@@ -1593,12 +1594,32 @@ def flat_for_print(body: cq.Workplane, axis: str) -> cq.Workplane:
     return _centre_on_bed(body)
 
 
+def model_stamp() -> str:
+    """A short hash of this file, written into every exported STL's header.
+
+    mtime cannot answer "was this built from the current model": restoring an
+    old artifact with `git checkout` gives it a fresh mtime and stale content,
+    which is exactly the case that matters.  A binary STL's 80-byte header is
+    free space that slicers ignore, so the provenance travels with the file.
+    """
+    import hashlib
+    src = Path(__file__).read_bytes()
+    return f"kingfisher wing_pod_v3 {hashlib.sha256(src).hexdigest()[:16]}"
+
+
+def _stamp_stl(path: str) -> None:
+    head = model_stamp().encode()[:79].ljust(80, b"\0")
+    with open(path, "r+b") as fh:
+        fh.write(head)
+
+
 def export_part(body: cq.Workplane, name: str, *, stl: bool = True) -> None:
     cq.exporters.export(body, f"{name}.step")
     if not stl:
         return
     cq.exporters.export(body, f"{name}.stl",
                         tolerance=0.03, angularTolerance=0.05)
+    _stamp_stl(f"{name}.stl")
     nb = _boundary_edges(f"{name}.stl")
     assert nb == 0, f"P2 {name}.stl has {nb} boundary edges (not watertight)"
     print(f"  {name}.stl watertight")
