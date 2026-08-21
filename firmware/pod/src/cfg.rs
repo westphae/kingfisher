@@ -19,6 +19,11 @@ pub const PI_IP: [u8; 4] = PI_EP.0;
 /// Parsed UDP port from [`PI_ADDR`].
 pub const PI_PORT: u16 = PI_EP.1;
 
+// 0x0004_000A: after ITPOR write Design Capacity + Design Energy only
+// (TI/SparkFun). Do not poke State Qmax Cell 0 (default 16384 Num;
+// Qmax_mAh = QmaxCell0 * DesignCap / 2^14) or Default Design Cap (chem
+// scale; TI: never modify). Writing learned FCC as Qmax Cell 0 left
+// FullChargeCapacity stuck at the factory 1340 leftover.
 // 0x0004_0009: do not SOC-sleep until FCC matches the pack; leave Protect
 // on healthy voltage; re-seed Qmax when FCC looks like factory leftover.
 // 0x0004_0008: BQ27441 restores Design Capacity + Qmax after ITPOR.
@@ -27,7 +32,7 @@ pub const PI_PORT: u16 = PI_EP.1;
 // the power state machine for 53 min on 2026-07-15.
 // 0x0004_0006: three-stage power protocol (burst/protect), Ping keepalive
 // fix, MMC5983 spread-poll harvesting at configured rate.
-pub const FW_VERSION: u32 = 0x0004_0009;
+pub const FW_VERSION: u32 = 0x0004_000A;
 
 /// Sensor poll / uplink cadence (Hz). Mag 50 Hz is a later stretch goal.
 pub const TICK_MS: u64 = 100;

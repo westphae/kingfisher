@@ -1,9 +1,10 @@
-//! Runtime LiPo design capacity and Qmax for the BQ27441 gauge.
+//! Runtime LiPo design capacity for the BQ27441 gauge.
 //!
 //! The G1A data memory is RAM-only: a battery unplug (ITPOR) forgets Design
-//! Capacity and the learned Qmax. We keep a small per-pack table of last-
-//! known FullChargeCapacity (used as the Qmax seed) in RAM this boot; the Pi
-//! persists the same map in config.json and restores it over SetAttr on Hello.
+//! Capacity. Impedance Track seeds Qmax from Design Capacity — we do **not**
+//! write State offset 0 (Qmax Cell 0 is 16384 Num, not mAh). The Pi still
+//! Acks a Qmax SetAttr so config.json can remember last FCC; that value is
+//! not programmed into the chip.
 
 use core::cell::Cell;
 use core::sync::atomic::{AtomicBool, AtomicU16, Ordering};
@@ -14,7 +15,7 @@ use crate::cfg;
 
 /// Wait this long after a failed config update before retrying (µs).
 const PROGRAM_FAIL_BACKOFF_US: u64 = 60_000_000;
-/// Don't re-seed Qmax every sample if FCC stays implausible after a write.
+/// Don't re-queue Design Capacity every sample if 0x3C is still factory.
 const RESTORE_COOLDOWN_US: u64 = 60_000_000;
 
 /// Plausible design-capacity bounds for a SetAttr request (mAh).
@@ -31,11 +32,8 @@ struct PackSlot {
 
 /// Value the Pi most recently asked us to program (0 = nothing pending).
 static PENDING_DESIGN: AtomicU16 = AtomicU16::new(0);
-static PENDING_QMAX: AtomicU16 = AtomicU16::new(0);
 /// Last DesignCapacity (0x3C) read back from the gauge (0 = unknown).
 static LAST_CHIP: AtomicU16 = AtomicU16::new(0);
-/// Last Qmax we wrote this boot (0 = never written).
-static LAST_QMAX: AtomicU16 = AtomicU16::new(0);
 static FAIL_UNTIL_US: Mutex<Cell<u64>> = Mutex::new(Cell::new(0));
 static LAST_RESTORE_US: Mutex<Cell<u64>> = Mutex::new(Cell::new(0));
 static FAIL_LOGGED: AtomicBool = AtomicBool::new(false);
@@ -59,18 +57,32 @@ pub fn note_chip(mah: u16) {
     LAST_CHIP.store(mah, Ordering::Relaxed);
 }
 
-/// If live FCC does not match the configured pack, queue a Qmax restore
-/// (last learned, else design). No-ops while a program is already pending or
-/// in fail-backoff so we do not hammer CONFIG UPDATE every sample.
-pub fn restore_if_fcc_implausible(design_mah: u16, fcc_mah: u16, now_us: u64) {
-    if design_mah < MIN_DESIGN_MAH {
+/// Pack size we intend to program (pending SetAttr, else the baked config).
+/// Never treat a factory 1340 leftover on 0x3C as the intended pack.
+fn intended_pack() -> u16 {
+    let pending = PENDING_DESIGN.load(Ordering::Relaxed);
+    if pending >= MIN_DESIGN_MAH {
+        return pending;
+    }
+    baked_default()
+}
+
+/// If 0x3C is still the G1A factory leftover (or blank), queue a Design
+/// Capacity rewrite. When 0x3C already matches the pack, leave Impedance
+/// Track alone — CFGUPDATE every 60 s is what kept FCC from ever learning.
+pub fn restore_if_fcc_implausible(chip_design: u16, fcc_mah: u16, now_us: u64) {
+    let intended = intended_pack();
+    if intended < MIN_DESIGN_MAH {
         return;
     }
-    if plausible_qmax(design_mah, fcc_mah) {
-        remember_qmax(design_mah, fcc_mah);
+    if chip_design == intended && plausible_qmax(intended, fcc_mah) {
+        remember_qmax(intended, fcc_mah);
         return;
     }
-    if PENDING_DESIGN.load(Ordering::Relaxed) != 0 || PENDING_QMAX.load(Ordering::Relaxed) != 0 {
+    if chip_design == intended {
+        return;
+    }
+    if PENDING_DESIGN.load(Ordering::Relaxed) != 0 {
         return;
     }
     if in_backoff(now_us) {
@@ -81,10 +93,7 @@ pub fn restore_if_fcc_implausible(design_mah: u16, fcc_mah: u16, now_us: u64) {
         return;
     }
     critical_section::with(|cs| LAST_RESTORE_US.borrow(cs).set(now_us));
-    LAST_QMAX.store(0, Ordering::Relaxed);
-    let qmax = lookup_qmax(design_mah).unwrap_or(design_mah);
-    PENDING_DESIGN.store(design_mah, Ordering::Relaxed);
-    PENDING_QMAX.store(qmax, Ordering::Relaxed);
+    PENDING_DESIGN.store(intended, Ordering::Relaxed);
 }
 
 fn in_backoff(now_us: u64) -> bool {
@@ -101,30 +110,28 @@ pub fn request_design_mah(mah: u16) -> bool {
         return false;
     }
     PENDING_DESIGN.store(mah, Ordering::Relaxed);
-    if PENDING_QMAX.load(Ordering::Relaxed) == 0 {
-        if let Some(q) = lookup_qmax(mah) {
-            PENDING_QMAX.store(q, Ordering::Relaxed);
-        }
-    }
     FAIL_LOGGED.store(false, Ordering::Relaxed);
     critical_section::with(|cs| FAIL_UNTIL_US.borrow(cs).set(0));
     true
 }
 
-/// Queue a Qmax restore (learned FullChargeCapacity for the selected pack).
+/// Remember last learned FCC for this boot / Ack the Pi. Do not enter
+/// CFGUPDATE — State Qmax Cell 0 is not an mAh seed.
 pub fn request_qmax_mah(mah: u16) -> bool {
     if !(MIN_DESIGN_MAH..=MAX_DESIGN_MAH).contains(&mah) {
         return false;
     }
-    PENDING_QMAX.store(mah, Ordering::Relaxed);
-    FAIL_LOGGED.store(false, Ordering::Relaxed);
-    critical_section::with(|cs| FAIL_UNTIL_US.borrow(cs).set(0));
+    let design = LAST_CHIP.load(Ordering::Relaxed);
+    if design >= MIN_DESIGN_MAH {
+        remember_qmax(design, mah);
+    } else {
+        remember_qmax(baked_default(), mah);
+    }
     true
 }
 
 fn clear_pending() {
     PENDING_DESIGN.store(0, Ordering::Relaxed);
-    PENDING_QMAX.store(0, Ordering::Relaxed);
     FAIL_LOGGED.store(false, Ordering::Relaxed);
     critical_section::with(|cs| FAIL_UNTIL_US.borrow(cs).set(0));
 }
@@ -132,7 +139,6 @@ fn clear_pending() {
 /// Mark a successful program.
 pub fn note_program_ok(design: u16, qmax: u16) {
     LAST_CHIP.store(design, Ordering::Relaxed);
-    LAST_QMAX.store(qmax, Ordering::Relaxed);
     remember_qmax(design, qmax);
     clear_pending();
 }
@@ -154,47 +160,34 @@ pub fn should_log_program_fail() -> bool {
 }
 
 /// True when Design Capacity is programmed, nothing is pending, and live FCC
-/// matches that pack — only then is SOC safe for Burst/Protect.
+/// matches the configured pack — only then is SOC safe for Burst/Protect.
 pub fn gauge_trusted(fcc_mah: u16) -> bool {
-    let design = LAST_CHIP.load(Ordering::Relaxed);
-    PENDING_DESIGN.load(Ordering::Relaxed) == 0
-        && PENDING_QMAX.load(Ordering::Relaxed) == 0
-        && plausible_qmax(design, fcc_mah)
+    let design = intended_pack();
+    PENDING_DESIGN.load(Ordering::Relaxed) == 0 && plausible_qmax(design, fcc_mah)
 }
 
-/// Returns (design, qmax) to program when a pending target differs from the
-/// last write and we are not in fail-backoff.
+/// Returns (design, qmax) to program when 0x3C differs from the pending
+/// pack size. `qmax` is log-only — it is not written to State offset 0.
 pub fn should_program_capacity(now_us: u64) -> Option<(u16, u16)> {
     let design = PENDING_DESIGN.load(Ordering::Relaxed);
-    let qmax_req = PENDING_QMAX.load(Ordering::Relaxed);
-    if design == 0 && qmax_req == 0 {
+    if design == 0 {
         return None;
     }
     let chip = LAST_CHIP.load(Ordering::Relaxed);
-    let target_design = if design != 0 { design } else { chip };
-    if target_design < MIN_DESIGN_MAH {
+    if design < MIN_DESIGN_MAH {
         return None;
     }
-    let target_qmax = if qmax_req != 0 {
-        qmax_req
-    } else if let Some(q) = lookup_qmax(target_design) {
-        q
-    } else {
-        target_design
-    };
-    if target_design == chip
-        && target_qmax == LAST_QMAX.load(Ordering::Relaxed)
-        && LAST_QMAX.load(Ordering::Relaxed) != 0
-    {
+    if design == chip {
         clear_pending();
         return None;
     }
+    let qmax = lookup_qmax(design).unwrap_or(design);
     critical_section::with(|cs| {
         let until = FAIL_UNTIL_US.borrow(cs).get();
         if until != 0 && now_us < until {
             return None;
         }
-        Some((target_design, target_qmax))
+        Some((design, qmax))
     })
 }
 

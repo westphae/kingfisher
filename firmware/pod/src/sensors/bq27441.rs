@@ -1,9 +1,11 @@
 //! SparkFun Battery Babysitter / TI BQ27441-G1A fuel gauge (I²C).
 //!
-//! Design Capacity and Qmax are written together when ITPOR is set (RAM lost)
-//! or when the Pi asks for a pack change. The G1A data memory is RAM-only, so
-//! a battery unplug forgets both; we restore from the last learned FullCharge
-//! Capacity (seeded as Qmax).
+//! Design Capacity and Design Energy are rewritten when ITPOR is set or when
+//! the chip still has the G1A factory 1340 mAh. The G1A data memory is RAM-only,
+//! so a battery unplug forgets it. Impedance Track initializes Qmax from Design
+//! Capacity: Qmax_mAh = QmaxCell0 * DesignCap / 2^14, and Qmax Cell 0 defaults
+//! to 16384 Num. Writing learned FCC into offset 0 left FullChargeCapacity
+//! stuck at 1340. Default Design Cap is the chem-ID scale and must not change.
 
 use embassy_time::{block_for, Duration, Instant};
 use esp_println::println;
@@ -34,8 +36,16 @@ const EXT_BLOCKDATA: u8 = 0x40;
 const EXT_CHECKSUM: u8 = 0x60;
 
 const ID_STATE: u8 = 82;
-const QMAX_OFFSET: u8 = 0;
 const DESIGN_CAPACITY_OFFSET: u8 = 10;
+const DESIGN_ENERGY_OFFSET: u8 = 12;
+const TERMINATE_VOLTAGE_OFFSET: u8 = 16;
+
+const FLAG_BAT_DET: u16 = 1 << 3;
+const CTRL_BAT_INSERT: u16 = 0x000C;
+
+/// G1A ROM default Design Capacity. A matching 0x3C after ITPOR means the
+/// host has not reloaded the pack size yet.
+const G1A_FACTORY_DESIGN_MAH: u16 = 1340;
 
 /// State subclass stores 16-bit fields MSB-first (TI TRM / SparkFun library).
 fn u16_be_bytes(v: u16) -> [u8; 2] {
@@ -94,14 +104,18 @@ impl Bq27441 {
         let fcc = read_word(bus, self.addr, CMD_FULL_CAPACITY)?;
         let design_reg = read_design_capacity(bus, self.addr)?;
         let itpor = flags & FLAG_ITPOR != 0;
-        // Data memory is RAM: ITPOR means factory defaults (Design ~1340,
-        // Qmax ~1340). Restore the baked pack size; Hello can override
-        // with the pack the user selected and a learned Qmax.
+        // Data memory is RAM: ITPOR means factory defaults (Design ~1340).
+        // Restore the baked pack size; Hello can override. Do not write
+        // State Qmax Cell 0 — IT seeds Qmax from Design Capacity.
         crate::battery_cfg::note_chip(design_reg);
-        if itpor || design_reg == 0 {
-            let seed = crate::battery_cfg::baked_default();
+        let seed = crate::battery_cfg::baked_default();
+        // Missed ITPOR still leaves 0x3C at the G1A factory 1340. Treat that
+        // as blank when the configured pack is a different size.
+        let factory_leftover =
+            design_reg == G1A_FACTORY_DESIGN_MAH && seed != G1A_FACTORY_DESIGN_MAH;
+        if itpor || design_reg == 0 || factory_leftover {
             println!(
-                "pod: bq27441 design_reg={design_reg} (itpor={itpor} fcc={fcc}); restoring {seed} mAh + Qmax"
+                "pod: bq27441 design_reg={design_reg} (itpor={itpor} fcc={fcc}); restoring design {seed} mAh"
             );
             let _ = crate::battery_cfg::request_design_mah(seed);
         } else {
@@ -114,7 +128,8 @@ impl Bq27441 {
         Ok(())
     }
 
-    /// Reprogram design capacity and Qmax (mAh) while running.
+    /// Reprogram Design Capacity and Design Energy (mAh / mWh) while running.
+    /// `qmax_mah` is only for logs — State Qmax Cell 0 is not an mAh seed.
     pub fn program_capacity(&self, bus: &mut I2cBus, design_mah: u16, qmax_mah: u16) -> Result<(), ()> {
         set_capacity_params(bus, self.addr, design_mah, qmax_mah)
     }
@@ -264,17 +279,17 @@ fn select_data_block(bus: &mut I2cBus, addr: u8, class_id: u8, offset: u8) -> Re
     write_byte(bus, addr, EXT_CONTROL, 0x00)?;
     write_byte(bus, addr, EXT_DATACLASS, class_id)?;
     write_byte(bus, addr, EXT_DATABLOCK, offset / 32)?;
+    // TI: BlockDataClass must settle before the 32-byte window is valid.
+    block_for(Duration::from_millis(5));
     Ok(())
 }
 
 fn set_capacity_params(bus: &mut I2cBus, addr: u8, design_mah: u16, qmax_mah: u16) -> Result<(), ()> {
-    let energy = design_energy_mwh(design_mah);
-
     if enter_config(bus, addr).is_err() {
         log_program_fail(design_mah, qmax_mah, ProgramFail::EnterConfig, 0);
         return Err(());
     }
-    if write_state_capacities(bus, addr, design_mah, energy, qmax_mah).is_err() {
+    if write_design_params(bus, addr, design_mah).is_err() {
         log_program_fail(design_mah, qmax_mah, ProgramFail::WriteBlock, 0);
         let _ = exit_config_resim(bus, addr);
         return Err(());
@@ -283,10 +298,17 @@ fn set_capacity_params(bus: &mut I2cBus, addr: u8, design_mah: u16, qmax_mah: u1
         log_program_fail(design_mah, qmax_mah, ProgramFail::ExitConfig, 0);
         return Err(());
     }
+    maybe_bat_insert(bus, addr);
     block_for(Duration::from_millis(500));
     for attempt in 0..40 {
         match read_design_capacity(bus, addr) {
-            Ok(reg) if reg == design_mah => return Ok(()),
+            Ok(reg) if reg == design_mah => {
+                let fcc = read_word(bus, addr, CMD_FULL_CAPACITY).unwrap_or(0);
+                println!(
+                    "pod: bq27441 design {design_mah} mAh verified (fcc={fcc} mAh; qmax seed {qmax_mah} not written to State.0)"
+                );
+                return Ok(());
+            }
             Ok(reg) => {
                 if attempt == 39 {
                     log_program_fail(design_mah, qmax_mah, ProgramFail::Verify, reg);
@@ -303,34 +325,66 @@ fn set_capacity_params(bus: &mut I2cBus, addr: u8, design_mah: u16, qmax_mah: u1
     Err(())
 }
 
-fn write_state_capacities(
-    bus: &mut I2cBus,
-    addr: u8,
-    design_mah: u16,
-    energy_mwh: u16,
-    qmax_mah: u16,
-) -> Result<(), ()> {
-    select_data_block(bus, addr, ID_STATE, 0)?;
-    let mut block = read_block_window(bus, addr)?;
-    let qmax = u16_be_bytes(qmax_mah);
-    let design = u16_be_bytes(design_mah);
-    let energy = u16_be_bytes(energy_mwh);
-    block[QMAX_OFFSET as usize] = qmax[0];
-    block[QMAX_OFFSET as usize + 1] = qmax[1];
-    block[DESIGN_CAPACITY_OFFSET as usize] = design[0];
-    block[DESIGN_CAPACITY_OFFSET as usize + 1] = design[1];
-    block[DESIGN_CAPACITY_OFFSET as usize + 2] = energy[0];
-    block[DESIGN_CAPACITY_OFFSET as usize + 3] = energy[1];
+fn patch_u16_be(block: &mut [u8; 32], offset: u8, v: u16) {
+    let b = u16_be_bytes(v);
+    let i = offset as usize;
+    block[i] = b[0];
+    block[i + 1] = b[1];
+}
 
-    for (i, &b) in block.iter().enumerate() {
-        write_byte(bus, addr, EXT_BLOCKDATA + i as u8, b)?;
-    }
+fn u16_be_at(block: &[u8; 32], offset: u8) -> u16 {
+    let i = offset as usize;
+    u16::from_be_bytes([block[i], block[i + 1]])
+}
+
+fn block_checksum(block: &[u8; 32]) -> u8 {
     let mut sum: u8 = 0;
     for b in block {
-        sum = sum.wrapping_add(b);
+        sum = sum.wrapping_add(*b);
     }
-    let csum = 255_u8.wrapping_sub(sum);
-    write_byte(bus, addr, EXT_CHECKSUM, csum)
+    255_u8.wrapping_sub(sum)
+}
+
+/// TI example / SparkFun setCapacity: patch Design Capacity (offset 10) and
+/// Design Energy (offset 12). Leave Qmax Cell 0 (16384 Num) and Default
+/// Design Cap (chem-ID scale) alone.
+fn write_design_params(bus: &mut I2cBus, addr: u8, design_mah: u16) -> Result<(), ()> {
+    select_data_block(bus, addr, ID_STATE, 0)?;
+    let mut block = read_block_window(bus, addr)?;
+    let old_design = u16_be_at(&block, DESIGN_CAPACITY_OFFSET);
+    let term_v = u16_be_at(&block, TERMINATE_VOLTAGE_OFFSET);
+    if !(100..=8000).contains(&old_design) || !(2500..=3700).contains(&term_v) {
+        println!(
+            "pod: bq27441 state block implausible design={old_design} term_v={term_v}; skip write"
+        );
+        return Err(());
+    }
+    let energy = design_energy_mwh(design_mah);
+    patch_u16_be(&mut block, DESIGN_CAPACITY_OFFSET, design_mah);
+    patch_u16_be(&mut block, DESIGN_ENERGY_OFFSET, energy);
+
+    for i in DESIGN_CAPACITY_OFFSET..=(DESIGN_ENERGY_OFFSET + 1) {
+        write_byte(bus, addr, EXT_BLOCKDATA + i, block[i as usize])?;
+    }
+    block_for(Duration::from_millis(1));
+    // SparkFun: checksum from a fresh 32-byte read after the data bytes land.
+    let written = read_block_window(bus, addr)?;
+    if u16_be_at(&written, DESIGN_CAPACITY_OFFSET) != design_mah {
+        println!("pod: bq27441 design patch did not stick in State block");
+        return Err(());
+    }
+    write_byte(bus, addr, EXT_CHECKSUM, block_checksum(&written))?;
+    block_for(Duration::from_millis(10));
+    Ok(())
+}
+
+fn maybe_bat_insert(bus: &mut I2cBus, addr: u8) {
+    let Ok(flags) = read_word(bus, addr, CMD_FLAGS) else {
+        return;
+    };
+    if flags & FLAG_BAT_DET == 0 {
+        let _ = execute_control(bus, addr, CTRL_BAT_INSERT);
+    }
 }
 
 #[derive(Copy, Clone)]

@@ -595,7 +595,7 @@ pub async fn run_sensor_poll(bus: &mut Bus, mut board: SensorBoard) {
             if let Some((mah, qmax)) = crate::battery_cfg::should_program_capacity(tick_us) {
                 match bq27441.program_capacity(bus, mah, qmax) {
                     Ok(()) => {
-                        println!("pod: bq27441 capacity programmed design={mah} qmax={qmax} mAh");
+                        println!("pod: bq27441 capacity programmed design={mah} mAh (fcc follows Impedance Track; qmax {qmax} not written)");
                         crate::battery_cfg::note_program_ok(mah, qmax);
                     }
                     Err(()) => {
