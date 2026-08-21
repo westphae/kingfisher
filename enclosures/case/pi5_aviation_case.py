@@ -159,6 +159,22 @@ SMA_D          = 6.5
 INTAKE_R, INTAKE_HOLE_D, INTAKE_PITCH = 21.0, 4.0, 6.5
 SLOT_W      = 3.0        # left-wall exhaust slot width
 
+# SparkFun Qwiic OLED 1.3" LCD-23453 (SSD1306), lid-rear over the GPS bay.
+# Panel / active area from SparkFun. PCB envelope is conservative (horizontal
+# Qwiic on ±X); caliper-tune OLED_PCB_* before the first print if the board
+# differs — see enclosures/pi5_aviation_case.md OLED IDs.
+OLED_PANEL_X, OLED_PANEL_Y = 34.5, 23.0
+OLED_ACTIVE_X, OLED_ACTIVE_Y = 29.42, 14.7
+OLED_PCB_X, OLED_PCB_Y = 41.0, 27.5
+OLED_CLR = 0.4           # pocket vs PCB
+OLED_WIN_CLR = 1.0       # aperture vs active area
+OLED_VISOR_H = 1.5       # raised hood above the lid top
+OLED_POCKET_D = 2.8      # recess from lid underside (LID_T=4 → 1.2 mm lip)
+OLED_BTN_D = 7.2         # tactile cap clearance
+OLED_BTN_OFF_X = 8.0     # PCB +X edge → button centre
+OLED_CABLE_W, OLED_CABLE_L = 8.0, 10.0  # Qwiic drop into the bay (-Y of pocket)
+OLED_FLANK_GAP = 18.0    # PCB half-width → flanking exhaust slot centre (clears +X button)
+
 # ----------------------------------------------------------------------------- DERIVED
 # The Z-stack, floor -> lid. PI_DECK_Z (Pi PCB top) is the master deck height.
 UPS_BOT_Z    = WALL + PAD_H + UPS_STANDOFF_H
@@ -229,6 +245,36 @@ GPSx0, GPSy0 = io(3, CLR_F + PI_W + BAY_GAP)
 gps_holes = [(GPSx0 + hx, GPSy0 + hy)
              for hx in (GPS_HOLE_INSET, GPS_L - GPS_HOLE_INSET)
              for hy in (GPS_HOLE_INSET, GPS_W - GPS_HOLE_INSET)]
+
+# OLED on the lid, facing up, centred over the GPS/IMU bay (not the cooler).
+oled_cx, oled_cy = OX / 2.0, GPSy0 + GPS_W / 2.0
+oled_win_x, oled_win_y = OLED_ACTIVE_X + 2 * OLED_WIN_CLR, OLED_ACTIVE_Y + 2 * OLED_WIN_CLR
+oled_pocket_x = OLED_PCB_X + 2 * OLED_CLR
+oled_pocket_y = OLED_PCB_Y + 2 * OLED_CLR
+oled_btn_x = oled_cx + OLED_PCB_X / 2.0 + OLED_BTN_OFF_X
+oled_btn_y = oled_cy
+oled_cable_y = oled_cy - oled_pocket_y / 2.0 - OLED_CABLE_L / 2.0 + 1.0
+_dx, _dy = oled_cx - cooler_cx, oled_cy - cooler_cy
+assert (_dx * _dx + _dy * _dy) ** 0.5 > INTAKE_R + oled_win_y / 2.0 + 3.0, \
+    "OLED window overlaps cooler intake grille"
+assert oled_cx - oled_pocket_x / 2.0 > WALL + 2.0, "OLED pocket hits left wall"
+assert oled_cx + oled_pocket_x / 2.0 < OX - WALL - 2.0, "OLED pocket hits right wall"
+assert oled_cy - oled_pocket_y / 2.0 > PIy0 + PI_W + 1.0, "OLED pocket overlaps stack"
+assert oled_cy + oled_pocket_y / 2.0 < OY - WALL - 2.0, "OLED pocket hits back wall"
+assert LID_T - OLED_POCKET_D >= 1.0, "OLED pocket leaves <1 mm lid lip"
+assert oled_btn_x + OLED_BTN_D / 2.0 < OX - WALL - 1.0, "OLED button overruns right wall"
+for sx in (oled_cx - OLED_PCB_X / 2.0 - OLED_FLANK_GAP,
+           oled_cx + OLED_PCB_X / 2.0 + OLED_FLANK_GAP):
+    assert abs(sx - oled_btn_x) > OLED_BTN_D / 2.0 + SLOT_W / 2.0 + 2.0, \
+        "OLED flanking vent overlaps the button"
+for _px, _py in lid_posts:
+    _d = ((_px - oled_btn_x) ** 2 + (_py - oled_btn_y) ** 2) ** 0.5
+    assert _d > BOSS_D / 2.0 + OLED_BTN_D / 2.0 + 2.0, \
+        f"OLED button fouls lid post at ({_px:.1f},{_py:.1f})"
+    _d = ((_px - oled_cx) ** 2 + (_py - oled_cy) ** 2) ** 0.5
+    assert _d > BOSS_D / 2.0 + max(oled_pocket_x, oled_pocket_y) / 2.0, \
+        f"OLED pocket fouls lid post at ({_px:.1f},{_py:.1f})"
+
 
 # IMU centred laterally between the GPS right edge and the right (bulkhead) wall.
 IMUy0 = io(0, CLR_F + PI_W + BAY_GAP + 2)[1]
@@ -412,11 +458,94 @@ def build_lid():
     lid = lid.cut(cq.Workplane("XY").pushPoints(lid_posts).circle(cb_r)
                   .extrude(cb_depth+0.1).translate((0,0,OZ+LID_T-cb_depth)))
 
-    # rear exhaust slots over the bay
-    for i in range(5):
-        lid = lid.cut(cq.Workplane("XY").box(3, 22, LID_T+1, centered=True)
-                      .translate((OX/2 + (i-2)*9, GPSy0+GPS_W/2, OZ+LID_T/2)))
+    # visor around the OLED window (cabin glare)
+    visor_out_x, visor_out_y = oled_win_x + 6.0, oled_win_y + 6.0
+    visor = cq.Workplane("XY").box(visor_out_x, visor_out_y, OLED_VISOR_H, centered=True)
+    visor = visor.cut(cq.Workplane("XY").box(oled_win_x, oled_win_y, OLED_VISOR_H + 1, centered=True))
+    lid = lid.union(visor.translate((oled_cx, oled_cy, OZ + LID_T + OLED_VISOR_H / 2.0 - 0.2)))
+
+    # viewing aperture through visor + lid
+    lid = lid.cut(cq.Workplane("XY").box(oled_win_x, oled_win_y, LID_T + OLED_VISOR_H + 2, centered=True)
+                  .translate((oled_cx, oled_cy, OZ + LID_T / 2.0)))
+
+    # PCB pocket from the underside (lip around the panel bezel)
+    lid = lid.cut(cq.Workplane("XY").box(oled_pocket_x, oled_pocket_y, OLED_POCKET_D + 0.2, centered=True)
+                  .translate((oled_cx, oled_cy, OZ + OLED_POCKET_D / 2.0 - 0.1)))
+
+    # Qwiic cable drop into the GPS bay (toward the stack / -Y)
+    lid = lid.cut(cq.Workplane("XY").box(OLED_CABLE_W, OLED_CABLE_L, LID_T + 2, centered=True)
+                  .translate((oled_cx, oled_cable_y, OZ + LID_T / 2.0)))
+
+    # tactile button in the same bezel, +X of the PCB
+    lid = lid.cut(cq.Workplane("XY").pushPoints([(oled_btn_x, oled_btn_y)])
+                  .circle(OLED_BTN_D / 2.0)
+                  .extrude(LID_T + OLED_VISOR_H + 2).translate((0, 0, OZ - 0.5)))
+
+    # flanking exhaust slots left/right of the OLED (bay still vents)
+    for sx in (oled_cx - OLED_PCB_X / 2.0 - OLED_FLANK_GAP,
+               oled_cx + OLED_PCB_X / 2.0 + OLED_FLANK_GAP):
+        lid = lid.cut(cq.Workplane("XY").box(SLOT_W, 22.0, LID_T + 1, centered=True)
+                      .translate((sx, oled_cy, OZ + LID_T / 2.0)))
     return lid
+
+# ----------------------------------------------------------------------------- QC PNG (top view, unique per OLED lid revision)
+def _png_rgb(path, rows):
+    import struct, zlib
+    h, w = len(rows), len(rows[0])
+    def chunk(tag, data):
+        crc = zlib.crc32(tag + data) & 0xffffffff
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", crc)
+    raw = b"".join(b"\x00" + bytes(c for p in row for c in p) for row in rows)
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+                + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+
+def write_lid_qc_png(path):
+    """Raster lid XY features so a stale PNG cannot be mistaken for current."""
+    scale = 4  # px / mm
+    w, h = int(OX * scale) + 1, int(OY * scale) + 1
+    bg, wall, cut, win, btn = (40, 44, 52), (180, 186, 196), (20, 22, 26), (220, 230, 255), (240, 180, 80)
+    rows = [[bg] * w for _ in range(h)]
+
+    def fill_rect(x0, y0, x1, y1, color):
+        ix0, iy0 = max(0, int(x0 * scale)), max(0, int(y0 * scale))
+        ix1, iy1 = min(w - 1, int(x1 * scale)), min(h - 1, int(y1 * scale))
+        for y in range(iy0, iy1 + 1):
+            row = rows[h - 1 - y]  # Y-up
+            for x in range(ix0, ix1 + 1):
+                row[x] = color
+
+    def fill_circle(cx, cy, r, color):
+        ir = int(r * scale) + 1
+        icx, icy = int(cx * scale), int(cy * scale)
+        r2 = (r * scale) ** 2
+        for y in range(max(0, icy - ir), min(h, icy + ir + 1)):
+            row = rows[h - 1 - y]
+            for x in range(max(0, icx - ir), min(w, icx + ir + 1)):
+                if (x - icx) ** 2 + (y - icy) ** 2 <= r2:
+                    row[x] = color
+
+    fill_rect(0, 0, OX, OY, wall)
+    n = int(INTAKE_R / INTAKE_PITCH) + 1
+    for i in range(-n, n + 1):
+        for j in range(-n, n + 1):
+            px, py = i * INTAKE_PITCH, j * INTAKE_PITCH
+            if px * px + py * py <= (INTAKE_R - INTAKE_HOLE_D / 2) ** 2:
+                fill_circle(cooler_cx + px, cooler_cy + py, INTAKE_HOLE_D / 2, cut)
+    fill_rect(oled_cx - oled_pocket_x / 2, oled_cy - oled_pocket_y / 2,
+              oled_cx + oled_pocket_x / 2, oled_cy + oled_pocket_y / 2, cut)
+    fill_rect(oled_cx - oled_win_x / 2, oled_cy - oled_win_y / 2,
+              oled_cx + oled_win_x / 2, oled_cy + oled_win_y / 2, win)
+    fill_rect(oled_cx - OLED_CABLE_W / 2, oled_cable_y - OLED_CABLE_L / 2,
+              oled_cx + OLED_CABLE_W / 2, oled_cable_y + OLED_CABLE_L / 2, cut)
+    fill_circle(oled_btn_x, oled_btn_y, OLED_BTN_D / 2, btn)
+    for sx in (oled_cx - OLED_PCB_X / 2.0 - OLED_FLANK_GAP,
+               oled_cx + OLED_PCB_X / 2.0 + OLED_FLANK_GAP):
+        fill_rect(sx - SLOT_W / 2, oled_cy - 11, sx + SLOT_W / 2, oled_cy + 11, cut)
+    for px, py in lid_posts:
+        fill_circle(px, py, 1.4, cut)
+    _png_rgb(path, rows)
 
 # ----------------------------------------------------------------------------- BUILD + EXPORT
 if __name__ == "__main__":
@@ -439,9 +568,13 @@ if __name__ == "__main__":
     asm.add(lid,  name="lid",  color=cq.Color(0.75,0.78,0.82))
     asm.save("case_assembly.step")
 
-    print(f"Outer footprint : {OX:.1f} x {OY:.1f} x {OZ+LID_T:.1f} mm")
+    write_lid_qc_png("case_lid_oled_qc_20260821.png")
+
+    print(f"Outer footprint : {OX:.1f} x {OY:.1f} x {OZ+LID_T+OLED_VISOR_H:.1f} mm (incl. OLED visor)")
     print(f"Z-stack: X1200 bottom {UPS_BOT_Z:.1f} | Pi deck {PI_DECK_Z:.1f} | "
           f"cooler top {COOLER_TOP_Z:.1f} | HAT top {HAT_TOP_Z:.1f} | "
           f"stack top {STACK_TOP_Z:.1f} | lid underside {OZ:.1f}")
+    print(f"OLED window {oled_win_x:.1f}x{oled_win_y:.1f} @ ({oled_cx:.1f},{oled_cy:.1f}); "
+          f"button Ø{OLED_BTN_D:.1f} @ ({oled_btn_x:.1f},{oled_btn_y:.1f})")
     print(f"Cell-to-floor clearance: {PAD_H + UPS_STANDOFF_H - UPS_UNDERSIDE:.1f} mm")
-    print("Exported base/lid .step/.stl (+ assembly). Lid STL is print-oriented (flipped).")
+    print("Exported base/lid .step/.stl (+ assembly, QC PNG). Lid STL is print-oriented (flipped).")

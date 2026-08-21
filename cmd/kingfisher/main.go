@@ -23,6 +23,7 @@ import (
 	"github.com/westphae/kingfisher/internal/gdl90"
 	"github.com/westphae/kingfisher/internal/gps"
 	"github.com/westphae/kingfisher/internal/live"
+	"github.com/westphae/kingfisher/internal/oled"
 	"github.com/westphae/kingfisher/internal/pod"
 	"github.com/westphae/kingfisher/internal/sensors"
 	"github.com/westphae/kingfisher/internal/store"
@@ -250,6 +251,17 @@ func main() {
 	if upsMon != nil {
 		safeGo(&wg, "ups", false, st, func() { upsMon.Run(ctx, stop) })
 	}
+	safeGo(&wg, "oled", false, st, func() {
+		oled.Run(ctx, oled.Sources{
+			Holder: holder,
+			Hub:    hub,
+			Buf:    buf,
+			Store:  st,
+			GPS:    gpsClient,
+			Pod:    podClient,
+			UPS:    upsMon,
+		}, stop)
+	})
 	safeGo(&wg, "web", false, st, func() {
 		if err := srv.Run(cfg.HTTPAddr, stop); err != nil {
 			log.Printf("web: %v", err)

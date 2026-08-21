@@ -62,6 +62,26 @@ func TestDefaults_pod(t *testing.T) {
 	}
 }
 
+func TestMergeOLEDDefaults(t *testing.T) {
+	var o OLED
+	MergeOLEDDefaults(&o)
+	if o.Bus != DefaultOLEDBus || o.Addr != DefaultOLEDAddr || o.Contrast != DefaultOLEDContrast {
+		t.Fatalf("defaults: %+v", o)
+	}
+	if o.ButtonGPIO != DefaultOLEDButtonGPIO || o.CycleS != DefaultOLEDCycleS {
+		t.Fatalf("button/cycle: %+v", o)
+	}
+	o.Addr = 0x3C
+	o.Contrast = 300
+	MergeOLEDDefaults(&o)
+	if o.Addr != 0x3C {
+		t.Fatalf("addr overwritten: %d", o.Addr)
+	}
+	if o.Contrast != 255 {
+		t.Fatalf("contrast clamp: %d", o.Contrast)
+	}
+}
+
 func TestDefaults_kollsman(t *testing.T) {
 	c := Defaults()
 	if got := c.KollsmanInHg(); got != DefaultKollsmanInHg {

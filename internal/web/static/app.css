@@ -91,6 +91,29 @@ html, body {
   margin: 0;
 }
 
+fieldset.cfgOled {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem 0.75rem;
+  margin: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+fieldset.cfgOled legend {
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 0 0.35rem;
+}
+
+.oledCycleList {
+  max-height: 36vh;
+  overflow: auto;
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.25rem 0;
+}
+
 body {
   display: flex;
   flex-direction: column;

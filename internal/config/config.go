@@ -448,7 +448,7 @@ type Pod struct {
 	ProtectSocPct     uint8             `json:"protect_soc_pct,omitempty"`
 	LowDebounceS      uint16            `json:"low_debounce_s,omitempty"`
 	ModemPowerSave    bool              `json:"modem_power_save,omitempty"` // off: brcmfmac AP drops unicast to dozing STA
-	Attrs             map[string]string `json:"attrs,omitempty"` // e.g. in_mag_sampling_frequency
+	Attrs             map[string]string `json:"attrs,omitempty"`            // e.g. in_mag_sampling_frequency
 }
 
 const (
@@ -629,7 +629,105 @@ type Config struct {
 	GDL90       GDL90       `json:"gdl90,omitempty"`
 	System      System      `json:"system,omitempty"`
 	UPS         UPS         `json:"ups,omitempty"`
+	OLED        OLED        `json:"oled,omitempty"`
 	Access      Access      `json:"access,omitempty"`
+}
+
+// OLEDCycleItem is one hub channel shown on the OLED cycle band.
+type OLEDCycleItem struct {
+	Device  string `json:"device"`
+	Channel string `json:"channel"`
+}
+
+// OLED configures the SparkFun Qwiic 128×64 SSD1306 health display.
+// Default off — the panel is optional hardware.
+type OLED struct {
+	Enabled    bool            `json:"enabled"`
+	Bus        string          `json:"bus,omitempty"`      // default /dev/i2c-1
+	Addr       int             `json:"addr,omitempty"`     // default 0x3D (61)
+	Contrast   int             `json:"contrast,omitempty"` // 0–255, default 128
+	Invert     bool            `json:"invert,omitempty"`
+	ColumnOff  int             `json:"column_offset,omitempty"` // SH1106 escape hatch (typically 2)
+	CycleS     float64         `json:"cycle_s,omitempty"`       // default 4
+	UPSWarnS   float64         `json:"ups_warn_s,omitempty"`    // default 1800
+	ButtonGPIO int             `json:"button_gpio,omitempty"`   // default 4; <0 disables
+	ButtonChip string          `json:"button_chip,omitempty"`   // empty: try gpiochip4 then gpiochip0
+	Cycle      []OLEDCycleItem `json:"cycle,omitempty"`
+}
+
+const (
+	DefaultOLEDBus        = "/dev/i2c-1"
+	DefaultOLEDAddr       = 0x3D
+	DefaultOLEDContrast   = 128
+	DefaultOLEDCycleS     = 4.0
+	DefaultOLEDUPSWarnS   = 1800.0
+	DefaultOLEDButtonGPIO = 4
+)
+
+func MergeOLEDDefaults(o *OLED) {
+	if o == nil {
+		return
+	}
+	if strings.TrimSpace(o.Bus) == "" {
+		o.Bus = DefaultOLEDBus
+	}
+	if o.Addr <= 0 {
+		o.Addr = DefaultOLEDAddr
+	}
+	if o.Contrast <= 0 {
+		o.Contrast = DefaultOLEDContrast
+	}
+	if o.Contrast > 255 {
+		o.Contrast = 255
+	}
+	if o.CycleS <= 0 || math.IsNaN(o.CycleS) {
+		o.CycleS = DefaultOLEDCycleS
+	}
+	if o.UPSWarnS <= 0 || math.IsNaN(o.UPSWarnS) {
+		o.UPSWarnS = DefaultOLEDUPSWarnS
+	}
+	if o.ButtonGPIO == 0 {
+		o.ButtonGPIO = DefaultOLEDButtonGPIO
+	}
+}
+
+func (o OLED) BusEffective() string {
+	if strings.TrimSpace(o.Bus) == "" {
+		return DefaultOLEDBus
+	}
+	return o.Bus
+}
+
+func (o OLED) AddrEffective() uint16 {
+	if o.Addr <= 0 {
+		return DefaultOLEDAddr
+	}
+	return uint16(o.Addr)
+}
+
+func (o OLED) ContrastEffective() byte {
+	if o.Contrast <= 0 {
+		return DefaultOLEDContrast
+	}
+	if o.Contrast > 255 {
+		return 255
+	}
+	return byte(o.Contrast)
+}
+
+func (o OLED) CycleDuration() time.Duration {
+	s := o.CycleS
+	if s <= 0 || math.IsNaN(s) {
+		s = DefaultOLEDCycleS
+	}
+	return time.Duration(s * float64(time.Second))
+}
+
+func (o OLED) UPSWarnSeconds() float64 {
+	if o.UPSWarnS <= 0 || math.IsNaN(o.UPSWarnS) {
+		return DefaultOLEDUPSWarnS
+	}
+	return o.UPSWarnS
 }
 
 // Calibration stores 6-position tumble results for cabin IMU and/or pod mag,
@@ -651,25 +749,25 @@ type Calibration struct {
 // and GyroTCO Δb(T) stay software-side. GyroBias is the still mean at TempCalC;
 // GyroBiasAtRef is what was nulled onto the chip (T_ref-baked).
 type IMUCalResult struct {
-	AccelScale     [3]float64 `json:"accel_scale"`
-	AccelBias      [3]float64 `json:"accel_bias"`
-	GyroBias       [3]float64 `json:"gyro_bias"`                 // still mean at TempCalC (rad/s)
-	GyroBiasAtRef  [3]float64 `json:"gyro_bias_at_ref,omitempty"` // μ − Δb(T_cal); OFFUSER target
-	TempCalC       float64    `json:"temp_cal_c,omitempty"`       // mean die °C during six-face
-	GyroFaceRMS    [3]float64 `json:"gyro_face_rms,omitempty"`    // per-axis RMS of face means − bias
+	AccelScale          [3]float64 `json:"accel_scale"`
+	AccelBias           [3]float64 `json:"accel_bias"`
+	GyroBias            [3]float64 `json:"gyro_bias"`                       // still mean at TempCalC (rad/s)
+	GyroBiasAtRef       [3]float64 `json:"gyro_bias_at_ref,omitempty"`      // μ − Δb(T_cal); OFFUSER target
+	TempCalC            float64    `json:"temp_cal_c,omitempty"`            // mean die °C during six-face
+	GyroFaceRMS         [3]float64 `json:"gyro_face_rms,omitempty"`         // per-axis RMS of face means − bias
 	GyroOffuser         [3]float64 `json:"gyro_offuser,omitempty"`          // programmed OFFUSER (rad/s)
 	AccelOffuser        [3]float64 `json:"accel_offuser,omitempty"`         // programmed OFFUSER (m/s²)
 	AccelOffuserApplied bool       `json:"accel_offuser_applied,omitempty"` // accel calibbias programmed
 	GyroOffuserApplied  bool       `json:"gyro_offuser_applied,omitempty"`  // gyro calibbias programmed
 	// OffuserApplied is true when either accel or gyro OFFUSER was programmed
 	// (legacy clients). Prefer AccelOffuserApplied / GyroOffuserApplied.
-	OffuserApplied bool    `json:"offuser_applied,omitempty"`
-	FittedUTC      string  `json:"fitted_utc"`
-	AccelFittedUTC string  `json:"accel_fitted_utc,omitempty"`
-	GyroFittedUTC  string  `json:"gyro_fitted_utc,omitempty"`
-	ResidualRMS    float64    `json:"residual_rms_ms2,omitempty"` // ‖a_corr‖−g₀ RMS
-	MeanNormMS2    float64    `json:"mean_norm_ms2,omitempty"`
-	Warnings       []string   `json:"warnings,omitempty"`
+	OffuserApplied bool     `json:"offuser_applied,omitempty"`
+	FittedUTC      string   `json:"fitted_utc"`
+	AccelFittedUTC string   `json:"accel_fitted_utc,omitempty"`
+	GyroFittedUTC  string   `json:"gyro_fitted_utc,omitempty"`
+	ResidualRMS    float64  `json:"residual_rms_ms2,omitempty"` // ‖a_corr‖−g₀ RMS
+	MeanNormMS2    float64  `json:"mean_norm_ms2,omitempty"`
+	Warnings       []string `json:"warnings,omitempty"`
 }
 
 // MagCalResult is diagonal soft-iron + hard-iron from a pod tumble.
@@ -753,8 +851,8 @@ func (s System) RateHzEffective() float64 {
 // /etc/UPower/UPower.conf for that.
 type UPS struct {
 	Enabled        bool    `json:"enabled"`
-	RateHz         float64 `json:"rate_hz,omitempty"`           // default 1, clamped to [0.1, 10]
-	PoweroffSocPct float64 `json:"poweroff_soc_pct,omitempty"`  // default 5, matching UPower PercentageAction
+	RateHz         float64 `json:"rate_hz,omitempty"`          // default 1, clamped to [0.1, 10]
+	PoweroffSocPct float64 `json:"poweroff_soc_pct,omitempty"` // default 5, matching UPower PercentageAction
 }
 
 const (
@@ -1046,6 +1144,7 @@ func Load(path string) (*Config, error) {
 	MergeHowgozitDefaults(&c.Howgozit)
 	MergeGDL90Defaults(&c.GDL90)
 	MergeGyroTCODefaults(&c.Calibration.GyroTCO)
+	MergeOLEDDefaults(&c.OLED)
 	MigrateIMUOffuserFlags(c.Calibration.CabinIMU)
 	if SeedPodMagDisplayCal(c) && path != "" {
 		if err := Save(path, c); err != nil {

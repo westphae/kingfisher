@@ -15,6 +15,23 @@ ICM-45686 IMU in a rear bay. One script generates `case_base.{step,stl}`,
   (85×112×35, Pi + bay only, incl. the old `relief.png` render),
   `KingfisherPod.zip` = wing-pod **v1** insert (archived). Live pod model:
   [`pod/wing_pod_v3.py`](pod/wing_pod_v3.py) / [`pod/pod_enclosure.md`](pod/pod_enclosure.md).
+- **OLED lid (2026-08-21):** SparkFun Qwiic OLED 1.3″ (LCD-23453, 128×64) recessed
+  in the lid rear over the GPS bay, facing up, with a GPIO button to the +X
+  side of the panel (toward the IMU). QC preview: `case/case_lid_oled_qc_20260821.png`.
+
+## OLED lid IDs
+
+| ID | Requirement |
+|---|---|
+| O1 | Viewing aperture ≥ active area 29.42×14.7 mm + 1 mm (`OLED_WIN_CLR`) |
+| O2 | Underside pocket for PCB 41.0×27.5 mm (datasheet panel 34.5×23.0; **caliper-tune `OLED_PCB_*` before print**) |
+| O3 | Qwiic cable slot into the GPS bay; do not pinch on lid close |
+| O4 | Tactile button hole Ø7.2 mm, +X of the PCB (toward the IMU), clear of lid posts and flank vents |
+| O5 | Window must not overlap cooler intake grille (`INTAKE_R`) |
+| O6 | Keep flanking 3×22 mm exhaust slots left/right of the bezel |
+| O7 | 1.5 mm visor around the window (cabin glare) |
+
+Wiring: daisy-chain Qwiic from the SparkFun NEO-M9N in the bay (cut the OLED I²C pull-up jumper). Button is GPIO4 / pin 7 to GND pin 9 (active-low).
 
 ## Regenerating
 

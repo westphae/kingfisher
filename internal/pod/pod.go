@@ -150,7 +150,7 @@ func New(addr string, transport Transport, hub *live.Hub, buf *store.Buffer, st 
 		}
 	}
 	if cfg != nil {
-	c.reader.SetDesignCapacityFromConfig(cfg.Get().PodBatteryCapacityMah())
+		c.reader.SetDesignCapacityFromConfig(cfg.Get().PodBatteryCapacityMah())
 		c.applySavedSettings(false)
 		c.refreshRegistryViews()
 	}
@@ -517,6 +517,14 @@ func (c *Client) enqueueOutbound(o outboundCmd) {
 	default:
 		log.Printf("pod: outbound queue full; dropped %T", o.Cmd)
 	}
+}
+
+// TelemetryDeviceNames returns Hello-advertised (or defaulted) wing chip names.
+func (c *Client) TelemetryDeviceNames() []string {
+	if c == nil || c.reader == nil {
+		return nil
+	}
+	return c.reader.TelemetryDeviceNames()
 }
 
 // RefreshRegistryViews updates registry attr snapshots for pod_* tabs.

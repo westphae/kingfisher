@@ -45,6 +45,7 @@ import (
 	"github.com/westphae/kingfisher/internal/flights"
 	"github.com/westphae/kingfisher/internal/gdl90"
 	"github.com/westphae/kingfisher/internal/gps"
+	"github.com/westphae/kingfisher/internal/health"
 	"github.com/westphae/kingfisher/internal/live"
 	"github.com/westphae/kingfisher/internal/location"
 	"github.com/westphae/kingfisher/internal/pod"
@@ -281,6 +282,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		config.MergeGyroTCODefaults(&nc.Calibration.GyroTCO)
+		config.MergeOLEDDefaults(&nc.OLED)
 		s.cfg.Set(&nc)
 		if err := config.Save(s.cfg.Path(), &nc); err != nil {
 			log.Printf("web: config save: %v", err)
@@ -339,7 +341,39 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	} else {
 		st["ups"] = ups.Snapshot{Enabled: cfg.UPS.Enabled}
 	}
+	st["health"] = s.healthReport(r.Context(), cfg, st["db_volume_free_bytes"])
 	writeJSON(w, st)
+}
+
+func (s *Server) healthReport(ctx context.Context, cfg *config.Config, free any) health.Report {
+	in := health.GatherIn{
+		Now:       time.Now(),
+		UPSWarnS:  cfg.OLED.UPSWarnSeconds(),
+		Hub:       s.hub.SnapshotNow(),
+		Cfg:       cfg,
+		IIONames:  s.cfg.IIODeviceNames(),
+		ExpectGPS: s.gps != nil,
+		Recording: s.buf.RecordingState(),
+		Clock:     clock.QueryDiscipline(ctx),
+		UPS:       ups.Snapshot{Enabled: cfg.UPS.Enabled},
+	}
+	if n, ok := free.(int64); ok {
+		in.DiskFree = &n
+	}
+	if s.gps != nil {
+		in.GPSFix = s.gps.LastFix()
+		in.GPSClock = s.gps.ClockStatus()
+	}
+	if s.pod != nil {
+		in.Pod = s.pod.LinkStats()
+		in.PodDevices = s.pod.TelemetryDeviceNames()
+	} else {
+		in.Pod = pod.LinkStats{Enabled: false}
+	}
+	if s.ups != nil {
+		in.UPS = s.ups.Status()
+	}
+	return health.Evaluate(in)
 }
 
 // handleDevices returns one entry per discovered IIO device, with the

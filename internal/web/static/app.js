@@ -1686,9 +1686,70 @@ function openSettingsDialog() {
     document.getElementById('cfgFlush').value = cfg.flush_seconds || 5;
     const bt = document.getElementById('cfgBigText');
     if (bt) bt.checked = bigTextEnabled();
+    fillOledSettings(cfg);
     settingsDlg._cfg = cfg;
     settingsDlg.showModal();
   });
+}
+
+function fillOledSettings(cfg) {
+  const o = cfg.oled || {};
+  const en = document.getElementById('cfgOledEnabled');
+  const inv = document.getElementById('cfgOledInvert');
+  const contrast = document.getElementById('cfgOledContrast');
+  const cycleS = document.getElementById('cfgOledCycleS');
+  if (en) en.checked = !!o.enabled;
+  if (inv) inv.checked = !!o.invert;
+  if (contrast) contrast.value = o.contrast > 0 ? o.contrast : 128;
+  if (cycleS) cycleS.value = o.cycle_s > 0 ? o.cycle_s : 4;
+  renderOledCyclePicker(o);
+}
+
+function renderOledCyclePicker(oled) {
+  const root = document.getElementById('cfgOledCycle');
+  if (!root) return;
+  const selected = new Set((oled?.cycle || []).map((x) => `${x.device}\t${x.channel}`));
+  const rows = [];
+  const names = [...state.devices.keys()].sort();
+  for (const name of names) {
+    const sm = state.devices.get(name);
+    const values = sm && sm.values ? sm.values : {};
+    const keys = (window.KFDisplay && KFDisplay.sortKeys)
+      ? KFDisplay.sortKeys(name, Object.keys(values))
+      : Object.keys(values).sort();
+    for (const ch of keys) {
+      const id = `${name}\t${ch}`;
+      const lab = (window.KFDisplay && KFDisplay.channelLabel)
+        ? KFDisplay.channelLabel(name, ch)
+        : ch;
+      const checked = selected.has(id) ? ' checked' : '';
+      rows.push(
+        `<label class="cfgCheckbox"><input type="checkbox" data-oled-dev="${escapeAttr(name)}" data-oled-ch="${escapeAttr(ch)}"${checked} /> ` +
+        `${escapeHtml(name)} · ${escapeHtml(lab)}</label>`
+      );
+    }
+  }
+  root.innerHTML = rows.join('') || '<div class="dim">No live channels yet — open the sensors view, then Settings.</div>';
+}
+
+function readOledSettings(cfg) {
+  const o = Object.assign({}, cfg.oled || {});
+  const en = document.getElementById('cfgOledEnabled');
+  const inv = document.getElementById('cfgOledInvert');
+  const contrast = document.getElementById('cfgOledContrast');
+  const cycleS = document.getElementById('cfgOledCycleS');
+  if (en) o.enabled = !!en.checked;
+  if (inv) o.invert = !!inv.checked;
+  if (contrast) o.contrast = parseInt(contrast.value, 10) || 128;
+  if (cycleS) o.cycle_s = parseFloat(cycleS.value) || 4;
+  const root = document.getElementById('cfgOledCycle');
+  if (root) {
+    o.cycle = [...root.querySelectorAll('input[type="checkbox"]:checked')].map((inp) => ({
+      device: inp.dataset.oledDev,
+      channel: inp.dataset.oledCh,
+    })).filter((x) => x.device && x.channel);
+  }
+  cfg.oled = o;
 }
 
 // --- Trusted devices (AP allowlist) ---
@@ -2091,6 +2152,7 @@ function wireUiTaps() {
     cfg.flush_seconds = parseInt(document.getElementById('cfgFlush').value, 10) || 5;
     const bt = document.getElementById('cfgBigText');
     if (bt) setBigText(bt.checked);
+    readOledSettings(cfg);
     await fetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
