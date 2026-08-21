@@ -31,6 +31,7 @@ const (
 	ChBatteryP       = "battery_power_w"
 	ChBatteryCapRm   = "battery_capacity_remain_mah"
 	ChBatteryCapFull = "battery_capacity_full_mah"
+	ChBatteryDesign  = "battery_design_capacity_mah"
 	ChBatterySOC     = "battery_soc_pct"
 	ChBatteryTime    = "battery_time_remain_s"
 	ChBatteryLearned = "battery_gauge_learned"
@@ -237,6 +238,9 @@ func (r *reader) applyReading(rd wire.Reading, learned bool) {
 		}
 		r.values[ChBatteryCapRm] = float64(v.CapacityRemainMah)
 		r.values[ChBatteryCapFull] = float64(v.CapacityFullMah)
+		if v.DesignCapacityMah > 0 {
+			r.values[ChBatteryDesign] = float64(v.DesignCapacityMah)
+		}
 		r.values[ChBatterySOC] = float64(v.SocPct)
 		r.values[ChBatteryTime] = float64(v.TimeRemainS)
 	}
@@ -284,6 +288,9 @@ func (r *reader) sampleBatteryValues(v wire.BatteryReading, learned bool) (devic
 		ChBatterySOC:     float64(v.SocPct),
 		ChBatteryTime:    float64(v.TimeRemainS),
 	}
+	if v.DesignCapacityMah > 0 {
+		values[ChBatteryDesign] = float64(v.DesignCapacityMah)
+	}
 	return r.deviceNameLocked(wire.SensorBattery), values, true
 }
 
@@ -307,7 +314,7 @@ func (r *reader) batteryValuesFromStatus(voltageV float32) map[string]float64 {
 	}
 	for _, k := range []string{
 		ChBatteryI, ChBatteryP, ChBatteryLearned,
-		ChBatteryCapRm, ChBatteryCapFull, ChBatterySOC, ChBatteryTime,
+		ChBatteryCapRm, ChBatteryCapFull, ChBatteryDesign, ChBatterySOC, ChBatteryTime,
 	} {
 		if v, ok := r.values[k]; ok {
 			out[k] = v

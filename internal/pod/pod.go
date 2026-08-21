@@ -386,19 +386,22 @@ func (c *Client) onBatch(b wire.SampleBatch) {
 				}
 				designMah = raw.DesignCapacityMah
 			}
-			var learnedQmax uint16
+			var packMah uint16 = config.DefaultPodBatteryCapacityMah
 			if c.cfg != nil {
-				learnedQmax = c.cfg.Get().PodLearnedQmaxMah(designMah)
+				packMah = c.cfg.Get().PodBatteryCapacityMah()
 			}
-			learned = BatteryGaugeLearned(raw, designMah)
-			br, _ := NormalizeBatteryReading(raw, designMah, learnedQmax)
+			if packMah == 0 {
+				packMah = designMah
+			}
+			learned = BatteryGaugeLearned(raw, packMah)
+			br, _ := NormalizeBatteryReading(raw, packMah)
 			dev, values, ok = c.reader.sampleBatteryValues(br, learned)
 			rd = br
 			if ok {
 				c.noteBatteryTelemetry(br, learned)
 				c.reader.applyReading(br, learned)
 				if learned {
-					c.maybePersistLearnedQmax(designMah, br.CapacityFullMah)
+					c.maybePersistLearnedQmax(packMah, br.CapacityFullMah)
 				}
 			}
 		default:

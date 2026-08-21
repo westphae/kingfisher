@@ -80,6 +80,7 @@ const KFDisplay = (function () {
       'battery_power_w',
       'battery_capacity_remain_mah',
       'battery_capacity_full_mah',
+      'battery_design_capacity_mah',
       'battery_time_remain_s',
     ],
   };
@@ -616,6 +617,10 @@ const KFDisplay = (function () {
         label: 'Full capacity',
         fmt(v) { return `${fmtNum(v, 0)} mAh`; },
       },
+      battery_design_capacity_mah: {
+        label: 'Design capacity',
+        fmt(v) { return `${fmtNum(v, 0)} mAh`; },
+      },
       battery_time_remain_s: {
         label: 'Time remaining',
         fmt(v) {
@@ -923,7 +928,7 @@ const KFDisplay = (function () {
 
   function bq27441Footnote(values) {
     if (!values || values.battery_gauge_learned !== 0) return '';
-    return '<div class="gaugeFootnote dim">Fuel gauge not learned — SOC and remaining capacity are hidden until FullChargeCapacity matches this pack. Full capacity is shown as the last saved value (or design) so the pod does not treat a factory 1340 mAh leftover as empty.</div>';
+    return '<div class="gaugeFootnote dim">Fuel gauge not learned — SOC and remaining capacity are hidden until chip FullChargeCapacity is 70–120% of this pack. Full is the BQ27441 FullChargeCapacity register (factory leftover is ~1340 mAh), not a Pi substitute.</div>';
   }
 
   function cell(_keys, _values, key, header) {

@@ -7,19 +7,19 @@ import (
 	"github.com/westphae/kingfisher/internal/pod/wire"
 )
 
-func TestNormalizeBatteryReading_zeroFullUsesDesign(t *testing.T) {
+func TestNormalizeBatteryReading_zeroFullStaysZero(t *testing.T) {
 	r, learned := NormalizeBatteryReading(wire.BatteryReading{
 		CapacityFullMah:   0,
 		CapacityRemainMah: 0,
 		SocPct:            72,
 		CurrentA:          -0.15,
 		TimeRemainS:       -1,
-	}, 850, 0)
+	}, 850)
 	if learned {
 		t.Fatal("SOC without a matching full-capacity is unlearned")
 	}
-	if math.Abs(float64(r.CapacityFullMah-850)) > 0.01 {
-		t.Fatalf("full=%v want design 850", r.CapacityFullMah)
+	if r.CapacityFullMah != 0 {
+		t.Fatalf("full=%v want chip 0 (no Pi fallback)", r.CapacityFullMah)
 	}
 	if r.CapacityRemainMah != 0 || r.SocPct != 0 {
 		t.Fatalf("untrusted SOC/remain should be cleared: %+v", r)
@@ -32,7 +32,7 @@ func TestNormalizeBatteryReading_preservesGauge(t *testing.T) {
 		CapacityRemainMah: 610,
 		SocPct:            74,
 		TimeRemainS:       3600,
-	}, 850, 0)
+	}, 850)
 	if !learned {
 		t.Fatal("expected learned")
 	}
@@ -41,20 +41,21 @@ func TestNormalizeBatteryReading_preservesGauge(t *testing.T) {
 	}
 }
 
-func TestNormalizeBatteryReading_unlearnedUsesDesignFull(t *testing.T) {
+func TestNormalizeBatteryReading_unlearnedKeepsChipFull(t *testing.T) {
 	r, learned := NormalizeBatteryReading(wire.BatteryReading{
 		VoltageV:          4.014,
-		CapacityFullMah:   0,
-		CapacityRemainMah: 0,
-		SocPct:            0,
+		CapacityFullMah:   1340,
+		CapacityRemainMah: 900,
+		SocPct:            67,
 		CurrentA:          -0.123,
-		TimeRemainS:       0,
-	}, 2000, 1840)
+		TimeRemainS:       1000,
+		DesignCapacityMah: 2000,
+	}, 2000)
 	if learned {
 		t.Fatal("expected unlearned")
 	}
-	if math.Abs(float64(r.CapacityFullMah-1840)) > 0.01 {
-		t.Fatalf("full=%v want last-learned 1840", r.CapacityFullMah)
+	if math.Abs(float64(r.CapacityFullMah-1340)) > 0.01 {
+		t.Fatalf("full=%v want chip 1340", r.CapacityFullMah)
 	}
 	if r.CapacityRemainMah != 0 || r.SocPct != 0 || r.TimeRemainS != 0 {
 		t.Fatalf("SOC/remain/time should stay hidden: %+v", r)
@@ -82,17 +83,17 @@ func TestBatteryGaugeLearned(t *testing.T) {
 	}
 }
 
-func TestNormalizeBatteryReading_wrongFullFallsBackToDesign(t *testing.T) {
+func TestNormalizeBatteryReading_wrongFullKeepsChip(t *testing.T) {
 	r, learned := NormalizeBatteryReading(wire.BatteryReading{
 		CapacityFullMah:   1221,
 		CapacityRemainMah: 600,
 		SocPct:            50,
-	}, 850, 0)
+	}, 850)
 	if learned {
 		t.Fatal("expected unlearned when full != design")
 	}
-	if math.Abs(float64(r.CapacityFullMah-850)) > 0.01 {
-		t.Fatalf("full=%v want design 850", r.CapacityFullMah)
+	if math.Abs(float64(r.CapacityFullMah-1221)) > 0.01 {
+		t.Fatalf("full=%v want chip 1221", r.CapacityFullMah)
 	}
 	if r.SocPct != 0 || r.CapacityRemainMah != 0 {
 		t.Fatalf("untrusted SOC/remain should be cleared: %+v", r)
@@ -103,13 +104,13 @@ func TestSampleBatteryValues_unlearnedIncludesZeros(t *testing.T) {
 	r := newReader(make(chan outboundCmd, 1))
 	r.caps[wire.SensorBattery] = wire.SensorCap{ID: wire.SensorBattery}
 	_, vals, ok := r.sampleBatteryValues(wire.BatteryReading{
-		VoltageV: 4.0, CurrentA: -0.1, PowerW: -0.4, CapacityFullMah: 2000,
+		VoltageV: 4.0, CurrentA: -0.1, PowerW: -0.4, CapacityFullMah: 1340, DesignCapacityMah: 2000,
 	}, false)
 	if !ok {
 		t.Fatal("expected ok")
 	}
 	for _, k := range []string{
-		ChBatteryCapRm, ChBatteryCapFull, ChBatterySOC, ChBatteryTime, ChBatteryLearned,
+		ChBatteryCapRm, ChBatteryCapFull, ChBatterySOC, ChBatteryTime, ChBatteryLearned, ChBatteryDesign,
 	} {
 		if _, exists := vals[k]; !exists {
 			t.Fatalf("missing %s", k)
@@ -118,7 +119,10 @@ func TestSampleBatteryValues_unlearnedIncludesZeros(t *testing.T) {
 	if vals[ChBatteryLearned] != 0 || vals[ChBatterySOC] != 0 {
 		t.Fatalf("unexpected: %+v", vals)
 	}
-	if vals[ChBatteryCapFull] != 2000 {
-		t.Fatalf("full=%v want design fallback 2000", vals[ChBatteryCapFull])
+	if vals[ChBatteryCapFull] != 1340 {
+		t.Fatalf("full=%v want chip 1340", vals[ChBatteryCapFull])
+	}
+	if vals[ChBatteryDesign] != 2000 {
+		t.Fatalf("design=%v want 2000", vals[ChBatteryDesign])
 	}
 }
