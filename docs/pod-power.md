@@ -39,11 +39,12 @@ power choice.
    Hysteresis +5% SOC / +0.05 V to return to Active; charging returns
    instantly.
 3. **Protect** — voltage ≤ `protect_voltage_v` (3.50) or (only if FCC matches
-   the pack) SOC ≤ `protect_soc_pct` (5%), debounced; immediate below 3.40 V:
-   final drain + Status, then true deep sleep. Unlearned FCC is treated as
-   design/last-learned capacity — a factory 1340 mAh leftover must not SOC-trip
-   Protect on a full 2000 mAh pack. Healthy voltage (above burst + 0.05 V)
-   leaves Protect even if charging current has tapered off.
+   the configured pack) SOC ≤ `protect_soc_pct` (5%), debounced; immediate below 3.40 V:
+   final drain + Status, then true deep sleep. `gauge_trusted` compares live FCC
+   to the **configured pack**, not chip 0x3C — a factory 1340/1340 leftover must
+   not SOC-trip Protect on a 2000 mAh pack (voltage floors still apply). Healthy
+   voltage (above burst + 0.05 V) leaves Protect even if charging current has
+   tapered off.
 
 ## Wire / Pi contract
 

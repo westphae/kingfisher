@@ -47,7 +47,7 @@ ship 2.2 kΩ — cut **I2C** on one board if the bus misbehaves when daisy-chain
 
 Desk bench with [SparkFun Pro Micro ESP32-C3](https://docs.sparkfun.com/SparkFun_Pro_Micro-ESP32C3/hardware_overview/) + Qwiic cable: firmware uses **IO5/IO6** (matches SparkFun `pins_arduino.h`). A plug-in Qwiic BMP581 (SEN-20170, default **0x47**) needs no extra wiring.
 
-**Battery Babysitter (PRT-13777):** connect the Qwiic port to the same bus. Tie **VPU** to **3.3 V** (ESP `3V3`). A LiPo must be plugged into the Babysitter for the BQ27441 to respond. Pick **750** or **2000** mAh (or type a custom value) in cockpit Settings on the `bq27441` tab. The G1A data memory is RAM-only: unplugging the pack (ITPOR) forgets Design Capacity **and** learned Qmax. Firmware restores both from the last saved FullChargeCapacity for that pack (Pi `pod.battery_learned_mah`, pushed on Hello).
+**Battery Babysitter (PRT-13777):** connect the Qwiic port to the same bus. Tie **VPU** to **3.3 V** (ESP `3V3`). A LiPo must be plugged into the Babysitter for the BQ27441 to respond. Pick **750** or **2000** mAh (or type a custom value) in cockpit Settings on the `bq27441` tab. The G1A data memory is RAM-only: unplugging the pack (ITPOR) restores ROM defaults (Design Capacity 1340 mAh). Firmware rewrites **Design Capacity** and **Design Energy** only (TI/SparkFun). It does **not** write State Qmax Cell 0 (`Qmax_mAh = QmaxCell0 × DesignCap / 16384`; default QmaxCell0 is 16384, so Qmax starts at Design Capacity) or Default Design Cap (chem-ID scale). Poking learned FCC into Qmax Cell 0 left FullChargeCapacity stuck at 1340.
 
 Planned wing pod PCB may move the bus to **IO4/IO5**; update `main.rs` when that layout is fixed.
 | `IO8`        | `LED`   | Status LED (active-low, with 1 kΩ)    |
@@ -212,12 +212,18 @@ Active):
 ### BQ27441 gauge learning
 
 Design capacity (`pod.battery_capacity_mah`, 750 or 2000 typically) is a **config write** to
-the gauge (ITPOR / `SetAttr`), together with **Qmax** seeded from the last learned
-FullChargeCapacity (`pod.battery_learned_mah`). The G1A has **no flash** for these
-parameters — they live in gauge RAM, ESP32 RAM this boot, and the Pi config file.
-**Impedance Track learning** (Qmax, resistance profile) still happens during real
-charge/discharge at representative load; saving FCC just means the next power-on
-is not starting from the factory 1340 mAh defaults.
+the gauge after ITPOR or when 0x3C still shows the G1A factory 1340 mAh. Firmware patches
+State subclass 82 **Design Capacity** (offset 10) and **Design Energy** (offset 12), then
+SOFT_RESET. **Do not host-write Qmax Cell 0** (offset 0): TI’s default is 16384 Num, and
+`Qmax_mAh = QmaxCell0 × Design Capacity / 2^14`. **Do not change Default Design Cap**
+(offset 14): it is the chem-ID scale. The Pi may still Ack `QmaxCapacity` and store last FCC in
+`pod.battery_learned_mah` for the Settings readout — that value is not programmed
+into the chip.
+
+The G1A has **no flash** for these parameters. Unplugging the LiPo JST sets ITPOR.
+**Impedance Track learning** (Qmax, resistance profile) still needs a real
+charge/discharge at representative load after Design Capacity is correct. Do not
+re-enter CFGUPDATE every minute if FCC lags — that suspends gauging.
 
 **Calibration run (bench or wing, pod at normal WiFi/sensor load):**
 
@@ -230,10 +236,10 @@ is not starting from the factory 1340 mAh defaults.
 One or two such cycles is usually enough. After that, partial cycles maintain
 accuracy; repeat a full anchor cycle every few months or after long storage.
 
-**Pass criteria:** serial `bq27441 capacity programmed design=2000 qmax=1840 mAh` (data memory
-`DesignCapacity` at 0x3C plus Qmax at State offset 0); kingfisher
-`battery_gauge_learned` and `battery_capacity_full_mah` within ~±15% of design after
-Impedance Track cycles; SOC tracks voltage sensibly on the next partial cycle.
+**Pass criteria:** serial `bq27441 design 2000 mAh verified` with `0x3C=2000`; live
+`battery_capacity_full_mah` is the chip FCC (factory leftover ~1340 until IT
+resims — not a Pi last-saved substitute); `battery_gauge_learned` once FCC is
+70–120% of the configured pack; SOC tracks voltage on the next partial cycle.
 
 **Cell note:** a single deep discharge to ~3.1 V loaded is unlikely to harm the pack
 if it charges normally afterward, but it adds wear without much extra gauge benefit.
