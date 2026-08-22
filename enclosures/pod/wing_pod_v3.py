@@ -1357,17 +1357,25 @@ def build_left() -> cq.Workplane:
 
 def _build_right() -> cq.Workplane:
     body = hollow_half(1)
-    for fn, args in ((add_flange_fasteners, (1,)), (add_pitot_cradle, (1,)),
-                     (add_battery_pocket, ()), (add_electronics_wall, ()),
-                     (add_static_bay, ()), (add_tail_rim, (1,)), (add_drain, ())):
+    # Fasteners LAST.  Every step above may union material, and add_pitot_cradle
+    # unions the clamp land over exactly where the clamp screws go: cut first
+    # and the holes are simply filled back in.  Print-3 showed the boss on the
+    # seam side with no hole through the clamp at all.  Cut all holes after all
+    # material exists and the ordering cannot bite again.
+    for fn, args in ((add_pitot_cradle, (1,)), (add_battery_pocket, ()),
+                     (add_electronics_wall, ()), (add_static_bay, ()),
+                     (add_tail_rim, (1,)), (add_drain, ()),
+                     (add_flange_fasteners, (1,))):
         body = _step(body, fn, *args)
     return body
 
 
 def _build_left() -> cq.Workplane:
     body = hollow_half(-1)
-    for fn, args in ((add_flange_fasteners, (-1,)), (add_pitot_cradle, (-1,)),
-                     (add_battery_pocket, ()), (add_tail_rim, (-1,))):
+    # Same reason as the right half: the cradle's clamp land was refilling the
+    # clearance hole and counterbore, leaving only a divot on the outer face.
+    for fn, args in ((add_pitot_cradle, (-1,)), (add_battery_pocket, ()),
+                     (add_tail_rim, (-1,)), (add_flange_fasteners, (-1,))):
         body = _step(body, fn, *args)
     return body
 
@@ -1738,7 +1746,8 @@ def insert_inventory() -> list[dict]:
     """
     out: list[dict] = []
     for x, z in FLANGE_SCREWS:
-        out.append(dict(name="flange", x=x, y=0.0, z=z, access="seam"))
+        out.append(dict(name="flange", x=x, y=0.0, z=z, access="seam",
+                        through_left=True))
     for bname, b in BOARDS.items():
         for hx, hz in board_standoffs(b):
             out.append(dict(name=f"board:{bname}", x=b["x0"] + hx, y=Y_PCB,

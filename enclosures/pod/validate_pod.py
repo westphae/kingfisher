@@ -221,6 +221,7 @@ def check_geometry(r: CheckResult) -> None:
     g.check_open_bay(r, pod, left, right)
     g.check_insert_access(r, pod, right)
     g.check_part_interference(r, pod, left, right)
+    g.check_fastener_holes(r, pod, left, right)
 
     # I2 — nothing may poke outside the envelope.
     outer = pod.full_body_solid(0.0)

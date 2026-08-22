@@ -454,3 +454,49 @@ def check_part_interference(r, pod, left, right) -> None:
                        "in assembly position")
             else:
                 r.ok(f"I6 {pname} clears {hname} ({v:.1f} mm^3)")
+
+
+def check_fastener_holes(r, pod, left, right) -> None:
+    """P12 — every fastener hole must actually be open.
+
+    I7 proves a tool can REACH a pilot; this proves the pilot exists.  They are
+    different failures: the SUN clamp screws had a clear corridor and a visible
+    boss, but add_pitot_cradle unioned the clamp land over them after the holes
+    were cut, so there was no hole at all — solid PETG where the screw goes,
+    and on the cover only a divot on the outer face.  Ordering, not geometry,
+    and nothing looked wrong until the part was in hand.
+    """
+    from OCP.BRepClass3d import BRepClass3d_SolidClassifier
+    from OCP.gp import gp_Pnt
+    from OCP.TopAbs import TopAbs_IN
+
+    cr = BRepClass3d_SolidClassifier(right.val().wrapped)
+    cl = BRepClass3d_SolidClassifier(left.val().wrapped)
+    filled = []
+    for ins in pod.insert_inventory():
+        if ins["access"] == "seam":
+            # the pilot itself, in the half that holds the insert
+            probe = (ins["x"], ins["y"] + pod.INS_DEPTH * 0.5, ins["z"])
+            cr.Perform(gp_Pnt(*probe), 1e-7)
+            if cr.State() == TopAbs_IN:
+                filled.append((ins["name"], "pilot", probe))
+            if ins.get("through_left"):
+                # and the clearance hole through the cover
+                y_out = pod.section_params(ins["x"])[0]
+                probe = (ins["x"], y_out * 0.5, ins["z"])
+                cl.Perform(gp_Pnt(*probe), 1e-7)
+                if cl.State() == TopAbs_IN:
+                    filled.append((ins["name"], "cover clearance", probe))
+        else:
+            probe = (pod.OUTER_L - pod.INS_DEPTH * 0.5, ins["y"], ins["z"])
+            cr.Perform(gp_Pnt(*probe), 1e-7)
+            if cr.State() == TopAbs_IN:
+                filled.append((ins["name"], "pilot", probe))
+    if filled:
+        worst = "; ".join(f"{n} {what} at ({p[0]:.0f},{p[2]:.0f})" for n, what, p in filled[:5])
+        r.fail(f"P12 {len(filled)} fastener hole(s) filled with material: {worst}"
+               + ("" if len(filled) <= 5 else f" (+{len(filled) - 5} more)"))
+    else:
+        n = len(pod.insert_inventory())
+        r.ok(f"P12 all {n} fastener holes open (pilots, plus cover clearance "
+             "where the screw passes through)")
