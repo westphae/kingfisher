@@ -53,8 +53,26 @@ Geometry / export contracts: [`REQUIREMENTS.md`](REQUIREMENTS.md). Layout:
 
 | File | On the bed | Notes |
 |------|------------|--------|
-| `pod_right.stl` | Mating flange down, curved outer up, **45°** diagonal | Electronics half |
-| `pod_left.stl` | Same | Cover half |
+| `pod_plate.stl` | **Outer skin DOWN**, cavity up, **45°** diagonal | Board plate — the part you reprint |
+| `pod_bowl.stl` | Same | Deep half: SUN cradle, battery, aft rim |
+
+**Outer skin down, not flange down.** Flange-down puts the cavity ceiling and
+every inward-hanging feature over open air; print-3 came out packed with
+support throughout the inside. Measured on the real halves at a 45° threshold:
+
+| part | flange-down | outside-down |
+|---|---|---|
+| plate | 11782 mm² support, 2096 bed | **8399** (−29 %), **5288** bed |
+| bowl | 12337 mm² support, 2610 bed | **8666** (−30 %), **6037** bed |
+
+The flank is flat over the whole midbody, so the first layer is a large flat
+face instead of a thin flange ring. Two consequences worth knowing:
+
+- The **mating face is now the top surface**. Give it enough top layers to come
+  out flat, and check it with a straightedge before trusting the gasket (S2).
+- The **aero skin takes the bed finish**, and the brim attaches to its
+  perimeter. Print on a smooth sheet if you want a smooth outer surface, and
+  expect to dress the brim witness line near the parting line.
 | `tail_panel.stl` | Large face down | Aft service plate — the face with the counterbores goes **up** |
 | `static_bay.stl` | **Closed face down** | BMP plenum cup; tabs overhang slightly at the top |
 | `pm_tray.stl` | Large face down | Pro Micro clamp tray |

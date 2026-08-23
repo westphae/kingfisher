@@ -212,6 +212,8 @@ def check_geometry(r: CheckResult) -> None:
 
     check_print_volume(r, pod)
     check_interior(r, pod)
+    import validate_pod_v3_checks as _g
+    _g.check_board_envelopes(r, pod)
     g.check_aero(r, pod)
     g.check_flats(r, pod)
 

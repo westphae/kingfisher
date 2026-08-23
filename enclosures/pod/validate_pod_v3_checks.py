@@ -488,9 +488,11 @@ def check_fastener_holes(r, pod, left, right) -> None:
                 if cl.State() == TopAbs_IN:
                     filled.append((ins["name"], "cover clearance", probe))
         else:
+            # aft-panel pilots sit in whichever half their y lies in
             probe = (pod.OUTER_L - pod.INS_DEPTH * 0.5, ins["y"], ins["z"])
-            cr.Perform(gp_Pnt(*probe), 1e-7)
-            if cr.State() == TopAbs_IN:
+            c = cr if ins["y"] > 0 else cl
+            c.Perform(gp_Pnt(*probe), 1e-7)
+            if c.State() == TopAbs_IN:
                 filled.append((ins["name"], "pilot", probe))
     if filled:
         worst = "; ".join(f"{n} {what} at ({p[0]:.0f},{p[2]:.0f})" for n, what, p in filled[:5])
@@ -500,3 +502,60 @@ def check_fastener_holes(r, pod, left, right) -> None:
         n = len(pod.insert_inventory())
         r.ok(f"P12 all {n} fastener holes open (pilots, plus cover clearance "
              "where the screw passes through)")
+
+
+def _overlap(a, b):
+    """3-D box overlap, or None."""
+    o = [min(a[2 * i + 1], b[2 * i + 1]) - max(a[2 * i], b[2 * i]) for i in range(3)]
+    return o if all(v > 0.05 for v in o) else None
+
+
+def check_board_envelopes(r, pod) -> None:
+    """I6' — a board's CONNECTORS need room, not just its outline.
+
+    Pure arithmetic on boxes, so it runs in milliseconds and needs no solids.
+    The board model had no way to express "a cable leaves here", which is the
+    whole reason print-3 could not be wired: the MS4525's aft JST lands where
+    the Boost has to go, and the Boost's forward Qwiic compounds it.  Both
+    boards individually fitted their footprints perfectly.
+    """
+    names = list(pod.BOARDS)
+    hits = []
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            for ea in pod.board_envelope(pod.BOARDS[names[i]]):
+                for eb in pod.board_envelope(pod.BOARDS[names[j]]):
+                    o = _overlap(ea, eb)
+                    if o:
+                        hits.append((names[i], names[j], o))
+                        break
+                else:
+                    continue
+                break
+    # against the battery, and against the SUN and its cradle
+    batt = (pod.BATT_X0, pod.BATT_X0 + pod.BATT_POCKET_X,
+            pod.BATT_Y0, pod.BATT_Y0 + pod.BATT_POCKET_Y,
+            pod.BATT_Z0, pod.BATT_Z0 + pod.BATT_POCKET_Z)
+    for n in names:
+        for e in pod.board_envelope(pod.BOARDS[n]):
+            o = _overlap(e, batt)
+            if o:
+                hits.append((n, "battery", o))
+                break
+        for obs in pod.sun_obstacles():
+            done = False
+            for e in pod.board_envelope(pod.BOARDS[n]):
+                o = _overlap(e, obs)
+                if o:
+                    hits.append((n, "SUN/cradle", o))
+                    done = True
+                    break
+            if done:
+                break
+    if hits:
+        detail = "; ".join(f"{a}/{b} by {o[0]:.1f}x{o[1]:.1f}x{o[2]:.1f}" for a, b, o in hits[:5])
+        r.fail(f"I6' {len(hits)} connector-envelope clash(es): {detail}"
+               + ("" if len(hits) <= 5 else f" (+{len(hits) - 5} more)"))
+    else:
+        r.ok(f"I6' all {len(names)} board envelopes clear each other, the battery "
+             "and the SUN")

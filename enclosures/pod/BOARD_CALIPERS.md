@@ -32,8 +32,12 @@ Boards mount flat against the plate's land, in the **X–Z plane**:
   corner as the board sits in the pod.
 - **L** is the board's size along u. **W** is its size along v.
 - Edges are **fore** (u=0), **aft** (u=L), **down** (v=0), **up** (v=W).
-- `at` means the distance along that edge from the low end (from u=0 for a
-  fore/aft edge; from v=0 for an up/down edge).
+- `at` means the distance along that edge from its low end. A **fore/aft**
+  edge runs in v, so `at` is a **v** value (0…W). An **up/down** edge runs in
+  u, so `at` is a **u** value (0…L).
+  *(This was stated backwards in the version measured against on 2026-08-23.
+  The measurements used the correct reading — six connectors land exactly on
+  their edge midpoint, which confirms it — so no data is affected.)*
 
 ## How to measure
 
@@ -70,25 +74,25 @@ you report two: forward-top and rear-bottom.
 |----|-------------------------------------------------------|------------|
 | A1 | Outline **L** (along u, fore→aft)                     | 22.9       |
 | A2 | Outline **W** (along v, down→up)                      | 17.0       |
-| A3 | PCB thickness                                         |  1.6       |
-| A4 | Tallest component height, component face (−Y)         |  9.9       |
-| A5 | Tallest feature on the **back** face                  |  1.6       |
-| A6 | Which feature faces **forward** in the pod (describe) |  barbs     |
+| A3 | PCB thickness                                         | 1.6        |
+| A4 | Tallest component height, component face (−Y)         | 9.9        |
+| A5 | Tallest feature on the **back** face                  | 1.6        |
+| A6 | Which feature faces **forward** in the pod (describe) | barbs      |
 
 Mounting holes:
 
-| # | u | v | Ø |
-|---|---|---|---|
-| 1 |  2.50 | 14.50 | 3.00 |
-| 2 | 14.50 |  2.50 | 3.00 |
+| # | u     | v     | Ø    |
+|---|-------|-------|------|
+| 1 | 2.50  | 14.50 | 3.00 |
+| 2 | 20.40 | 2.50  | 3.00 |
 
 Connectors and ports:
 
-| Name             | Edge |  `at` | Body width | Body height | Cable/port room |
+| Name             | Edge | `at`  | Body width | Body height | Cable/port room |
 |------------------|------|-------|------------|-------------|-----------------|
 | pitot port       | fore | 11.00 | 3.5        | 6.5         | 7.0             |
-| static port      | fore |  5.00 | 3.5        | 3.0         | 7.0             |
-| JST (electrical) |  aft | 11.50 | 6.1        | 4.0         | 5.0             |
+| static port      | fore | 5.00  | 3.5        | 3.0         | 7.0             |
+| JST (electrical) | aft  | 11.50 | 6.1        | 4.0         | 5.0             |
 
 ## 2. SparkFun Qwiic 5V Boost
 
@@ -100,18 +104,18 @@ them fore/aft.
 |----|----------------------------------|------------|
 | B1 | Outline **L**                    | 25.25      |
 | B2 | Outline **W**                    | 25.25      |
-| B3 | PCB thickness                    |  1.60      |
-| B4 | Tallest component height         |  3.00      |
-| B5 | Tallest feature on the back face |  0.40      |
-| B6 | Which feature faces **forward**  |  JST       |
+| B3 | PCB thickness                    | 1.60       |
+| B4 | Tallest component height         | 3.00       |
+| B5 | Tallest feature on the back face | 0.40       |
+| B6 | Which feature faces **forward**  | qwiic 1    |
 
 Mounting holes:
 
-| # | u | v | Ø |
-|---|---|---|---|
-| 1 |  2.50 |  2.50 | 3.00 |
-| 2 |  2.50 | 22.75 | 3.00 |
-| 3 | 22.75 |  2.50 | 3.00 |
+| # | u     | v     | Ø    |
+|---|-------|-------|------|
+| 1 | 2.50  | 2.50  | 3.00 |
+| 2 | 2.50  | 22.75 | 3.00 |
+| 3 | 22.75 | 2.50  | 3.00 |
 | 4 | 22.75 | 22.75 | 3.00 |
 
 Connectors:
@@ -119,8 +123,8 @@ Connectors:
 | Name     | Edge | `at`  | Body width | Body height | Cable room |
 |----------|------|-------|------------|-------------|------------|
 | Qwiic 1  | fore | 12.63 | 6.00       | 3.00        | 4.00       |
-| Qwiic 2  |  aft | 12.63 | 6.00       | 3.00        | 4.00       |
-| VIN/VOUT |   up | 12.63 |            | 4.00        | 4.00       |
+| Qwiic 2  | aft  | 12.63 | 6.00       | 3.00        | 4.00       |
+| VIN/VOUT | up   | 12.63 |            | 4.00        | 4.00       |
 
 ## 3. SparkFun Pro Micro ESP32-C3
 
@@ -132,21 +136,21 @@ mounting holes, which is why it sits in `pm_tray.stl`.
 |-----|--------------------------------------------------------------|------------|
 | C1  | Outline **L**                                                | 33.51      |
 | C2  | Outline **W**                                                | 17.70      |
-| C3  | PCB thickness                                                |  0.78      |
-| C4  | Tallest component height, component face                     |  4.40      |
-| C5  | Tallest feature on the back face                             |  0.00      |
+| C3  | PCB thickness                                                | 0.78       |
+| C4  | Tallest component height, component face                     | 4.40       |
+| C5  | Tallest feature on the back face                             | 0.00       |
 | C6  | Which short end carries the **USB-C** (fore or aft)          | aft        |
-| C7  | USB-C centre position along that end (`at`, from v=0)        |  8.85      |
-| C8  | How far the USB-C **plug** protrudes past the board edge     |  1.30      |
-| C9  | Clearance needed off a long edge to solder a castellated pad |  2.00      |
-| C10 | Must Reset/Boot be reachable after assembly? (y/n)           |  n         |
+| C7  | USB-C centre position along that end (`at`, from v=0)        | 8.85       |
+| C8  | How far the USB-C **plug** protrudes past the board edge     | 1.30       |
+| C9  | Clearance needed off a long edge to solder a castellated pad | 2.00       |
+| C10 | Must Reset/Boot be reachable after assembly? (y/n)           | n          |
 
 Connectors:
 
 | Name  | Edge | `at` | Body width | Body height | Cable room |
 |-------|------|------|------------|-------------|------------|
 | USB-C | aft  | 8.85 | 9.00       | 3.20        | 30.00      |
-| Qwiic |  up  | 0.00 | 2.60       | 6.00        |  7.00      |
+| Qwiic | up   | 0.00 | 2.60       | 6.00        | 7.00       |
 
 ## 4. SparkFun Battery Babysitter (PRT-13777)
 
@@ -156,28 +160,40 @@ Assumed today: L 33.0, W 33.0, component height 8.0, four corner holes.
 |----|-------------------------------------------------------|------------|
 | D1 | Outline **L**                                         | 32.90      |
 | D2 | Outline **W**                                         | 33.09      |
-| D3 | PCB thickness                                         |  1.60      |
-| D4 | Tallest component height                              |  5.52      |
-| D5 | Tallest feature on the back face                      |  0.50      |
-| D6 | Which feature faces **forward**                       |  i2c wires |
-| D7 | Must JP12 / SYSOFF be reachable after assembly? (y/n) |  no        |
+| D3 | PCB thickness                                         | 1.60       |
+| D4 | Tallest component height                              | 5.52       |
+| D5 | Tallest feature on the back face                      | 0.50       |
+| D6 | Which feature faces **forward**                       | i2c wires  |
+| D7 | Must JP12 / SYSOFF be reachable after assembly? (y/n) | no         |
 
 Mounting holes:
 
 | # | u     | v     | Ø    |
 |---|-------|-------|------|
-| 1 |  2.60 |  2.60 | 3.29 | 3.29 0.96
-| 2 |  2.60 | 30.49 | 3.29 |
-| 3 | 30.30 |  2.60 | 3.29 |
+| 1 | 2.60  | 2.60  | 3.29 |
+| 2 | 2.60  | 30.49 | 3.29 |
+| 3 | 30.30 | 2.60  | 3.29 |
 | 4 | 30.30 | 30.49 | 3.29 |
 
 Connectors:
 
 | Name        | Edge | `at`  | Body width | Body height | Cable room |
 |-------------|------|-------|------------|-------------|------------|
-| battery JST | up   | 19.20 | 8.00       | 5.53        |  4.00      |
-| load / VOUT | fore | 16.55 | 9.20       | 3.00        |  4.00      |
-| USB-B       | aft  |  8.80 | 7.95       | 2.70        | 50.00      |
+| battery JST | up   | 19.20 | 8.00       | 5.53        | 4.00       |
+| load / VOUT | fore | 16.55 | 9.20       | 3.00        | 4.00       |
+| USB-B       | aft  | 8.80  | 7.95       | 2.70        | 50.00      |
+
+**This board has no Qwiic or VIN/VOUT connectors fitted** — only PTH holes,
+with wires soldered directly. The I2C wires are along the **fore** edge and
+stand off the **component face**, so they add to the board's inboard depth
+rather than to an edge clearance. Soldered wires bend far closer to the board
+than a connector body would, so the load/VOUT figure above is the wire exit,
+not a plug.
+
+| ID | Still to measure | Value (mm) |
+|----|------------------|------------|
+| D8 | How far the soldered I2C wires stand off the component face | |
+| D9 | How far the soldered VIN/VOUT wires stand off the component face | |
 
 ## 5. SparkFun BMP581 (Qwiic) — inside the sealed plenum
 
@@ -185,14 +201,19 @@ Assumed today: L 25.4, W 25.4, component height 8.0, four corner holes.
 **Pass-through wiring agreed: two cables, two glands**, so both connector
 positions matter — they set where the cup's sealed entries go.
 
+**Confirmed: only two holes, both on the down edge (v=2.55).** The board would
+pivot about that line, so the model adds **support nubs** at the two upper
+corners — plain posts to the same height as the standoffs, no insert, no screw.
+They stop it flexing and hold it flat; they do not fasten it.
+
 | ID | Measure                                             | Value (mm) |
 |----|-----------------------------------------------------|------------|
-| E1 | Outline **L**                                       |  25.31     |
-| E2 | Outline **W**                                       |  25.18     |
-| E3 | PCB thickness                                       |   1.54     |
-| E4 | Tallest component height                            |   3.08     |
-| E5 | Tallest feature on the back face                    |   0.00     |
-| E6 | Sensor port: how far it stands off the board        |   0.50     |
+| E1 | Outline **L**                                       | 25.31      |
+| E2 | Outline **W**                                       | 25.18      |
+| E3 | PCB thickness                                       | 1.54       |
+| E4 | Tallest component height                            | 3.08       |
+| E5 | Tallest feature on the back face                    | 0.00       |
+| E6 | Sensor port: how far it stands off the board        | 0.50       |
 | E7 | Sensor port: which face it is on (component / back) | component  |
 | E8 | Which feature faces **forward**                     | qwiic 1    |
 
@@ -200,7 +221,7 @@ Mounting holes:
 
 | # | u     | v    | Ø    |
 |---|-------|------|------|
-| 1 |  2.55 | 2.55 | 3.29 |
+| 1 | 2.55  | 2.55 | 3.29 |
 | 2 | 22.76 | 2.55 | 3.29 |
 
 Connectors:
@@ -214,14 +235,21 @@ Connectors:
 
 Assumed today: L 19.0, W 7.6, component height 8.0, two holes.
 
-| ID | Measure                          | Value (mm)  |
-|----|----------------------------------|-------------|
-| F1 | Outline **L**                    | 19.13       |
-| F2 | Outline **W**                    |  7.52       |
-| F3 | PCB thickness                    |  1.63       |
-| F4 | Tallest component height         |  3.02       |
-| F5 | Tallest feature on the back face |  0.00       |
-| F6 | Which feature faces **forward**  |  mount hole |
+**Confirmed: one hole only.** This is the magnetometer, so its orientation
+relative to the airframe is the measurement — a board free to rotate about a
+single screw is not acceptable. The model adds a **support nub** at the Qwiic
+end plus **keepers above and below** the board, capturing it in v so it cannot
+turn. Nub and keepers carry no fastener; the single screw still does the
+clamping.
+
+| ID | Measure                          | Value (mm) |
+|----|----------------------------------|------------|
+| F1 | Outline **L**                    | 19.13      |
+| F2 | Outline **W**                    | 7.52       |
+| F3 | PCB thickness                    | 1.63       |
+| F4 | Tallest component height         | 3.02       |
+| F5 | Tallest feature on the back face | 0.00       |
+| F6 | Which feature faces **forward**  | mount hole |
 
 Mounting holes:
 
