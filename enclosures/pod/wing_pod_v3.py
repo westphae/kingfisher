@@ -288,8 +288,14 @@ CUP_TAB = 3.0       # screw tab reach beyond the cup wall
 CUP_FLANGE = 2.5    # flange thickness where it seals to the land
 STATIC_COVER_T = 2.2
 STATIC_HOLE_D = 1.6
-STATIC_HOLE_ROWS = 2
-STATIC_HOLE_COLS = 5
+# 5 rows x 2 cols, not 2 x 5.  Same ten holes and the same flow area, but the
+# array is now tall and narrow instead of wide and short, so its x-centre sits
+# 18 mm further forward in the plenum.  That, plus biasing it to the forward
+# wall, is what brings the sensing station inside L3's 40-60% band; a wide
+# array simply cannot get far enough forward without hanging off the plenum.
+# The plenum is ~26 mm tall, so 5 rows at 4.5 mm pitch still clears both walls.
+STATIC_HOLE_ROWS = 5
+STATIC_HOLE_COLS = 2
 STATIC_HOLE_PITCH_X = 4.5
 STATIC_HOLE_PITCH_Z = 4.5
 
@@ -432,7 +438,15 @@ BATT_Y0 = -24.0
 BATT_Z0 = (OUTER_H - BATT_POCKET_Z) / 2
 
 # Static ports sit mid-body, where a side port reads closest to freestream.
-STATIC_PORT_X = 0.5 * (BAY_X0 + BAY_X1)
+# Biased to the FORWARD end of the plenum rather than centred in it.  L3 wants
+# the sensing station in the 40-60% band, where a side port reads closest to
+# freestream, and a centred array put it at 61%.  Where the holes sit inside a
+# sealed plenum is pneumatically irrelevant -- the plenum is one volume and the
+# BMP581 reads its pressure, not the pressure at any one hole -- so this buys
+# the band back without moving the bay, the cup, or a single board.  Kept a
+# hole-pitch clear of the plenum wall so the array stays over open volume.
+_STATIC_SPAN_X = (STATIC_HOLE_COLS - 1) * STATIC_HOLE_PITCH_X
+STATIC_PORT_X = BAY_X0 + STATIC_HOLE_PITCH_X + _STATIC_SPAN_X / 2
 STATIC_PORT_Z = BMP_Z0 + BMP581_W / 2
 
 # Flange runs from just aft of the nose fairing to just short of the base.
@@ -1745,35 +1759,40 @@ def add_tail_rim(body: cq.Workplane, side: int) -> cq.Workplane:
         .intersect(_keep_half(side))
     )
     body = _union_if_solid(body, rim)
-    if True:
-        # A boss belongs to whichever half its y lies in.  Hard-coding side>0
-        # was fine while the plate was the deep half; now the aft screws are in
-        # the bowl and four bosses were being built into the plate, where they
-        # had nothing to attach to (P1 caught them as 997 mm^3 of loose solids).
-        for cy, cz in TAIL_SCREWS:
-            if (cy > 0) != (side > 0):
-                continue
-                boss = (
-                    cq.Workplane("XY")
-                    .transformed(offset=(OUTER_L - TAIL_RIM_T, cy, cz), rotate=(0, 90, 0))
-                    .circle(BOSS_D / 2)
-                    .extrude(TAIL_RIM_T)
-                )
-                body = _union_if_solid(body, boss.intersect(full_body_solid(0.0)))
-                pilot = (
-                    cq.Workplane("XY")
-                    .transformed(offset=(OUTER_L - INS_DEPTH, cy, cz), rotate=(0, 90, 0))
-                    .circle(INS_HOLE_D / 2)
-                    .extrude(INS_DEPTH + 1.0)
-                )
-                relief = (
-                    cq.Workplane("XY")
-                    .transformed(offset=(OUTER_L - INS_DEPTH - SCREW_RELIEF_EXTRA, cy, cz),
-                                 rotate=(0, 90, 0))
-                    .circle(SCREW_RELIEF_D / 2)
-                    .extrude(INS_DEPTH + SCREW_RELIEF_EXTRA + 1.0)
-                )
-                body = body.cut(relief).cut(pilot)
+    # A boss belongs to whichever half its y lies in.  Hard-coding side>0 was
+    # fine while the plate was the deep half; now the aft screws are all in the
+    # bowl, and four bosses were being built into the plate where they had
+    # nothing to attach to (P1 caught them as 997 mm^3 of loose solids).
+    #
+    # The guard that fixed that left this whole block indented UNDER the `if`,
+    # after the `continue` -- dead code for every screw, so no boss and no
+    # pilot was built in either half and the service plate bolted into solid
+    # rim.  P12 caught it; nothing else could, because a missing hole looks
+    # exactly like a part that was never drilled.
+    for cy, cz in TAIL_SCREWS:
+        if (cy > 0) != (side > 0):
+            continue
+        boss = (
+            cq.Workplane("XY")
+            .transformed(offset=(OUTER_L - TAIL_RIM_T, cy, cz), rotate=(0, 90, 0))
+            .circle(BOSS_D / 2)
+            .extrude(TAIL_RIM_T)
+        )
+        body = _union_if_solid(body, boss.intersect(full_body_solid(0.0)))
+        pilot = (
+            cq.Workplane("XY")
+            .transformed(offset=(OUTER_L - INS_DEPTH, cy, cz), rotate=(0, 90, 0))
+            .circle(INS_HOLE_D / 2)
+            .extrude(INS_DEPTH + 1.0)
+        )
+        relief = (
+            cq.Workplane("XY")
+            .transformed(offset=(OUTER_L - INS_DEPTH - SCREW_RELIEF_EXTRA, cy, cz),
+                         rotate=(0, 90, 0))
+            .circle(SCREW_RELIEF_D / 2)
+            .extrude(INS_DEPTH + SCREW_RELIEF_EXTRA + 1.0)
+        )
+        body = body.cut(relief).cut(pilot)
     return body
 
 

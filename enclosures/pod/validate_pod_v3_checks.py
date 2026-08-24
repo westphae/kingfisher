@@ -56,7 +56,13 @@ def _openings(pod):
         x, y, z = pt
         # 1. Prandtl / SUN tip mouth
         if x < pod.NOSE_BH_X1 + 1.0:
-            if math.hypot(y, z - pod.PITOT_AXIS_Z) < pod.CRADLE_R_CLAMP + 2.5:
+            # Measured from the PITOT AXIS, not from y=0.  Same stale
+            # centreline the SUN insertion probe had: the mouth moved to
+            # y=-15 with the clamshell inversion, so a sample 5.4 mm from the
+            # real axis read as 19.9 mm from the assumed one and the mouth
+            # stopped counting as a declared opening.
+            if math.hypot(y - pod.PITOT_AXIS_Y,
+                          z - pod.PITOT_AXIS_Z) < pod.CRADLE_R_CLAMP + 2.5:
                 return True
         # 2. multi-hole static array into the isolated BMP bay
         if y > pod.RIGHT_EXTENT - 4.0:
@@ -304,37 +310,46 @@ def check_tips(r, pod, left, right) -> None:
 def check_drain(r, pod, closed) -> None:
     """L8 — the drain must be a labyrinth, not a hole.
 
-    Fire a ray straight up through the outer drain hole.  If it reaches the
-    cavity without crossing material, the baffle is missing and the 'drain' is
-    a ram-air inlet.
+    The invariant is that there is no STRAIGHT path from freestream to the
+    cavity: fire a ray up through the outer drain hole and it must run into
+    the channel roof.
+
+    This used to count ray/surface crossings and demand exactly two, on the
+    reasoning that the ray sees the roof's under- and upper- surfaces.  That
+    stopped being true once the board land grew over the drain: the roof is now
+    BACKED by land rather than by air, so the ray enters material at the roof
+    and never leaves, scoring one crossing and failing a drain that is more
+    sealed than the one the check was written for.  Classify the roof directly
+    instead -- it is the actual requirement, and it does not care what is
+    stacked above.
     """
-    from OCP.BRepIntCurveSurface import BRepIntCurveSurface_Inter
-    from OCP.gp import gp_Dir, gp_Lin, gp_Pnt
+    from OCP.BRepClass3d import BRepClass3d_SolidClassifier
+    from OCP.gp import gp_Pnt
+    from OCP.TopAbs import TopAbs_IN, TopAbs_ON
 
-    shp = closed.val().wrapped
+    cls = BRepClass3d_SolidClassifier(closed.val().wrapped)
     cy = 0.5 * (pod.DRAIN_Y0 + pod.DRAIN_Y1)
-    hits = 0
+    x = pod.DRAIN_X0 + 4.0
+    solid = 0
     for dy in (-0.5, 0.0, 0.5):
-        lin = gp_Lin(gp_Pnt(pod.DRAIN_X0 + 4.0, cy + dy, -5.0), gp_Dir(0, 0, 1))
-        inter = BRepIntCurveSurface_Inter()
-        inter.Init(shp, lin, 1e-4)
-        n = 0
-        while inter.More():
-            if 0.05 < inter.W() < 5.0 + pod.DRAIN_ROOF + 2.0:
-                n += 1
-            inter.Next()
-        hits = max(hits, n)
-    # The ray goes UP THE HOLE, so it never crosses the skin — the crossings it
-    # does see are the channel roof's under- and upper- surfaces.  Roof intact
-    # => 2 crossings; roof missing => 0, a clear shot into the cavity.  (The
-    # earlier >=3 expectation wrongly counted skin surfaces the ray misses.)
-    if hits < 2:
-        r.fail(f"L8 drain is a straight path into the cavity ({hits} crossings) — "
-               "the channel roof is missing")
+        cls.Perform(gp_Pnt(x, cy + dy, pod.DRAIN_ROOF + 0.5), 1e-7)
+        if cls.State() in (TopAbs_IN, TopAbs_ON):
+            solid += 1
+    # ...and the channel below it must still be open, or the drain drains
+    # nothing.  Both halves of the labyrinth, tested where they actually are.
+    open_ch = 0
+    for dy in (-0.5, 0.0, 0.5):
+        cls.Perform(gp_Pnt(x, cy + dy, pod.INNER_Z0 + 1.0), 1e-7)
+        if cls.State() not in (TopAbs_IN, TopAbs_ON):
+            open_ch += 1
+    if solid < 3:
+        r.fail(f"L8 no channel roof over the drain hole ({solid}/3 samples "
+               f"solid at z={pod.DRAIN_ROOF + 0.5:.1f}) — it is a ram-air inlet")
+    elif open_ch < 3:
+        r.fail(f"L8 drain channel is blocked ({open_ch}/3 samples open at "
+               f"z={pod.INNER_Z0 + 1.0:.1f}) — water cannot reach the outlet")
     else:
-        r.ok(f"L8 labyrinth drain baffled: {hits} crossings above the outer hole "
-             "(channel roof intact, no straight path to the cavity)")
-
+        r.ok(f"L8 labyrinth intact: roof over the outlet, channel open beneath")
 
 def check_open_bay(r, pod, left, right) -> None:
     """I4 — the mating face must stay OPEN for install.
@@ -393,8 +408,14 @@ def check_open_bay(r, pod, left, right) -> None:
     # Stop short of the aft locating boss and use the smallest bore radius:
     # the boss is SUPPOSED to sit inside the SUN's aft cup, and the nose
     # bulkhead bore is tighter than the barrel, so neither is interference.
+    # On PITOT_AXIS_Y, not y=0.  This was written when the seam ran down the
+    # middle and the SUN sat on it; the inversion moved the pitot to y=-15 and
+    # left the probe straddling the seam, where it clipped ordinary wall in
+    # BOTH halves and reported 221/325 mm^3 of "fouling" that is simply the
+    # pod.  A tool that models the part has to move when the part moves.
     sun = (cq.Workplane("XY")
-           .transformed(offset=(0.0, 0.0, pod.PITOT_AXIS_Z), rotate=(0, 90, 0))
+           .transformed(offset=(0.0, pod.PITOT_AXIS_Y, pod.PITOT_AXIS_Z),
+                        rotate=(0, 90, 0))
            .circle(pod.CRADLE_R_SMOOTH)
            .extrude(pod.AFT_BH_X0 - pod.SUN_RECESS_BOSS_LEN - 1.0))
     # The flange screw bosses legitimately survive inside the battery pocket —
