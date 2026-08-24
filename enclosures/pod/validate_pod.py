@@ -129,9 +129,29 @@ def check_print_volume(r: CheckResult, pod) -> None:
 
 def check_interior(r: CheckResult, pod) -> None:
     """I1/I5/I6/I8 + L1/L2/L6 — layout rules that are cheap to state as numbers."""
+    # I8 is a RESTRAINT rule, not a hole count.  The old test was
+    # len(holes) < 2, which existed to catch a board whose fasteners had been
+    # forgotten.  With the holes now measured that test is simply wrong: the
+    # MMC5983 has one hole, the BMP581 two on a single edge, and the Pro Micro
+    # none at all, and no amount of asserting will give them more.  What has
+    # to hold is that nothing can rotate or rock.
     for name, b in pod.BOARDS.items():
-        if len(b["holes"]) < 2:
-            r.fail(f"I8 {name} has fewer than 2 insert positions")
+        screws = pod.board_standoffs(b)
+        nubs = pod.board_nubs(b)
+        tray = pod.board_tray_screws(b)
+        keepers = 2 if b.get("keepers") else 0
+        if len(tray) >= 3:
+            r.ok(f"I8 {name} restrained by a {len(tray)}-screw tray")
+        elif len(screws) >= 2:
+            r.ok(f"I8 {name} restrained by {len(screws)} screws"
+                 + (f" + {len(nubs)} nubs" if nubs else ""))
+        elif len(screws) == 1 and (len(nubs) + keepers) >= 2:
+            r.ok(f"I8 {name} restrained by 1 screw + {len(nubs)} nub(s) "
+                 f"+ {keepers} keeper(s)")
+        else:
+            r.fail(f"I8 {name} is not restrained: {len(screws)} screws, "
+                   f"{len(nubs)} nubs, {keepers} keepers, {len(tray)} tray screws "
+                   "— it can rotate or rock")
     if pod.Y_PCB <= pod.Y_LAND - pod.STANDOFF_H - 0.01:
         r.fail("I5 boards are flush on the land, not on raised standoffs")
     else:
@@ -212,8 +232,8 @@ def check_geometry(r: CheckResult) -> None:
 
     check_print_volume(r, pod)
     check_interior(r, pod)
-    import validate_pod_v3_checks as _g
-    _g.check_board_envelopes(r, pod)
+    g.check_no_invented_holes(r, pod)
+    g.check_board_envelopes(r, pod)
     g.check_aero(r, pod)
     g.check_flats(r, pod)
 

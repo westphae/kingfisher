@@ -281,10 +281,19 @@ def check_flats(r, pod) -> None:
 
 
 def check_tips(r, pod, left, right) -> None:
-    """A8/A9 — both halves reach both tips; no dropped tail scrap."""
+    """A8/A9 — the OML reaches both tips; no dropped tail scrap.
+
+    Both halves used to have to reach the nose, because the seam ran down the
+    middle and the nose mouth was split between them.  Inverting the clamshell
+    ended that: the SUN, its cradle and the whole nose now live in the bowl,
+    and the plate is a flat lid over the board bay that legitimately starts
+    aft of the nose cone.  Requiring the plate to reach x=0 would demand
+    material where the design deliberately has none.  The tail is different --
+    both halves still run out to the tail rim, so A9 stays on both.
+    """
     for name, half in (("pod_left", left), ("pod_right", right)):
         bb = half.val().BoundingBox()
-        if bb.xmin > 1.0:
+        if bb.xmin > 1.0 and name == "pod_left":
             r.fail(f"A8 {name} does not reach the nose (xmin={bb.xmin:.1f})")
         elif bb.xmax < pod.OUTER_L - 0.5:
             r.fail(f"A9 {name} tail tip not fused (xmax={bb.xmax:.1f})")
@@ -337,8 +346,12 @@ def check_open_bay(r, pod, left, right) -> None:
     validator: watertight, single solid, nothing outside the envelope, no leak.
 
     Two tests, both physical:
-      * the left cover's bay must be empty — it is a cover, so between the SUN
-        aft bulkhead and the tail rim it may contain nothing at all;
+      * the BOWL's bay must be empty aft of the SUN bulkhead.  This survived
+        the clamshell inversion unchanged in substance but not in reason: it
+        used to hold because pod_left was a bare cover, and it now holds
+        because every board moved to the plate.  What hangs into the bowl
+        there is the battery pocket (a recess, not material), the drain, and
+        the boards' own components past the seam — no printed material.
       * the battery and the SUN must have clear insertion volume in BOTH
         halves, since they go in through the seam before close-up.
     """
@@ -366,11 +379,11 @@ def check_open_bay(r, pod, left, right) -> None:
                     blocked.append((x, y, z))
     if blocked:
         bx, by, bz = blocked[0]
-        r.fail(f"I4 pod_left bay obstructed at {len(blocked)} sample points, e.g. "
-               f"({bx:.0f},{by:.1f},{bz:.0f}) — the cover must be hollow between "
+        r.fail(f"I4 bowl bay obstructed at {len(blocked)} sample points, e.g. "
+               f"({bx:.0f},{by:.1f},{bz:.0f}) — the bowl must be hollow between "
                "the SUN aft bulkhead and the tail rim")
     else:
-        r.ok("I4 pod_left bay clear for install")
+        r.ok("I4 bowl bay clear for install")
 
     import cadquery as cq
     batt = (cq.Workplane("XY")
@@ -542,6 +555,27 @@ def check_board_envelopes(r, pod) -> None:
             if o:
                 hits.append((n, "battery", o))
                 break
+        # the MS4525 is one END of the hose run, so it is exempt from it
+        for obs in (pod.hose_obstacles() if n != "MS4525" else ()):
+            done = False
+            for e in pod.board_envelope(pod.BOARDS[n]):
+                o = _overlap(e, obs)
+                if o:
+                    hits.append((n, "pitot/static hose run", o))
+                    done = True
+                    break
+            if done:
+                break
+        for obs in (pod.cup_obstacles() if n != "BMP581" else ()):
+            done = False
+            for e in pod.board_envelope(pod.BOARDS[n]):
+                o = _overlap(e, obs)
+                if o:
+                    hits.append((n, "static bay", o))
+                    done = True
+                    break
+            if done:
+                break
         for obs in pod.sun_obstacles():
             done = False
             for e in pod.board_envelope(pod.BOARDS[n]):
@@ -557,5 +591,37 @@ def check_board_envelopes(r, pod) -> None:
         r.fail(f"I6' {len(hits)} connector-envelope clash(es): {detail}"
                + ("" if len(hits) <= 5 else f" (+{len(hits) - 5} more)"))
     else:
-        r.ok(f"I6' all {len(names)} board envelopes clear each other, the battery "
-             "and the SUN")
+        r.ok(f"I6' all {len(names)} board envelopes clear each other, the battery, "
+             "the SUN/cradle, the static bay and the hose run")
+
+
+def check_no_invented_holes(r, pod) -> None:
+    """I9 — every printed post traces to a measured feature.
+
+    v2's wall-mount rework generated four corner standoffs for every board
+    regardless of what the board had, which is how the MS4525 got two posts
+    supporting nothing and the Pro Micro got four it has no holes for.  A post
+    is legitimate only if it is a measured hole (screwed, or demoted to a nub
+    because a heat-set iron cannot reach it) or a nub/keeper the caliper sheet
+    explicitly calls for.
+    """
+    bad = []
+    for n, b in pod.BOARDS.items():
+        measured = {tuple(h) for h in b["holes"]}
+        declared = {tuple(h) for h in b.get("nubs", [])}
+        for u, v in pod.board_standoffs(b):
+            if (u, v) not in measured:
+                bad.append(f"{n} screw at ({u},{v}) is not a measured hole")
+        for u, v in pod.board_nubs(b):
+            if (u, v) not in measured | declared:
+                bad.append(f"{n} nub at ({u},{v}) is neither measured nor declared")
+        for u, v in pod.board_standoffs(b):
+            if not pod._insert_reachable(b, v):
+                bad.append(f"{n} insert at z={b['z0'] + v:.1f} is outside the "
+                           f"reach band {pod.INSERT_Z_MIN:.1f}..{pod.INSERT_Z_MAX:.1f}")
+    if bad:
+        r.fail("I9 " + "; ".join(bad[:5]))
+    else:
+        n_s = sum(len(pod.board_standoffs(b)) for b in pod.BOARDS.values())
+        n_n = sum(len(pod.board_nubs(b)) for b in pod.BOARDS.values())
+        r.ok(f"I9 {n_s} inserts + {n_n} nubs, all traced to measured features")
