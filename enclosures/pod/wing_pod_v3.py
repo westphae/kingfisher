@@ -118,7 +118,10 @@ TAIL_LEN = OUTER_L - MID_END_X
 # rim 2.9 mm across the seam into the bowl's flange rail, which is what I6
 # caught as pm_tray fouling both halves.
 PM_TRAY_T = 2.2                                    # floor thickness
-PM_TRAY_RIM = 1.5                                  # pocket wall, over a 0.78 PCB
+PM_TRAY_RIM = 2.3                                  # pocket wall over a 0.78 PCB
+# 2.3, not 1.5: at 1.5 the rim stood only 0.72 mm proud of the component face,
+# which is a chamfer, not a pocket.  2.3 leaves 1.5 mm of lip to actually
+# capture the board edge.
 
 MIN_CORNER_R = 0.80
 # Section corner radii.  BOTTOM_EDGE_R is section-native (A7) — there is no
@@ -411,7 +414,10 @@ COL_B_X0 = AFT_BH_X1 + BOOST_CONN_FORE + BOARD_GAP  # Pro Micro low + Boost high
 # 9.0, not the 8.5 that just barely clears: at 8.5 the tray outline misses the
 # rail by 0.10 mm, which is a number, not a clearance.  0.6 mm survives a
 # first-layer squish.
-PM_X0, PM_Z0 = COL_B_X0 - 2.0, 9.0
+# z lifted 0.5 with the deeper rim, which grows the tray outline downward by
+# the same amount: the outline still has to clear the plate's bottom flange
+# rail at z=6.5.
+PM_X0, PM_Z0 = COL_B_X0 - 2.0, 9.8
 BOOST_X0, BOOST_Z0 = COL_B_X0, 32.0                # upper holes -> nubs
 COL_B_W = max(BOOST_L, PM_L)
 
@@ -935,7 +941,12 @@ BOARD_PLACEMENT: dict[str, dict] = {
     "MS4525":   dict(x0=MS_X0, z0=MS_Z0),
     "MAG":      dict(x0=MAG_X0, z0=MAG_Z0),
     "BOOST":    dict(x0=BOOST_X0, z0=BOOST_Z0),
-    "PROMICRO": dict(x0=PM_X0, z0=PM_Z0),
+    # y=3.5 (the outboard limit, Y_LAND - STANDOFF_H) rather than the default
+    # 2.5.  The tray hangs a floor outboard of the board and a rim inboard of
+    # it, so it needs the depth: at 2.5 the rim came within 0.20 mm of the
+    # seam.  Out here it clears by 1.2 mm, and the components' inboard reach
+    # drops to -1.68, which also clears the SUN's aft bulkhead top at -1.84.
+    "PROMICRO": dict(x0=PM_X0, z0=PM_Z0, y=3.5),
     "BABY":     dict(x0=BABY_X0, z0=BABY_Z0),
     "BMP581":   dict(x0=BMP_X0, z0=BMP_Z0),
 }
@@ -1069,8 +1080,13 @@ def board_envelope(b: dict, service: bool = False) -> list[tuple[float, ...]]:
 def board_keepout(b: dict) -> tuple[float, float, float, float, float, float]:
     """3-D keepout (I6): PCB plus everything hanging off it, in world coords."""
     y = board_y(b)
+    # b["pcb"], not the global PCB_T.  Every board's thickness was measured;
+    # using a 1.6 default modelled the Pro Micro's 0.78 mm board as twice its
+    # thickness and charged it 0.8 mm of inboard depth it does not use -- on
+    # the one board where depth is tightest, because its tray adds a floor
+    # outboard and a rim inboard.
     return (b["x0"], b["x0"] + b["L"],
-            y - PCB_T - b["comp"], y + 1.0,
+            y - b.get("pcb", PCB_T) - b["comp"], y + 1.0,
             b["z0"], b["z0"] + b["W"])
 
 
@@ -1989,9 +2005,13 @@ def build_pm_tray() -> cq.Workplane:
                          b["z0"] + usb["at"] - usb["w"] / 2 - 1.0,
                          rim + 2.0, rim + 2.0, usb["w"] + 2.0))
 
-    # window so the Pro Micro's underside parts clear the tray floor
-    body = body.cut(_box(b["x0"] + 4.0, base_y - 1.0, b["z0"] + 3.0,
-                         b["L"] - 8.0, t + 2.0, b["W"] - 6.0))
+    # NO window.  There used to be a 25.5 x 11.7 cut through the floor of a
+    # 33.5 x 17.7 board, "so the Pro Micro's underside parts clear the tray" --
+    # but the measured back-face height is 0.00, so there are no underside
+    # parts and the window only removed the support the board sits on.  It let
+    # the board rock, and it read as an invitation to push the ESP32 and its
+    # antenna through, which is the one thing the tray must not ask for.  The
+    # floor is solid: the board lies flat on it, back face down.
 
     # Fixing ears + their clearance holes.  These are the tray's screws, not
     # the board's -- the board has none.
