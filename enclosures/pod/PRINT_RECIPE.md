@@ -1,7 +1,7 @@
 # Wing pod v3 — AnkerMake print recipe
 
 Slicer settings for `pod_left.stl`, `pod_right.stl`, `tail_panel.stl`,
-`static_bay.stl`, and `pm_tray.stl` on an **AnkerMake M5C** in **PETG**. STLs do not carry support or
+`static_bay.stl`, `pm_tray.stl`, and `sun_clamp.stl` on an **AnkerMake M5C** in **PETG**. STLs do not carry support or
 slice settings — use this recipe in AnkerMake Studio (or PrusaSlicer with an
 M5C profile).
 
@@ -76,6 +76,7 @@ face instead of a thin flange ring. Two consequences worth knowing:
 | `tail_panel.stl` | Large face down | Aft service plate — the face with the counterbores goes **up** |
 | `static_bay.stl` | **Closed face down** | BMP plenum cup; tabs overhang slightly at the top |
 | `pm_tray.stl` | Large face down | Pro Micro clamp tray |
+| `sun_clamp.stl` | **Split face down** | Cap that closes the SUN saddle; the bore half-cylinder faces up |
 
 Print one half at a time if the diagonal + skirt crowds the bed. The SUN-B
 adapter is purchased metal — not printed.
@@ -88,6 +89,7 @@ adapter is purchased metal — not printed.
 | `tail_panel` | **Off** | Flat plate |
 | `static_bay` | **Off** | Shallow cup, tabs are a short overhang |
 | `pm_tray` | **Off** | Flat tray |
+| `sun_clamp` | **Off** | Half-bore in the up face, so it self-supports |
 
 Suggested support settings (tune after first preview):
 

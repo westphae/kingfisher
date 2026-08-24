@@ -31,7 +31,10 @@ Boards mount flat against the plate's land, in the **X–Z plane**:
 - **u** runs fore → aft; **v** runs down → up. Origin is the **forward-bottom**
   corner as the board sits in the pod.
 - **L** is the board's size along u. **W** is its size along v.
-- Edges are **fore** (u=0), **aft** (u=L), **down** (v=0), **up** (v=W).
+- Edges are **fore** (u=0), **aft** (u=L), **down** (v=0), **up** (v=W), and
+  **face** — wires soldered straight off the component side, leaving in −Y.
+  A `face` run costs the board depth rather than reaching into a neighbour's
+  area, which is why the Boost's VIN/VOUT is cheap and its Qwiic pair is not.
 - `at` means the distance along that edge from its low end. A **fore/aft**
   edge runs in v, so `at` is a **v** value (0…W). An **up/down** edge runs in
   u, so `at` is a **u** value (0…L).
@@ -61,6 +64,7 @@ Boards mount flat against the plate's land, in the **X–Z plane**:
 | component height      | inboard keepout depth, and how deep in Y the board can sit         |
 | back-face height      | whether the board sits flat on the standoffs                       |
 | connector edge + `at` | where the cable leaves, so the envelope grows there                |
+| edge = `face`         | wires leaving perpendicular to the PCB: costs Y depth, not X/Z area |
 | cable room            | clear space reserved beyond that edge                              |
 
 ---
@@ -124,7 +128,7 @@ Connectors:
 |----------|------|-------|------------|-------------|------------|
 | Qwiic 1  | fore | 12.63 | 6.00       | 3.00        | 4.00       |
 | Qwiic 2  | aft  | 12.63 | 6.00       | 3.00        | 4.00       |
-| VIN/VOUT | up   | 12.63 |            | 4.00        | 4.00       |
+| VIN/VOUT | face | 12.63 |            | 4.00        | 4.00       |
 
 ## 3. SparkFun Pro Micro ESP32-C3
 
@@ -181,7 +185,11 @@ Connectors:
 |-------------|------|-------|------------|-------------|------------|
 | battery JST | up   | 19.20 | 8.00       | 5.53        | 4.00       |
 | load / VOUT | fore | 16.55 | 9.20       | 3.00        | 4.00       |
-| USB-B       | aft  | 8.80  | 7.95       | 2.70        | 50.00      |
+| USB-B       | aft  | 8.80  | 7.95       | 2.70        | 25.00      |
+
+The 25 mm on USB-B is the revised figure: 50 was generous headroom for a
+stiff pigtail, and you confirmed the cable can be bent slightly around whatever
+is in the way. It is what buys the Babysitter its place in the aft column.
 
 **This board has no Qwiic or VIN/VOUT connectors fitted** — only PTH holes,
 with wires soldered directly. The I2C wires are along the **fore** edge and
@@ -268,6 +276,9 @@ Connectors:
 ## Status
 
 - [x] Measured (date: 2026-08-23)
-- [ ] `BOARD_SPECS` populated; every unmeasured value still marked assumed
-- [ ] `validate_pod.py` green with **I6′** (connector envelopes) and **I9**
-      (no invented holes)
+- [x] `BOARD_SPECS` populated from these tables
+- [x] **I6′** green — every board envelope clears its neighbours, the battery,
+      the SUN and its cradle, and the static bay
+- [ ] D8 / D9 (Babysitter soldered-wire standoff heights) still open; the
+      model currently charges the VIN/VOUT run 4 mm of Y depth
+- [ ] **I9** (no invented holes)

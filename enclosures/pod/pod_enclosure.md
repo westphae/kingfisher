@@ -98,10 +98,39 @@ rejects the job. The `.step` files carry the same print orientation as the
 
    | Column | x | Lower row | Upper row |
    |---|---|---|---|
-   | A | 44 → 67 | MS4525 (z 4) | MMC5983 (z 26) |
-   | B | 71 → 104 | Qwiic Boost (z 4) | Pro Micro on `pm_tray` (z 33.5) |
-   | C | 108 → 140 | isolated static bay cup: BMP581 (z 16) | |
-   | D | 144 → 177 | Battery Babysitter (z 12) | |
+   | A | 44 → 67 | MMC5983 (z 8.5) | MS4525 (z 32) |
+   | B | 86 → 120 | Pro Micro on `pm_tray` (z 6.6) | Qwiic Boost (z 32) |
+   | C | 127 → 160 | isolated static bay cup: BMP581 (z 17.8) | |
+   | D | 167 → 200 | Battery Babysitter (z 12) | |
+
+   Re-packed for print-4 against measured **envelopes** rather than outlines
+   (I6′), which moved almost every board:
+
+   - **Column A swapped rows.** The MS4525 is the only board deep enough in Y
+     to foul the SUN's brass, so it goes *above* the barrel; the MMC5983 is
+     short enough to tuck under it.
+   - **Column B starts at 86, not 71.** The SUN's aft shoulder bulkhead is a
+     full-height plate at x 79.0…82.5 — `_cradle_plate` boxes it over the whole
+     height because its Y band never reaches the outer wall, so top and bottom
+     skin are its only attachment. Nothing may straddle it, and no board is
+     shallow enough in Y to pass over it: the shallowest, the Pro Micro, clears
+     its top by 0.2 mm, which is not a clearance worth designing to.
+   - **Column B also swapped rows.** The Boost's upper mounting pair lands
+     above the top flange rail, outside the insert-reach band, so those two
+     become nubs (I9) and the board is free to sit high; the Pro Micro cannot,
+     because its tray rim hangs 3.6 mm below the board.
+   - **Columns C and D moved aft** to clear the Pro Micro tray's forward ear
+     and, in D's case, because the Babysitter's USB-B pigtail reserve came down
+     from 50 mm to 25 — you confirmed the cable will bend around what is in the
+     way. At 25 the Babysitter's envelope ends at x 225.3 against a tail rim at
+     227; at 50 it did not fit the pod at all.
+
+   About **40 cm³ of the bowl is now reserved for the pitot/static tubing**,
+   boxed as the hull of the SUN's barbs and the MS4525's fore ports inflated by
+   3 × tube OD for the bend. Nothing modelled that space before, so it read as
+   free and would have been packed; silicone of this size will not turn inside
+   about 3 OD, and a kinked static line reads as a pressure error rather than
+   as a fit problem.
 
    Battery slab **68.5 × 5.9 × 49.3, laid down**, on the seam at x 85 → 155.5,
    measured 2026-08-18 ([`BATTERY_CALIPERS.md`](BATTERY_CALIPERS.md)), leads on
@@ -119,12 +148,46 @@ foam/RTV gasket. Integral walls plus a service window could not do both jobs —
 the window has to pass a heat-set iron yet leave a sealing frame, and at a
 25.4 mm board it did neither.
 
-The **Pro Micro tray** (`pm_tray.stl`) sits over the four standoffs at
-x 70.9…103.9, z 33.5…51.3, directly above the Qwiic Boost. Its base lands on
-the standoff tops at y=28 and it bolts down with four M2.5; the retaining rim
-runs in −Y so the board drops in from the open mating face.
+The **Pro Micro tray** (`pm_tray.stl`) sits below the Qwiic Boost at
+x 81.5…126.6, z 3.0…31.6. The retaining rim runs in −Y so the board drops in
+from the open mating face. Rebuilt for print-4:
+
+- **Outer size is the board plus 2 × (clearance + rim).** It used to be built
+  to the board's own outline with a rim on all four edges, so the rim ate
+  *into* the footprint and a 33.5 × 17.7 board had a 29.8 × 14.6 pocket to drop
+  into. It could not.
+- **The long edges are open**, held by corner clips instead of rims: SparkFun
+  document castellated pads along both, and they have to stay solderable.
+- **The aft rim is notched for the USB-C**, so the board can be reflashed.
+- **Three fixings, not four** — and they belong to the tray, because the board
+  has no holes at all. Two on a forward ear plus one on the upper edge at
+  mid-length: two in a line would still let the tray pivot about that line, and
+  the obvious third position, an aft ear, puts a post at x 127.0, which is
+  exactly the static bay's forward wall.
+
+The **static bay cup** now has **two glands, in its fore and aft walls**, facing
+the BMP581's two Qwiic connectors. The single gland it had before was in the
+cup's *top* wall, where the board has no connector — nothing could ever have
+used it. Two glands is twice the leak path of one and is worth revisiting if the
+static readings look suspect, but it is the only arrangement the board allows
+without a jumper.
 
 ## Pitot mount (ESA SUN-B)
+
+**The cradle is split, and `sun_clamp.stl` is the cap.** Inverting the
+clamshell moved the whole cradle into the bowl, and with it a problem nothing
+checked: the bores are full circles, so the bowl wrapped the barrel through
+360° and the SUN was captured. It could not drop in laterally, and it could not
+slide in from the nose either — the barbs stand up off the barrel and the nose
+bulkhead sits forward of the barb bay, so they had nothing to pass through. The
+cradle is now cut open toward the seam over x 3.8…82.5, leaving a saddle; the
+cap is exactly the material that cut removed, so cap and saddle share the bore
+they came from and the brass is gripped on its own features rather than on a
+printed guess. Four M2.5 hold it down — fore and aft on the two shoulder
+bulkheads, either side of the bore in Z. The obvious geometry, ears at
+z = axis ± (R_outer + 4), does not work: the lower ear lands at z = 6.8 against
+an insert-reach band that starts at 10.5.
+
 
 Calipers: [`SUN_B_CALIPERS.md`](SUN_B_CALIPERS.md).
 
