@@ -103,6 +103,24 @@ NOSE_LEN = 52.0
 MID_END_X = 165.0
 TAIL_LEN = OUTER_L - MID_END_X
 
+# Smallest corner arc any inset section may have.  The section topology is
+# fixed at 4 lines + 4 arcs so a corner can never go sharp, and the old 0.30
+# floor made the inner TOP corners degenerate: the top radii are 1.2, so at
+# inset=WALL they clamped to 0.30 and the loft grew a row of 19.6 x 0.30 x
+# 0.30 mm ribbon faces along the cavity's top-flank corner.  Those tessellate
+# to degenerate triangles at some angular tolerances and not others -- 0.06
+# and 0.09 came out watertight, 0.07, 0.08 and 0.12 did not -- so the export
+# was passing or failing on luck.  A larger floor only ever ADDS material at
+# an interior fillet, so it cannot thin a wall.
+# Pro Micro tray stack.  The floor sits OUTBOARD of the board (the board's
+# back face rests on its inboard side) and the rim reaches inboard to form the
+# pocket.  Getting this backwards -- floor inboard at board_y - t -- hung the
+# rim 2.9 mm across the seam into the bowl's flange rail, which is what I6
+# caught as pm_tray fouling both halves.
+PM_TRAY_T = 2.2                                    # floor thickness
+PM_TRAY_RIM = 1.5                                  # pocket wall, over a 0.78 PCB
+
+MIN_CORNER_R = 0.80
 # Section corner radii.  BOTTOM_EDGE_R is section-native (A7) — there is no
 # post-hoc fillet to fail.  The top edge may be square (A6); a small radius
 # keeps OCCT away from zero-length arcs and prints better than a knife edge.
@@ -141,11 +159,26 @@ FLANGE_W = 6.0        # mating-face flange depth into each half (±Y)
 FLANGE_RAIL = 4.0     # perimeter rail on the open mating face (I4)
 GASKET_W = 1.6
 GASKET_D = 0.9
-SHELL_SCREW_INSET = 3.0
+# 3.3, not 3.0.  At 3.0 the flange screw boss is EXACTLY tangent to the rail
+# it is unioned into: boss top = 3.0 + BOSS_D/2 = 6.5, and the rail's top face
+# is INNER_Z0 + FLANGE_RAIL = 6.5.  Mirrored at the top rail.  A tangent union
+# touches along a line instead of crossing it, so the mesher subdivides the
+# shared corner differently on each side and leaves a T-junction -- four
+# odd-parity edges at y=-6.0, z=6.5 that made pod_left.stl non-watertight at
+# some angular tolerances and not others.  0.3 mm of overlap makes it
+# transversal.  Do not re-derive this from FLANGE_RAIL without re-checking the
+# insert-reach band, which is defined from the same constant.
+SHELL_SCREW_INSET = 3.3
 FLANGE_SCREW_PITCH = 28.0
 # (x, z) of the two screws that clamp the SUN's threaded band.  z sits above
 # the bore: below it the section bottom runs out before the land does.
-CLAMP_SCREWS = [(13.0, 34.0), (27.0, 34.0)]
+CLAMP_SCREWS = [(13.0, 35.0), (27.0, 35.0)]
+# sun_clamp fasteners (x, z), entered along +Y from the seam into inserts in
+# the bowl.  Two Z stations either side of the bore, two X stations fore and
+# aft, so the cap cannot rock or slide.  Both Z values sit inside the
+# insert-reach band; the obvious choice of ears at z = axis +/- (R_OUTER + 4)
+# does not, because the lower ear lands at z=6.8 against a band starting at
+# 10.5.
 
 # --- M2.5 heat-set inserts (same family as pi5_aviation_case.py) ------------
 INSERT_OD = 3.47
@@ -316,6 +349,21 @@ NOSE_BH_X0 = NOSE_BH_X1 - SHOULDER_BH_T
 # Aft bulkhead carries the locating boss into the Ø6.03 x 7.06 blind cup.
 AFT_BH_X0 = SUN_AFT_X
 AFT_BH_X1 = AFT_BH_X0 + SHOULDER_BH_T
+
+# Four sun_clamp fasteners: fore/aft on the two shoulder bulkheads, and either
+# side of the bore in Z at just outside the clamp bore plus a screw radius.
+_SCS_DZ = CRADLE_R_CLAMP + 2.5
+# The fore pair goes on the MID bulkhead, not the nose one: at x 3.8 the
+# section is barely wider than the bore, so the opener is clipped away there
+# and there is no cap to bolt down.
+MID_BH_X = 0.5 * (SUN_BARREL_X0 + SUN_BARB_X[0]) - 1.75
+_SCS_MID_X = MID_BH_X + 1.75
+SUN_CLAMP_SCREWS = [
+    (_SCS_MID_X, PITOT_AXIS_Z - _SCS_DZ),
+    (_SCS_MID_X, PITOT_AXIS_Z + _SCS_DZ),
+    (0.5 * (AFT_BH_X0 + AFT_BH_X1), PITOT_AXIS_Z - _SCS_DZ),
+    (0.5 * (AFT_BH_X0 + AFT_BH_X1), PITOT_AXIS_Z + _SCS_DZ),
+]
 SUN_RECESS_BOSS_LEN = SUN_RECESS_DEPTH - SUN_RECESS_BOSS_AXIAL_CLR
 SUN_RECESS_BOSS_D = SUN_RECESS_D - SUN_RECESS_BOSS_DIA_CLR
 
@@ -329,6 +377,8 @@ INSERT_Z_MIN = INNER_Z0 + FLANGE_RAIL + BOARD_POST_D / 2 + 0.5
 INSERT_Z_MAX = INNER_Z1 - FLANGE_RAIL - BOARD_POST_D / 2 - 0.5
 LOW_ROW_Z0 = 8.5                                   # -> lower pilots at z=11.0
 
+BOOST_CONN_FORE = 4.0                              # Boost fore-Qwiic cable room
+
 COL_A_X0 = 44.0                                    # MS4525 low + MMC5983 high
 # MS4525 goes ABOVE the SUN barrel (which reaches z=29.9 out to x=79);
 # its 12 mm of inboard components will not clear the brass otherwise.
@@ -336,12 +386,30 @@ MS_X0, MS_Z0 = COL_A_X0, 32.0
 MAG_X0, MAG_Z0 = COL_A_X0, LOW_ROW_Z0   # short enough to tuck under the SUN
 COL_A_W = max(MS_L, MAG_L)
 
-COL_B_X0 = COL_A_X0 + COL_A_W + BOARD_GAP          # Boost low + Pro Micro high
-BOOST_X0, BOOST_Z0 = COL_B_X0, LOW_ROW_Z0
-PM_X0, PM_Z0 = COL_B_X0, 35.5
+# Column B has to start aft of the SUN's aft bulkhead, which is a full-height
+# plate at x 79.0..82.5: nothing may straddle it, and no board is shallow
+# enough in Y to pass over it (the shallowest, the Pro Micro, clears its top by
+# 0.2 mm -- not a clearance worth designing to).  The Boost's fore Qwiic needs
+# 4 mm ahead of the board, hence 87 rather than 83.
+COL_B_X0 = AFT_BH_X1 + BOOST_CONN_FORE + BOARD_GAP  # Pro Micro low + Boost high
+# The tray's rim and clips hang below the board, so the Pro Micro cannot sit
+# at the interior floor even though it has no inserts of its own to place: the
+# tray outline has to clear the bottom flange rail, whose top is at
+# INNER_Z0 + FLANGE_RAIL = 6.5.
+#
+# Shifted 2 mm FORWARD of the column so the up-edge Qwiic column (x0 +/- 1.3)
+# lands entirely ahead of the Boost.  That is what buys the height: while the
+# Qwiic overlapped the Boost in x, the Boost's z floor was pinned to the Pro
+# Micro's cable clearance and the column was 0.35 mm short of fitting.  Clear
+# of it in x, only the board's own top edge constrains the Boost.
+# 9.0, not the 8.5 that just barely clears: at 8.5 the tray outline misses the
+# rail by 0.10 mm, which is a number, not a clearance.  0.6 mm survives a
+# first-layer squish.
+PM_X0, PM_Z0 = COL_B_X0 - 2.0, 9.0
+BOOST_X0, BOOST_Z0 = COL_B_X0, 32.0                # upper holes -> nubs
 COL_B_W = max(BOOST_L, PM_L)
 
-CUP_X0 = COL_B_X0 + COL_B_W + BOARD_GAP            # isolated static bay (cup)
+CUP_X0 = 127.0                                     # isolated static bay (cup)
 # Centred in the band the flange rails leave: with a 29.4 mm plenum and
 # 3 mm tabs the cup spans 39.4 mm against 40.0 mm of usable height, so
 # there is exactly one place it can sit.
@@ -354,7 +422,7 @@ CUP_Z0, CUP_Z1 = BAY_Z0 - CUP_WALL, BAY_Z1 + CUP_WALL
 CUP_Y0 = Y_PCB - PCB_T - COMP_H - 3.0              # inner face, 1 mm over the BMP
 BAY_Y0 = CUP_Y0
 
-BABY_X0, BABY_Z0 = CUP_X1 + BOARD_GAP, 12.0        # Babysitter, full column
+BABY_X0, BABY_Z0 = CUP_X1 + BOARD_GAP + 3.0, 12.0  # Babysitter, full column
 
 # Battery: laid down on the seam, clear of the SUN aft bulkhead.
 BATT_X0 = AFT_BH_X1 + 2.5
@@ -437,7 +505,7 @@ def section_wire(x: float, inset: float = 0.0) -> cq.Wire:
     """
     y0, y1, z0, z1, r00, r10, r11, r01 = section_params(x)
     y0, y1, z0, z1 = y0 + inset, y1 - inset, z0 + inset, z1 - inset
-    rs = [max(r - inset, 0.30) for r in (r00, r10, r11, r01)]
+    rs = [max(r - inset, MIN_CORNER_R) for r in (r00, r10, r11, r01)]
     w, h = y1 - y0, z1 - z0
     # Never let opposing radii consume a whole side: keep MIN_FLAT of straight.
     sc = min(
@@ -602,7 +670,7 @@ def skin_y_plus(x: float, z: float, inset: float = 0.0) -> float:
     rather than an ellipse approximation."""
     y0, y1, z0, z1, r00, r10, r11, r01 = section_params(x)
     y0, y1, z0, z1 = y0 + inset, y1 - inset, z0 + inset, z1 - inset
-    r10, r11 = max(r10 - inset, 0.30), max(r11 - inset, 0.30)
+    r10, r11 = max(r10 - inset, MIN_CORNER_R), max(r11 - inset, MIN_CORNER_R)
     if z <= z0 or z >= z1:
         return y1 - min(r10, r11)
     if z < z0 + r10:
@@ -618,7 +686,7 @@ def skin_y_minus(x: float, z: float, inset: float = 0.0) -> float:
     boattail draws it inboard rather than assuming a constant LEFT_EXTENT."""
     y0, y1, z0, z1, r00, r10, r11, r01 = section_params(x)
     y0, z0, z1 = y0 + inset, z0 + inset, z1 - inset
-    r00, r01 = max(r00 - inset, 0.30), max(r01 - inset, 0.30)
+    r00, r01 = max(r00 - inset, MIN_CORNER_R), max(r01 - inset, MIN_CORNER_R)
     if z <= z0 or z >= z1:
         return y0 + min(r00, r01)
     if z < z0 + r00:
@@ -726,11 +794,18 @@ def sun_obstacles() -> list[tuple[float, float, float, float, float, float]]:
     has to clear what is actually there at its own x and z.
     """
     out = []
-    for x0, x1, r in ((NOSE_BH_X0, NOSE_BH_X1, CRADLE_LAND_Y),
-                      (SUN_THREAD_X0, SUN_THREAD_X1, CLAMP_R_OUTER),
-                      (AFT_BH_X0, AFT_BH_X1, CRADLE_LAND_Y)):
-        out.append((x0, x1, PITOT_AXIS_Y - r, PITOT_AXIS_Y + r,
-                    PITOT_AXIS_Z - r, PITOT_AXIS_Z + r))
+    # The clamp land IS local to the bore.  The two shoulder bulkheads are not:
+    # _cradle_plate boxes them over the FULL height and clips to the envelope,
+    # because their only attachment is the top and bottom skin -- their Y band
+    # never reaches the outer wall.  Modelling them as discs understated them
+    # and let boards be placed straddling a solid plate.
+    out.append((SUN_THREAD_X0, SUN_THREAD_X1,
+                PITOT_AXIS_Y - CLAMP_R_OUTER, PITOT_AXIS_Y + CLAMP_R_OUTER,
+                PITOT_AXIS_Z - CLAMP_R_OUTER, PITOT_AXIS_Z + CLAMP_R_OUTER))
+    for x0, x1 in ((NOSE_BH_X0, NOSE_BH_X1), (AFT_BH_X0, AFT_BH_X1)):
+        out.append((x0, x1,
+                    PITOT_AXIS_Y - CRADLE_LAND_Y, PITOT_AXIS_Y + CRADLE_LAND_Y,
+                    0.0, OUTER_H))
     # the brass itself, everywhere along its length
     br = SUN_BARREL_OD / 2 + 1.0
     out.append((SUN_TIP_X0, AFT_BH_X1, PITOT_AXIS_Y - br, PITOT_AXIS_Y + br,
@@ -793,12 +868,24 @@ BOARD_SPECS: dict[str, dict] = {
         holes=[(2.50, 2.50), (2.50, 22.75), (22.75, 2.50), (22.75, 22.75)],
         conns=[dict(name="qwiic1", edge="fore", at=12.63, w=6.0, need=4.0),
                dict(name="qwiic2", edge="aft", at=12.63, w=6.0, need=4.0),
-               dict(name="vin_vout", edge="up", at=12.63, w=6.0, need=4.0)],
+               # soldered wires, not a connector: they leave straight off the
+               # component face, so they cost Y depth rather than X/Z area
+               dict(name="vin_vout", edge="face", at=12.63, w=6.0, need=4.0)],
     ),
     "PROMICRO": dict(
         L=33.51, W=17.70, pcb=0.78, comp=4.4, back=0.0, tray=True,
         holes=[],                       # castellated edges, no mounting holes
         edge_clear=2.0,                 # room to solder a castellated pad
+        # The board has no holes, so the TRAY carries the fasteners.  Three,
+        # not two: two in a line still lets the tray pivot about that line.
+        # Two on a fore ear, one on the upper edge at mid-length.  The obvious
+        # third position -- an aft ear -- puts a post at x=127.0, which is
+        # exactly the static bay's forward wall, and it would foul the USB-C
+        # besides.  All three clear the insert-reach band, which starts at
+        # z=10.5 while the Pro Micro has to sit at z=3.
+        # The third ear is at the AFT end, not mid-length: at mid-length its
+        # 4 mm boss sits under the Boost, and the Boost cannot move up.
+        tray_screws=[(-4.0, 8.0), (-4.0, 16.0), (33.51, 21.0)],
         conns=[dict(name="usb_c", edge="aft", at=8.85, w=9.0, need=30.0,
                     when="service"),
                dict(name="qwiic", edge="up", at=0.00, w=2.6, need=7.0)],
@@ -808,7 +895,7 @@ BOARD_SPECS: dict[str, dict] = {
         holes=[(2.60, 2.60), (2.60, 30.49), (30.30, 2.60), (30.30, 30.49)],
         conns=[dict(name="batt_jst", edge="up", at=19.20, w=8.0, need=4.0),
                dict(name="load", edge="fore", at=16.55, w=9.2, need=4.0),
-               dict(name="usb_b", edge="aft", at=8.80, w=7.95, need=50.0)],
+               dict(name="usb_b", edge="aft", at=8.80, w=7.95, need=25.0)],
     ),
     "BMP581": dict(
         L=25.31, W=25.18, pcb=1.54, comp=3.08, back=0.0, bay=True,
@@ -850,15 +937,79 @@ def board_y(b: dict) -> float:
     return b.get("y") or Y_PCB
 
 
+def _insert_reachable(b: dict, v: float) -> bool:
+    return INSERT_Z_MIN <= b["z0"] + v <= INSERT_Z_MAX
+
+
 def board_standoffs(b: dict) -> list[tuple[float, float]]:
-    """Screw positions — the board's REAL holes, nothing invented (I9)."""
-    return list(b["holes"])
+    """Screw positions — the board's REAL holes, nothing invented (I9), and
+    only the ones a heat-set iron can actually reach (I7).
+
+    A measured hole whose world Z lands outside the insert band is not a
+    fastener: the flange rail is inside the iron's corridor there.  Rather
+    than let that veto a placement, demote it to a nub.  The Boost lands this
+    way — lower pair screwed, upper pair supported — which is the same
+    two-screws-plus-two-nubs pattern the BMP581 already uses."""
+    return [(u, v) for (u, v) in b["holes"] if _insert_reachable(b, v)]
+
+
+def board_tray_screws(b: dict) -> list[tuple[float, float]]:
+    """Fixings belonging to a board's TRAY rather than to the board itself."""
+    return list(b.get("tray_screws", []))
 
 
 def board_nubs(b: dict) -> list[tuple[float, float]]:
     """Support-only posts: no insert, no screw.  For boards with too few holes
-    to sit flat — the BMP581 has both holes on one edge, the MMC5983 has one."""
-    return list(b.get("nubs", []))
+    to sit flat — the BMP581 has both holes on one edge, the MMC5983 has one —
+    plus any measured hole board_standoffs had to demote."""
+    return list(b.get("nubs", [])) + [
+        (u, v) for (u, v) in b["holes"] if not _insert_reachable(b, v)
+    ]
+
+
+def hose_obstacles() -> list[tuple[float, float, float, float, float, float]]:
+    """The pitot/static tubing run, as (x0,x1,y0,y1,z0,z1).
+
+    Two silicone lines leave the SUN's barbs pointing up out of the barrel and
+    turn aft into the MS4525's fore ports.  That run is the single largest
+    consumer of bowl volume and nothing in the model reserved it, so the space
+    read as free and would have been packed.  Boxed as the hull of both
+    endpoints, inflated by a tube diameter each way for the bend: silicone of
+    this size will not turn inside about 3x OD, and a kinked static line reads
+    as a pressure error, not as a fit problem.
+    """
+    bend = 3.0 * MS_TUBE_OD
+    ms = BOARDS["MS4525"]
+    port_z = [ms["z0"] + c["at"] for c in ms["conns"] if c["edge"] == "fore"]
+    # both barbs matter, and the aft one sits BEHIND the MS4525's aft edge, so
+    # its line has to come forward past the board.  Capped at the aft bulkhead,
+    # which the hose cannot pass through in any case.
+    x0 = min(SUN_BARB_X) - SUN_BARB_STEM_OD / 2 - bend
+    x1 = min(max(max(SUN_BARB_X) + SUN_BARB_STEM_OD / 2 + bend, ms["x0"]),
+             AFT_BH_X0)
+    z0 = min(min(port_z), PITOT_AXIS_Z) - MS_TUBE_OD
+    z1 = max(max(port_z), SUN_BARB_TIP_Z) + bend
+    y0 = min(PITOT_AXIS_Y, board_y(ms) - PCB_T - ms["comp"]) - MS_TUBE_OD
+    y1 = board_y(ms)
+    return [(x0, x1, y0, y1, z0, z1)]
+
+
+def cup_obstacles() -> list[tuple[float, float, float, float, float, float]]:
+    """The static bay's four walls, as (x0,x1,y0,y1,z0,z1).
+
+    The cup was never an I6' obstacle, which is how the Pro Micro came to end
+    3 mm inside its forward wall while the envelope check reported clear: the
+    only thing the check knew about the bay was the BMP581 sitting in its
+    plenum, and that board is correctly clear of everything.  Its interior is
+    excluded, so the BMP581 itself must be skipped by the caller.
+    """
+    y0, y1 = CUP_Y0, Y_LAND
+    return [
+        (CUP_X0, BAY_X0, y0, y1, CUP_Z0, CUP_Z1),   # fore wall
+        (BAY_X1, CUP_X1, y0, y1, CUP_Z0, CUP_Z1),   # aft wall
+        (CUP_X0, CUP_X1, y0, y1, CUP_Z0, BAY_Z0),   # lower wall
+        (CUP_X0, CUP_X1, y0, y1, BAY_Z1, CUP_Z1),   # upper wall
+    ]
 
 
 def board_keepout(b: dict) -> tuple[float, float, float, float, float, float]:
@@ -888,6 +1039,12 @@ def board_envelope(b: dict, service: bool = False) -> list[tuple[float, ...]]:
             cz = b["z0"] + c["at"]
             ex0, ex1 = ((x0 - need, x0) if c["edge"] == "fore" else (x1, x1 + need))
             out.append((ex0, ex1, y0, y1, cz - half, cz + half))
+        elif c["edge"] == "face":
+            # Wires leaving perpendicular to the PCB.  These deepen the board in
+            # Y instead of reaching into a neighbour's X/Z, which is cheap now
+            # that the measured component heights turned out far lower than the
+            # model assumed.  Conservatively taken over the whole footprint.
+            out.append((x0, x1, y0 - need, y0, z0, z1))
         else:
             cx = b["x0"] + c["at"]
             ez0, ez1 = ((z0 - need, z0) if c["edge"] == "down" else (z1, z1 + need))
@@ -897,8 +1054,9 @@ def board_envelope(b: dict, service: bool = False) -> list[tuple[float, ...]]:
 
 def board_keepout(b: dict) -> tuple[float, float, float, float, float, float]:
     """3-D keepout (I6): PCB plus everything hanging off it, in world coords."""
+    y = board_y(b)
     return (b["x0"], b["x0"] + b["L"],
-            Y_PCB - PCB_T - b["comp"], Y_PCB + 1.0,
+            y - PCB_T - b["comp"], y + 1.0,
             b["z0"], b["z0"] + b["W"])
 
 
@@ -1200,6 +1358,93 @@ def _sun_bore(x0: float, x1: float, r: float) -> cq.Workplane:
     )
 
 
+def sun_opener() -> cq.Workplane:
+    """The volume removed from the cradle so the SUN can be dropped in.
+
+    Inverting the clamshell moved the whole cradle into the bowl, and with it
+    a problem nothing checked: the bores are full circles, so the bowl wraps
+    the barrel through 360 degrees and the SUN is captured.  It cannot drop in
+    laterally, and it cannot slide in from the nose either -- the barbs stand
+    up off the barrel and the nose bulkhead sits forward of the barb bay, so
+    they have nothing to pass through.  Cutting the cradle open toward the
+    seam turns it into a saddle; build_sun_clamp is the cap that closes it.
+    """
+    r = CLAMP_R_OUTER + 1.0
+    # Stop at the top of the cradle land.  Running it up to the seam would cut
+    # shell and board land that is not cradle at all -- the plates only ever
+    # existed between the axis and PITOT_AXIS_Y + CRADLE_LAND_Y.
+    # Overshoot the cradle plates' top face by 2 mm.  Stopping exactly on it
+    # -- PITOT_AXIS_Y + CRADLE_LAND_Y is both the opener's top and the plates'
+    # top -- is a coplanar cut, and it tessellated to the same kind of
+    # zero-area sliver the board land produced at z=58.5.  The overshoot costs
+    # nothing: above the plates there is only cavity, and the whole opener is
+    # clipped to full_body_solid(WALL) so it can never reach the skin.
+    box = _box(NOSE_BH_X0, PITOT_AXIS_Y, PITOT_AXIS_Z - r,
+               AFT_BH_X1 - NOSE_BH_X0, CRADLE_LAND_Y + 2.0, 2 * r)
+    # Clip to the CAVITY.  The nose bulkhead sits at x 3.8, where the section
+    # is barely wider than the bore, so an unclipped opener walks straight out
+    # through the nose skin -- the same way the barb bay once left 0.32 mm of
+    # PETG and printed as a slit across the seam.  Nothing is lost by it: the
+    # SUN's tip goes through the nose mouth first and the barrel then drops
+    # into the saddle behind it.
+    # Protect the two nose flange bosses, exactly as add_battery_pocket does.
+    # They stand at z 31.5..38.5, above the thread bore's top at 30.1, so the
+    # SUN still drops in underneath them and the barbs start ~13 mm further
+    # aft.  Without this the opener eats the cradle land they are standing on
+    # and each boss comes away as a loose 59 mm^3 block -- attached to nothing,
+    # in a half that is otherwise a perfect single solid.
+    for sx, sz in CLAMP_SCREWS:
+        box = box.cut(_cyl_y(sx, sz, PITOT_AXIS_Y - 1.0,
+                             CRADLE_LAND_Y + 3.0, BOSS_D / 2))
+    return box.intersect(full_body_solid(WALL))
+
+
+def build_sun_clamp() -> cq.Workplane:
+    """The cap that closes the SUN saddle (sun_clamp.stl).
+
+    Exactly the material add_pitot_cradle would have built above the pitot
+    axis, so cap and saddle share the bore they were cut from and the brass is
+    gripped on its own features rather than on a printed guess.
+    """
+    # Built from the CRADLE PLATES, not from a solid envelope.  Taking the
+    # complement of a solid body gave a continuous half-tube spanning the whole
+    # cradle, which is not what add_pitot_cradle removes -- between the
+    # bulkheads the barrel runs through open cavity -- and that extra material
+    # sat squarely in the pitot/static hose corridor.
+    plates = None
+    for x0, xl in ((NOSE_BH_X0, SHOULDER_BH_T),
+                   (SUN_THREAD_X0, SUN_THREAD_X1 - SUN_THREAD_X0),
+                   (MID_BH_X, 3.5),
+                   (AFT_BH_X0, SHOULDER_BH_T)):
+        pl = _cradle_plate(x0, xl, -1)
+        if not _real_solid(pl):
+            continue
+        plates = pl if plates is None else plates.union(pl)
+    # the clamp land is thicker than the plate around the threaded band
+    clamp_base = _cradle_plate(SUN_THREAD_X0, SUN_THREAD_X1 - SUN_THREAD_X0, -1)
+    if _real_solid(clamp_base):
+        extra = clamp_base.intersect(
+            _sun_bore(SUN_THREAD_X0 - 1.0, SUN_THREAD_X1 + 1.0, CLAMP_R_OUTER))
+        if _real_solid(extra):
+            plates = extra if plates is None else plates.union(extra)
+    # Spine tying the four bulkhead caps into ONE part.  Without it the cap
+    # comes out as three loose slivers, which is three things to align around
+    # a piece of brass while holding the pod open.  It threads through the one
+    # band that is free: below the barrel (which starts at z 17.1) and below
+    # the hose corridor (which starts at z 20.5), outboard of the MMC5983.
+    spine = _box(NOSE_BH_X0, PITOT_AXIS_Y, 11.0,
+                 AFT_BH_X1 - NOSE_BH_X0, CRADLE_LAND_Y - 6.5 + 1.0, 5.5)
+    plates = plates.union(spine)
+    body = plates.intersect(sun_opener())
+    body = body.cut(_sun_bore(-1.0, NOSE_BH_X1, CRADLE_R_SMOOTH))
+    body = body.cut(_sun_bore(NOSE_BH_X1, SUN_THREAD_X1, CRADLE_R_CLAMP))
+    body = body.cut(_sun_bore(SUN_THREAD_X1, AFT_BH_X0, CRADLE_R_BARREL))
+    for x, z in SUN_CLAMP_SCREWS:
+        body = body.cut(_cyl_y(x, z, PITOT_AXIS_Y - 1.0,
+                               CRADLE_LAND_Y + 2.0, LID_SCREW_D / 2))
+    return body
+
+
 def add_pitot_cradle(body: cq.Workplane, side: int) -> cq.Workplane:
     """Split L/R cradle on the SUN's own features — no saddle, no tubes-in-tube.
 
@@ -1223,8 +1468,7 @@ def add_pitot_cradle(body: cq.Workplane, side: int) -> cq.Workplane:
     # angle gets past it.  The SUN is already held by the nose bulkhead, a
     # 25 mm clamp on the thread, this bulkhead and the aft bulkhead + boss;
     # the free span it leaves is 46 mm of Ø11.71 brass.
-    mid_bh_x = 0.5 * (SUN_BARREL_X0 + SUN_BARB_X[0]) - 1.75
-    body = _union_if_solid(body, _cradle_plate(mid_bh_x, 3.5, side))
+    body = _union_if_solid(body, _cradle_plate(MID_BH_X, 3.5, side))
     body = _union_if_solid(body, _cradle_plate(AFT_BH_X0, SHOULDER_BH_T, side))
 
     # Bores, forward to aft.  Mouth lip is NOSE_LIP_WALL of PETG (P7).
@@ -1252,6 +1496,19 @@ def add_pitot_cradle(body: cq.Workplane, side: int) -> cq.Workplane:
     # too long held the SUN off its stops, so >=2.5 mm of the cup stays unused.
     boss = _sun_bore(AFT_BH_X0 - SUN_RECESS_BOSS_LEN, AFT_BH_X0, SUN_RECESS_BOSS_D / 2)
     body = _union_if_solid(body, boss.intersect(_keep_half(side)))
+    return body
+
+
+def open_sun_saddle(body: cq.Workplane) -> cq.Workplane:
+    """Cut the cradle open toward the seam and pilot the cap's fasteners."""
+    body = body.cut(sun_opener())
+    for x, z in SUN_CLAMP_SCREWS:
+        # Heat-set pilot entered from the split plane, running into the
+        # saddle.  Not insert_stack_cuts: that enters from the seam, which
+        # would put the insert up in the board land rather than in the
+        # shoulder the cap actually lands on.
+        body = body.cut(_cyl_y(x, z, PITOT_AXIS_Y - INSERT_LEN - 1.5,
+                               INSERT_LEN + 1.5, INSERT_OD / 2))
     return body
 
 
@@ -1300,18 +1557,49 @@ def add_electronics_wall(body: cq.Workplane) -> cq.Workplane:
     print-1 showed an iron cannot reach the bottom of a well."""
     xs = [b["x0"] for b in BOARDS.values()] + [b["x0"] + b["L"] for b in BOARDS.values()]
     zs = [b["z0"] for b in BOARDS.values()] + [b["z0"] + b["W"] for b in BOARDS.values()]
-    land = _box(min(xs) - 4.0, Y_LAND, max(min(zs) - 4.0, INNER_Z0),
+    # Keep the land clear of the inner skin PLANES by half a millimetre.  The
+    # clamp used to be INNER_Z0 / INNER_Z1 exactly, which was invisible until
+    # the print-4 re-pack pushed a board high enough for the clamp to bite:
+    # the land's top face then landed precisely on the inner skin at z=58.5
+    # and tessellated to a zero-area sliver, five boundary edges wide, in an
+    # otherwise perfect single solid.  A coplanar face is not a modelling
+    # error the solid kernel will complain about -- only the mesh shows it.
+    lz0 = max(min(zs) - 4.0, INNER_Z0 + 0.5)
+    lz1 = min(max(zs) + 4.0, INNER_Z1 - 0.5)
+    land = _box(min(xs) - 4.0, Y_LAND, lz0,
                 (max(xs) + 4.0) - (min(xs) - 4.0), WALL_LAND_T + 6.0,
-                min(max(zs) + 4.0, INNER_Z1) - max(min(zs) - 4.0, INNER_Z0))
+                lz1 - lz0)
     body = _union_if_solid(body, land.intersect(full_body_solid(0.0)))
 
     for b in BOARDS.values():
-        for hx, hz in board_standoffs(b):
+        y = board_y(b)
+        # Screwed standoffs and support-only nubs are the same post; only the
+        # nub has no insert bored into it (I8).
+        for hx, hz in board_standoffs(b) + board_nubs(b):
             x, z = b["x0"] + hx, b["z0"] + hz
-            post = _cyl_y(x, z, Y_PCB, Y_LAND + 3.0 - Y_PCB, BOARD_POST_D / 2)
+            post = _cyl_y(x, z, y, Y_LAND + 3.0 - y, BOARD_POST_D / 2)
             body = _union_if_solid(body, post.intersect(full_body_solid(0.0)))
+        # A tray screw lands on the tray's ear, which sits one floor thickness
+        # outboard of the board — start its post there or the ear and the post
+        # fight for the same space.
+        for hx, hz in board_tray_screws(b):
+            x, z = b["x0"] + hx, b["z0"] + hz
+            y_t = y + PM_TRAY_T
+            post = _cyl_y(x, z, y_t, Y_LAND + 3.0 - y_t, BOARD_POST_D / 2)
+            body = _union_if_solid(body, post.intersect(full_body_solid(0.0)))
+        # Keepers: posts flanking the board in Z at its far end.  The MMC5983
+        # has a single hole and is the magnetometer, so a board free to swing
+        # about that screw is a heading error, not a rattle.  They rise past
+        # the PCB's back face so the edge is trapped between them.
+        if b.get("keepers"):
+            ky = y - PCB_T - 0.5
+            kx = b["x0"] + b["L"] - BOARD_POST_D / 2 - 0.5
+            for kz in (b["z0"] - BOARD_POST_D / 2 - 0.3,
+                       b["z0"] + b["W"] + BOARD_POST_D / 2 + 0.3):
+                post = _cyl_y(kx, kz, ky, Y_LAND + 3.0 - ky, BOARD_POST_D / 2)
+                body = _union_if_solid(body, post.intersect(full_body_solid(0.0)))
     for b in BOARDS.values():
-        for hx, hz in board_standoffs(b):
+        for hx, hz in board_standoffs(b) + board_tray_screws(b):
             body = insert_stack_cuts(body, b["x0"] + hx, b["z0"] + hz)
     return body
 
@@ -1569,7 +1857,8 @@ def _build_left() -> cq.Workplane:
     # Same reason as the right half: the cradle's clamp land was refilling the
     # clearance hole and counterbore, leaving only a divot on the outer face.
     for fn, args in ((add_pitot_cradle, (-1,)), (add_battery_pocket, ()),
-                     (add_tail_rim, (-1,)), (add_flange_fasteners, (-1,))):
+                     (add_tail_rim, (-1,)), (add_flange_fasteners, (-1,)),
+                     (open_sun_saddle, ())):
         body = _step(body, fn, *args)
     return body
 
@@ -1619,9 +1908,19 @@ def build_static_bay_cup() -> cq.Workplane:
                                CUP_FLANGE + 2.0, LID_SCREW_D / 2))
         body = body.cut(_cyl_y(cx, cz, Y_LAND - CUP_FLANGE - 0.1,
                                LID_CB_DEPTH + 0.1, LID_CB_D / 2))
-    # Qwiic gland so the I2C tail leaves the sealed plenum.
-    body = body.cut(_box(0.5 * (BAY_X0 + BAY_X1) - 3.0, CUP_Y0 - 1.0,
-                         BAY_Z1 - 4.0, 6.0, CUP_WALL + 2.0, 4.0))
+    # Qwiic glands so the I2C tails leave the sealed plenum.  There used to be
+    # ONE, in the cup's top wall, which nothing could ever have used: the
+    # BMP581's two Qwiic connectors are on its fore and aft edges, so a cable
+    # leaving upward does not exist.  Two glands is twice the leak path of one
+    # -- worth revisiting if the static readings look suspect -- but it is the
+    # only arrangement the board's connectors allow without a jumper.
+    bmp = BOARDS["BMP581"]
+    for c in bmp["conns"]:
+        cz = bmp["z0"] + c["at"]
+        gw, gh = c["w"] + 1.5, 4.5
+        gx0 = (CUP_X0 - 1.0) if c["edge"] == "fore" else (BAY_X1 - 1.0)
+        body = body.cut(_box(gx0, CUP_Y0 - 1.0, cz - gw / 2,
+                             CUP_WALL + 2.0, gh + 1.0, gw))
     return body
 
 
@@ -1633,20 +1932,54 @@ def build_pm_tray() -> cq.Workplane:
     tray from the open mating face.  It used to run +Y, straight into the wall
     land it is bolted against, which retained nothing and fouled the land by
     1 mm.
+
+    Rebuilt for print-4.  The old tray was built to the board's own outline
+    with a rim on all four edges, so the rim ate INTO the footprint: a 33.5 x
+    17.7 board had a 29.8 x 14.6 pocket to drop into, and it could not.  Now
+    the outer size is the board plus 2 x (clearance + rim), so the pocket is
+    the board.  Two further changes come from what SparkFun actually document:
+    both long edges carry castellated pads that have to stay solderable, so
+    the rim runs only on the short ends and the long edges are held by corner
+    clips instead; and the USB-C on the aft end must stay reachable for
+    reflashing, so the aft rim is notched for it.
     """
     b = BOARDS["PROMICRO"]
-    t, rim = 2.2, 3.2
-    base_y = Y_PCB - t
-    body = _box(b["x0"], base_y, b["z0"], b["L"], t, b["W"])
-    for dx, dz, sx, sz in ((0.0, 0.0, b["L"], 1.6), (0.0, b["W"] - 1.6, b["L"], 1.6),
-                           (0.0, 0.0, 1.6, b["W"]), (b["L"] - 1.6, 0.0, 1.6, b["W"])):
-        body = body.union(_box(b["x0"] + dx, base_y - rim, b["z0"] + dz, sx, rim, sz))
-    # window so the Pro Micro's underside parts and its USB tail clear the tray
+    t, rim, clr = PM_TRAY_T, PM_TRAY_RIM, 0.4
+    ear = 4.0                              # how far a fixing ear reaches out
+    base_y = board_y(b)                    # floor outboard; rim reaches inboard
+    ox0, oz0 = b["x0"] - (clr + rim), b["z0"] - (clr + rim)
+    oL, oW = b["L"] + 2 * (clr + rim), b["W"] + 2 * (clr + rim)
+
+    body = _box(ox0, base_y, oz0, oL, t, oW)
+
+    # Short-end rims only.  The long edges stay open for the castellated pads.
+    for dx in (0.0, oL - rim):
+        body = body.union(_box(ox0 + dx, base_y - rim, oz0, rim, rim, oW))
+
+    # Corner clips: short tabs that hook over the board's corners in Z, which
+    # is what the missing long rims used to do.
+    clip = 5.0
+    for cx in (b["x0"], b["x0"] + b["L"] - clip):
+        for cz in (b["z0"] - clr - rim, b["z0"] + b["W"] + clr):
+            body = body.union(_box(cx, base_y - rim, cz, clip, rim, rim))
+
+    # USB-C notch in the aft rim: the connector is at v=8.85, 9.0 wide, and has
+    # to be reachable with the pod closed-up-but-plate-off for reflashing.
+    usb = next(c for c in b["conns"] if c["name"] == "usb_c")
+    body = body.cut(_box(ox0 + oL - rim - 1.0, base_y - rim - 1.0,
+                         b["z0"] + usb["at"] - usb["w"] / 2 - 1.0,
+                         rim + 2.0, rim + 2.0, usb["w"] + 2.0))
+
+    # window so the Pro Micro's underside parts clear the tray floor
     body = body.cut(_box(b["x0"] + 4.0, base_y - 1.0, b["z0"] + 3.0,
                          b["L"] - 8.0, t + 2.0, b["W"] - 6.0))
-    for hx, hz in board_standoffs(b):
-        body = body.cut(_cyl_y(b["x0"] + hx, b["z0"] + hz, base_y - rim - 1.0,
-                               t + rim + 2.0, LID_SCREW_D / 2))
+
+    # Fixing ears + their clearance holes.  These are the tray's screws, not
+    # the board's -- the board has none.
+    for hx, hz in board_tray_screws(b):
+        x, z = b["x0"] + hx, b["z0"] + hz
+        body = body.union(_cyl_y(x, z, base_y, t, ear))
+        body = body.cut(_cyl_y(x, z, base_y - 1.0, t + 2.0, LID_SCREW_D / 2))
     return body
 
 
@@ -1891,12 +2224,14 @@ def main() -> None:
     panel = build_tail_panel()
     cup = build_static_bay_cup()
     tray = build_pm_tray()
+    clamp = build_sun_clamp()
 
     export_part(for_print_half(right, 1), "pod_right")
     export_part(for_print_half(left, -1), "pod_left")
     for name, part, axis in (("tail_panel", panel, "x"),
                              ("static_bay", cup, "y"),
-                             ("pm_tray", tray, "y")):
+                             ("pm_tray", tray, "y"),
+                             ("sun_clamp", clamp, "y")):
         flat = flat_for_print(part, axis)
         export_part(flat, name)
         check_print_bb(flat, name)
@@ -2002,7 +2337,8 @@ def assembly_parts() -> list[tuple[str, cq.Workplane]]:
     pointed at the wall land it bolts against and overlapped it by 1 mm, which
     no check could see because the tray is not part of either half.
     """
-    return [("pm_tray", build_pm_tray()),
+    return [("sun_clamp", build_sun_clamp()),
+            ("pm_tray", build_pm_tray()),
             ("static_bay", build_static_bay_cup()),
             ("tail_panel", build_tail_panel())]
 
@@ -2033,7 +2369,7 @@ for _i in insert_inventory():
 def _section_polyline(x: float, inset: float = 0.0, n: int = 24) -> list[tuple[float, float]]:
     y0, y1, z0, z1, r00, r10, r11, r01 = section_params(x)
     y0, y1, z0, z1 = y0 + inset, y1 - inset, z0 + inset, z1 - inset
-    rs = [max(r - inset, 0.30) for r in (r00, r10, r11, r01)]
+    rs = [max(r - inset, MIN_CORNER_R) for r in (r00, r10, r11, r01)]
     w, h = y1 - y0, z1 - z0
     sc = min(1.0,
              (w - MIN_FLAT) / max(rs[0] + rs[1], 1e-9),
