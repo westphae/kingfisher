@@ -117,11 +117,15 @@ TAIL_LEN = OUTER_L - MID_END_X
 # pocket.  Getting this backwards -- floor inboard at board_y - t -- hung the
 # rim 2.9 mm across the seam into the bowl's flange rail, which is what I6
 # caught as pm_tray fouling both halves.
-PM_TRAY_T = 2.2                                    # floor thickness
-PM_TRAY_RIM = 2.3                                  # pocket wall over a 0.78 PCB
+
 # 2.3, not 1.5: at 1.5 the rim stood only 0.72 mm proud of the component face,
 # which is a chamfer, not a pocket.  2.3 leaves 1.5 mm of lip to actually
 # capture the board edge.
+
+# MMC5983 keeper rails: how tightly the magnetometer is held against rotation.
+KEEPER_CLR = 0.15      # per side, board edge to rail
+KEEPER_W = 2.0         # rail thickness
+KEEPER_END_CLR = 2.0   # rail stops short of the board ends
 
 MIN_CORNER_R = 0.80
 # Section corner radii.  BOTTOM_EDGE_R is section-native (A7) — there is no
@@ -269,12 +273,16 @@ WALL_LAND_T = 7.0
 STANDOFF_H = 4.0
 BOARD_GAP = 4.0
 INSET = 2.54
-BMP581_L, BMP581_W = 25.4, 25.4
-BOOST_L, BOOST_W = 24.5, 24.5
-PM_L, PM_W = 33.0, 17.8   # v3: long axis along X so it stacks over the Boost
-MAG_L, MAG_W = 19.0, 7.6
+# Measured 2026-08-23 (BOARD_CALIPERS.md).  These were pre-caliper estimates
+# and disagreed with BOARD_SPECS by up to 0.5 mm -- the layout sized the cup and
+# centred the ESP32 from one set while the envelope checks used the other.
+BMP581_L, BMP581_W, BMP581_COMP = 25.31, 25.18, 3.08
+BOOST_L, BOOST_W = 25.25, 25.25
+PM_L, PM_W = 33.51, 17.70  # long axis along X
+PM_PCB, PM_COMP = 0.78, 4.4
+MAG_L, MAG_W = 19.13, 7.52
 MS_L, MS_W = 22.9, 17.0
-BABY_L, BABY_W = 33.0, 33.0
+BABY_L, BABY_W = 32.90, 33.09
 Y_LAND = RIGHT_EXTENT - WALL - WALL_LAND_T   # inboard face of the plate's land
 Y_PCB = Y_LAND - STANDOFF_H
 
@@ -291,14 +299,11 @@ CUP_TAB = 3.0       # screw tab reach beyond the cup wall
 CUP_FLANGE = 2.5    # flange thickness where it seals to the land
 STATIC_COVER_T = 2.2
 STATIC_HOLE_D = 1.6
-# 5 rows x 2 cols, not 2 x 5.  Same ten holes and the same flow area, but the
-# array is now tall and narrow instead of wide and short, so its x-centre sits
-# 18 mm further forward in the plenum.  That, plus biasing it to the forward
-# wall, is what brings the sensing station inside L3's 40-60% band; a wide
-# array simply cannot get far enough forward without hanging off the plenum.
-# The plenum is ~26 mm tall, so 5 rows at 4.5 mm pitch still clears both walls.
-STATIC_HOLE_ROWS = 5
-STATIC_HOLE_COLS = 2
+# 2 rows x 5 cols: spread along X, the flow direction, so the array averages
+# over the pressure gradient rather than sampling one station.  (Briefly 5 x 2
+# to let a wide array sit further forward -- unnecessary now the bay moved.)
+STATIC_HOLE_ROWS = 2
+STATIC_HOLE_COLS = 5
 STATIC_HOLE_PITCH_X = 4.5
 STATIC_HOLE_PITCH_Z = 4.5
 
@@ -388,53 +393,70 @@ LOW_ROW_Z0 = 8.5                                   # -> lower pilots at z=11.0
 
 BOOST_CONN_FORE = 4.0                              # Boost fore-Qwiic cable room
 
-COL_A_X0 = 44.0                                    # MS4525 low + MMC5983 high
+# Layout follows the WIRING ORDER, which is linear:
+#   battery -JST- babysitter -wires- ESP32 -qwiic- BMP581 -qwiic- boost
+#   -wires/JST- MS4525,  and the boost is a Y:  boost -qwiic- MMC5983.
+# Print-4 ignored that and put the babysitter full aft with the ESP32 in the
+# middle, a run too long for the existing loom.  Laid out fore->aft in chain
+# order the runs come out short and nothing crosses.
+COL_A_X0 = 44.0
 # MS4525 goes ABOVE the SUN barrel (which reaches z=29.9 out to x=79);
-# its 12 mm of inboard components will not clear the brass otherwise.
+# its inboard components will not clear the brass otherwise.
 MS_X0, MS_Z0 = COL_A_X0, 32.0
-MAG_X0, MAG_Z0 = COL_A_X0, LOW_ROW_Z0   # short enough to tuck under the SUN
+# MMC5983 moved aft from 44 to shorten the boost->mag Qwiic to ~12 mm.  Capped
+# so its aft cable envelope still stops short of the SUN's aft bulkhead at
+# x=79.03 -- it may not straddle a full-height plate.
+MAG_X0, MAG_Z0 = 55.0, LOW_ROW_Z0
 COL_A_W = max(MS_L, MAG_L)
 
-# Column B has to start aft of the SUN's aft bulkhead, which is a full-height
-# plate at x 79.0..82.5: nothing may straddle it, and no board is shallow
-# enough in Y to pass over it (the shallowest, the Pro Micro, clears its top by
-# 0.2 mm -- not a clearance worth designing to).  The Boost's fore Qwiic needs
-# 4 mm ahead of the board, hence 87 rather than 83.
-COL_B_X0 = AFT_BH_X1 + BOOST_CONN_FORE + BOARD_GAP  # Pro Micro low + Boost high
-# The tray's rim and clips hang below the board, so the Pro Micro cannot sit
-# at the interior floor even though it has no inserts of its own to place: the
-# tray outline has to clear the bottom flange rail, whose top is at
-# INNER_Z0 + FLANGE_RAIL = 6.5.
-#
-# Shifted 2 mm FORWARD of the column so the up-edge Qwiic column (x0 +/- 1.3)
-# lands entirely ahead of the Boost.  That is what buys the height: while the
-# Qwiic overlapped the Boost in x, the Boost's z floor was pinned to the Pro
-# Micro's cable clearance and the column was 0.35 mm short of fitting.  Clear
-# of it in x, only the board's own top edge constrains the Boost.
-# 9.0, not the 8.5 that just barely clears: at 8.5 the tray outline misses the
-# rail by 0.10 mm, which is a number, not a clearance.  0.6 mm survives a
-# first-layer squish.
-# z lifted 0.5 with the deeper rim, which grows the tray outline downward by
-# the same amount: the outline still has to clear the plate's bottom flange
-# rail at z=6.5.
-PM_X0, PM_Z0 = COL_B_X0 - 2.0, 9.8
-BOOST_X0, BOOST_Z0 = COL_B_X0, 32.0                # upper holes -> nubs
-COL_B_W = max(BOOST_L, PM_L)
+# Column B starts aft of the SUN's aft bulkhead (a full-height plate at
+# x 79.0..82.5 that nothing may straddle).  The Boost's fore Qwiic needs 4 mm
+# ahead of the board.
+COL_B_X0 = AFT_BH_X1 + BOOST_CONN_FORE + BOARD_GAP
+# Boost DROPPED from z=32.  At 32 the board spanned 32.0..57.25 while the top
+# flange rail starts at 54.5, so 2.75 mm of it wanted to be inside the seal --
+# which is exactly why it would not fit the printed plate -- and its upper
+# mounting pair landed inside the rail too, which is why those two had to be
+# demoted to nubs.  Down here all four holes are inside the insert-reach band
+# (10.5..50.5) AND clear of both rails, so the Boost gets four screws.
+BOOST_X0, BOOST_Z0 = COL_B_X0, 20.0
+COL_B_W = BOOST_L
 
-CUP_X0 = 127.0                                     # isolated static bay (cup)
-# Centred in the band the flange rails leave: with a 29.4 mm plenum and
-# 3 mm tabs the cup spans 39.4 mm against 40.0 mm of usable height, so
-# there is exactly one place it can sit.
+# --- static bay, with the ESP32 stacked on its inboard face ---------------
+CUP_X0 = 122.0
 BMP_X0, BMP_Z0 = CUP_X0 + CUP_WALL + CUP_CLR, 17.8
 # BAY_* is the PLENUM volume (cup interior); CUP_* is the cup's outer shell.
 BAY_X0, BAY_X1 = BMP_X0 - CUP_CLR, BMP_X0 + BMP581_L + CUP_CLR
 BAY_Z0, BAY_Z1 = BMP_Z0 - CUP_CLR, BMP_Z0 + BMP581_W + CUP_CLR
 CUP_X1 = BAY_X1 + CUP_WALL
 CUP_Z0, CUP_Z1 = BAY_Z0 - CUP_WALL, BAY_Z1 + CUP_WALL
-CUP_Y0 = Y_PCB - PCB_T - COMP_H - 3.0              # inner face, 1 mm over the BMP
-BAY_Y0 = CUP_Y0
+# The cup was 16.6 mm deep in Y for a board that needs 5.6, and its glands were
+# cut at the deep end where the BMP581 has nothing -- its two Qwiic connectors
+# sit at the BOARD plane, so a gland down there could never have taken a cable.
+# Sized to the board now: interior clears the components by ~1.4 mm.
+CUP_Y0 = Y_PCB - PCB_T - BMP581_COMP - CUP_WALL - 1.4
+BAY_Y0 = CUP_Y0 + CUP_WALL
 
-BABY_X0, BABY_Z0 = CUP_X1 + BOARD_GAP + 3.0, 12.0  # Babysitter, full column
+# The ESP32 rides on the cup's outboard-facing back, not on the plate: that is
+# what lets it sit beside the babysitter in the chain without spending 33 mm of
+# its own X.  Back face on the cup, components into the open bowl.
+PM_X0 = 0.5 * (CUP_X0 + CUP_X1) - PM_L / 2
+PM_Z0 = 0.5 * (CUP_Z0 + CUP_Z1) - PM_W / 2
+# Standing off the cup, not flush on it: the board needs posts to mount to,
+# and a keepout that reaches 1 mm behind the back face would otherwise sit
+# inside the sealed plenum wall.
+# 1.0 is enough: the measured back-face height is 0.00, so this is solder-
+# clearance only.  The whole stack (standoff + PCB + components + cover) ends
+# 1.7 mm short of the battery, and every mm here comes straight off that gap.
+PM_STANDOFF = 1.0
+PM_Y = CUP_Y0 - PM_STANDOFF
+# Inner face of the cover's roof: past the tallest component with clearance.
+PM_COVER_CLR = 0.6
+PM_COVER_T = 2.0
+# Outer face of the cover roof; the cup's bosses run out to meet it.
+PM_COVER_Y = PM_Y - PM_PCB - PM_COMP - PM_COVER_CLR - PM_COVER_T
+
+BABY_X0, BABY_Z0 = 162.0, 12.0                     # Babysitter, beside the ESP32
 
 # Battery: laid down on the seam, clear of the SUN aft bulkhead.
 BATT_X0 = AFT_BH_X1 + 2.5
@@ -444,15 +466,12 @@ BATT_Y0 = -24.0
 BATT_Z0 = (OUTER_H - BATT_POCKET_Z) / 2
 
 # Static ports sit mid-body, where a side port reads closest to freestream.
-# Biased to the FORWARD end of the plenum rather than centred in it.  L3 wants
-# the sensing station in the 40-60% band, where a side port reads closest to
-# freestream, and a centred array put it at 61%.  Where the holes sit inside a
-# sealed plenum is pneumatically irrelevant -- the plenum is one volume and the
-# BMP581 reads its pressure, not the pressure at any one hole -- so this buys
-# the band back without moving the bay, the cup, or a single board.  Kept a
-# hole-pitch clear of the plenum wall so the array stays over open volume.
-_STATIC_SPAN_X = (STATIC_HOLE_COLS - 1) * STATIC_HOLE_PITCH_X
-STATIC_PORT_X = BAY_X0 + STATIC_HOLE_PITCH_X + _STATIC_SPAN_X / 2
+# Centred in the plenum again.  It was briefly biased to the forward wall to
+# chase L3's 40-60% band, which left the array 4.5 mm from the fore wall and
+# 20.4 from the aft -- visibly wrong in the printed part, and the wrong lever:
+# the band is a property of where the BAY sits, not of where the holes sit
+# inside it.  With the bay at x 122 the centred array lands at 59%.
+STATIC_PORT_X = 0.5 * (BAY_X0 + BAY_X1)
 STATIC_PORT_Z = BMP_Z0 + BMP581_W / 2
 
 # Flange runs from just aft of the nose fairing to just short of the base.
@@ -905,7 +924,10 @@ BOARD_SPECS: dict[str, dict] = {
         # z=10.5 while the Pro Micro has to sit at z=3.
         # The third ear is at the AFT end, not mid-length: at mid-length its
         # 4 mm boss sits under the Boost, and the Boost cannot move up.
-        tray_screws=[(-4.0, 8.0), (-4.0, 16.0), (33.51, 21.0)],
+        # No fasteners of its own, and none on the plate: the board rides on
+        # four pads on the static bay's back face and is trapped by pm_cover,
+        # whose four screws go into the CUP.
+        cover=True,
         conns=[dict(name="usb_c", edge="aft", at=8.85, w=9.0, need=30.0,
                     when="service"),
                dict(name="qwiic", edge="up", at=0.00, w=2.6, need=7.0)],
@@ -946,7 +968,8 @@ BOARD_PLACEMENT: dict[str, dict] = {
     # it, so it needs the depth: at 2.5 the rim came within 0.20 mm of the
     # seam.  Out here it clears by 1.2 mm, and the components' inboard reach
     # drops to -1.68, which also clears the SUN's aft bulkhead top at -1.84.
-    "PROMICRO": dict(x0=PM_X0, z0=PM_Z0, y=3.5),
+    # Rides on the static bay's back face, not on the plate's land.
+    "PROMICRO": dict(x0=PM_X0, z0=PM_Z0, y=PM_Y),
     "BABY":     dict(x0=BABY_X0, z0=BABY_Z0),
     "BMP581":   dict(x0=BMP_X0, z0=BMP_Z0),
 }
@@ -1017,6 +1040,25 @@ def hose_obstacles() -> list[tuple[float, float, float, float, float, float]]:
     y0 = min(PITOT_AXIS_Y, board_y(ms) - PCB_T - ms["comp"]) - MS_TUBE_OD
     y1 = board_y(ms)
     return [(x0, x1, y0, y1, z0, z1)]
+
+
+def rail_obstacles(side: int = 1) -> list[tuple[float, float, float, float, float, float]]:
+    """The mating flange rails, as (x0,x1,y0,y1,z0,z1).
+
+    These were never an I6' obstacle, and they are the reason the Boost did not
+    fit the printed plate: its board spans z 32.0..57.25 while the top rail
+    starts at 54.5, so 2.75 mm of board wanted to be inside the seal.  Its two
+    upper posts were worse -- demoted to nubs precisely BECAUSE they sit above
+    the insert-reach band, which is defined from FLANGE_RAIL, so the model knew
+    the rail was there and still put the posts in it.
+
+    Boards live on the plate, so side>0 by default.
+    """
+    y0, y1 = (0.0, FLANGE_W) if side > 0 else (-FLANGE_W, 0.0)
+    return [
+        (FLANGE_X0, FLANGE_X1, y0, y1, INNER_Z0, INNER_Z0 + FLANGE_RAIL),
+        (FLANGE_X0, FLANGE_X1, y0, y1, INNER_Z1 - FLANGE_RAIL, INNER_Z1),
+    ]
 
 
 def cup_obstacles() -> list[tuple[float, float, float, float, float, float]]:
@@ -1126,14 +1168,23 @@ for _n, _b in BOARDS.items():
                 f"I1 {_n}: inner skin y={_sk:.1f} at x={_xx:.1f} z={_zz:.1f} "
                 f"cannot host the land at y={Y_LAND}"
             )
-# I6: neighbours must not collide.
+# I6: neighbours must not collide.  In all THREE axes -- this used to test x
+# and z only, on the unstated assumption that every board lies coplanar on the
+# land, so separation had to come from the board plane.  The ESP32 now rides on
+# the static bay's back, stacked in Y over the BMP581, and two boards that
+# share x and z but sit 5 mm apart in Y are a legitimate arrangement, not a
+# collision.
 _names = list(BOARDS)
 for _i in range(len(_names)):
     for _j in range(_i + 1, len(_names)):
         _a, _bk = board_keepout(BOARDS[_names[_i]]), board_keepout(BOARDS[_names[_j]])
         _ox = min(_a[1], _bk[1]) - max(_a[0], _bk[0])
+        _oy = min(_a[3], _bk[3]) - max(_a[2], _bk[2])
         _oz = min(_a[5], _bk[5]) - max(_a[4], _bk[4])
-        assert _ox <= 0 or _oz <= 0, f"I6 {_names[_i]}/{_names[_j]} keepouts overlap"
+        assert _ox <= 0 or _oy <= 0 or _oz <= 0, (
+            f"I6 {_names[_i]}/{_names[_j]} keepouts overlap "
+            f"({_ox:.1f} x {_oy:.1f} x {_oz:.1f} mm)"
+        )
 
 print(f"pod v3  OUTER L x W x H = {OUTER_L:.1f} x {OUTER_W:.1f} x {OUTER_H:.1f}")
 print(f"  aero: fineness {FINENESS:.2f} (D_eq {D_EQ:.1f})  nose {NOSE_LEN / D_EQ:.2f}D"
@@ -1609,25 +1660,24 @@ def add_electronics_wall(body: cq.Workplane) -> cq.Workplane:
             x, z = b["x0"] + hx, b["z0"] + hz
             post = _cyl_y(x, z, y, Y_LAND + 3.0 - y, BOARD_POST_D / 2)
             body = _union_if_solid(body, post.intersect(full_body_solid(0.0)))
-        # A tray screw lands on the tray's ear, which sits one floor thickness
-        # outboard of the board — start its post there or the ear and the post
-        # fight for the same space.
-        for hx, hz in board_tray_screws(b):
-            x, z = b["x0"] + hx, b["z0"] + hz
-            y_t = y + PM_TRAY_T
-            post = _cyl_y(x, z, y_t, Y_LAND + 3.0 - y_t, BOARD_POST_D / 2)
-            body = _union_if_solid(body, post.intersect(full_body_solid(0.0)))
         # Keepers: posts flanking the board in Z at its far end.  The MMC5983
         # has a single hole and is the magnetometer, so a board free to swing
         # about that screw is a heading error, not a rattle.  They rise past
         # the PCB's back face so the edge is trapped between them.
         if b.get("keepers"):
-            ky = y - PCB_T - 0.5
-            kx = b["x0"] + b["L"] - BOARD_POST_D / 2 - 0.5
-            for kz in (b["z0"] - BOARD_POST_D / 2 - 0.3,
-                       b["z0"] + b["W"] + BOARD_POST_D / 2 + 0.3):
-                post = _cyl_y(kx, kz, ky, Y_LAND + 3.0 - ky, BOARD_POST_D / 2)
-                body = _union_if_solid(body, post.intersect(full_body_solid(0.0)))
+            # RAILS, not posts.  Two cylinders flanking the board gave point
+            # contact with 0.3 mm of slack a side: measured +/-2.73 deg of
+            # rotation about the single screw, which on the magnetometer is a
+            # heading error, not a rattle.  Straight rails hugging both long
+            # edges over most of the length cut that to a few tenths, and they
+            # bear along a line instead of at a point.
+            ky = y - b.get("pcb", PCB_T) - 0.5
+            kx0 = b["x0"] + KEEPER_END_CLR
+            klen = b["L"] - 2 * KEEPER_END_CLR
+            for kz in (b["z0"] - KEEPER_CLR - KEEPER_W,
+                       b["z0"] + b["W"] + KEEPER_CLR):
+                rail = _box(kx0, ky, kz, klen, Y_LAND + 3.0 - ky, KEEPER_W)
+                body = _union_if_solid(body, rail.intersect(full_body_solid(0.0)))
     for b in BOARDS.values():
         for hx, hz in board_standoffs(b) + board_tray_screws(b):
             body = insert_stack_cuts(body, b["x0"] + hx, b["z0"] + hz)
@@ -1921,6 +1971,27 @@ def build_tail_panel() -> cq.Workplane:
     return body
 
 
+def pm_support_pads() -> list[tuple[float, float]]:
+    """Where the ESP32's bare back face lands on the cup (x, z).
+
+    Inside the footprint, clear of the castellated edges the board is soldered
+    along.  These carry no fastener -- the Pro Micro has no holes at all, which
+    is the whole reason it needs a cover rather than screws.
+    """
+    b = BOARDS["PROMICRO"]
+    return [(b["x0"] + dx, b["z0"] + dz)
+            for dx in (5.0, b["L"] - 5.0)
+            for dz in (4.0, b["W"] - 4.0)]
+
+
+def pm_cover_screws() -> list[tuple[float, float]]:
+    """Where pm_cover bolts into the cup (x, z) — outside the board."""
+    b = BOARDS["PROMICRO"]
+    return [(b["x0"] + dx, b["z0"] + dz)
+            for dx in (6.0, b["L"] - 6.0)
+            for dz in (-4.0, b["W"] + 4.0)]
+
+
 def build_static_bay_cup() -> cq.Workplane:
     """S3: the isolated BMP plenum, as a cup that seals to the wall land.
 
@@ -1950,77 +2021,94 @@ def build_static_bay_cup() -> cq.Workplane:
     # -- worth revisiting if the static readings look suspect -- but it is the
     # only arrangement the board's connectors allow without a jumper.
     bmp = BOARDS["BMP581"]
+    bko = board_keepout(bmp)
     for c in bmp["conns"]:
         cz = bmp["z0"] + c["at"]
-        gw, gh = c["w"] + 1.5, 4.5
+        gw = c["w"] + 1.5
+        # At the BOARD plane.  The glands used to be cut at the cup's deep end,
+        # y -11.1..-5.6, while the connectors sit at y -2.1..+2.0 -- so they
+        # opened into a part of the plenum the BMP581 has nothing in, and no
+        # cable could ever have passed through one.  Spanned from just behind
+        # the connector body to just past the board's back face.
+        gy0, gy1 = bko[2] - 0.5, board_y(bmp) + 0.5
         gx0 = (CUP_X0 - 1.0) if c["edge"] == "fore" else (BAY_X1 - 1.0)
-        body = body.cut(_box(gx0, CUP_Y0 - 1.0, cz - gw / 2,
-                             CUP_WALL + 2.0, gh + 1.0, gw))
+        body = body.cut(_box(gx0, gy0, cz - gw / 2,
+                             CUP_WALL + 2.0, gy1 - gy0, gw))
+
+    # --- the ESP32 rides on the cup's back face ---------------------------
+    # Four pads for it to sit on and four bosses for the cover to clamp into.
+    # The bosses go on the Z sides: the board is as long as the cup, so there
+    # is no room fore or aft, but ~7.7 mm above and below.
+    pm = BOARDS["PROMICRO"]
+    for px, pz in pm_support_pads():
+        pad = _cyl_y(px, pz, CUP_Y0 - PM_STANDOFF, PM_STANDOFF, BOARD_POST_D / 2)
+        body = _union_if_solid(body, pad)
+    for bx, bz in pm_cover_screws():
+        boss = _cyl_y(bx, bz, PM_COVER_Y, CUP_Y0 - PM_COVER_Y, BOSS_D / 2)
+        body = _union_if_solid(body, boss)
+        body = body.cut(_cyl_y(bx, bz, PM_COVER_Y - 1.0,
+                               INS_DEPTH + 1.0, INS_HOLE_D / 2))
     return body
 
 
-def build_pm_tray() -> cq.Workplane:
-    """L7: the SparkFun Pro Micro has no OEM mounting holes, so it is clamped
-    in a tray and the TRAY screws to the standoffs.
+def build_pm_cover() -> cq.Workplane:
+    """L7: the lid that CLAMPS the Pro Micro down (pm_cover.stl).
 
-    The retaining rim runs in -Y, away from the wall: the board drops into the
-    tray from the open mating face.  It used to run +Y, straight into the wall
-    land it is bolted against, which retained nothing and fouled the land by
-    1 mm.
+    This was a "tray" for three revisions and should never have been one.  A
+    tray is a floor with a rim: the board lies in it, nothing holds it, and the
+    rim could just as well have been printed into the plate -- which is exactly
+    what the printed part turned out to be.  The Pro Micro has no mounting
+    holes, so the only way to retain it is to trap it, and that needs something
+    ABOVE it.
 
-    Rebuilt for print-4.  The old tray was built to the board's own outline
-    with a rim on all four edges, so the rim ate INTO the footprint: a 33.5 x
-    17.7 board had a 29.8 x 14.6 pocket to drop into, and it could not.  Now
-    the outer size is the board plus 2 x (clearance + rim), so the pocket is
-    the board.  Two further changes come from what SparkFun actually document:
-    both long edges carry castellated pads that have to stay solderable, so
-    the rim runs only on the short ends and the long edges are held by corner
-    clips instead; and the USB-C on the aft end must stay reachable for
-    reflashing, so the aft rim is notched for it.
+    The board now sits on four pads on the static bay's back face, bare back
+    down.  This is a shallow lid that goes over its components and bears on the
+    component-side border, bolting into four bosses on the cup.  Openings for
+    the two things that must stay reachable: the USB-C on the aft end, and the
+    Qwiic on the up edge.
     """
     b = BOARDS["PROMICRO"]
-    t, rim, clr = PM_TRAY_T, PM_TRAY_RIM, 0.4
-    ear = 4.0                              # how far a fixing ear reaches out
-    base_y = board_y(b)                    # floor outboard; rim reaches inboard
-    ox0, oz0 = b["x0"] - (clr + rim), b["z0"] - (clr + rim)
-    oL, oW = b["L"] + 2 * (clr + rim), b["W"] + 2 * (clr + rim)
+    ko = board_keepout(b)
+    clr = 0.4
+    # roof: outboard of the tallest component
+    y_in = ko[2] - PM_COVER_CLR                    # inner face of the roof
+    ox0, oz0 = b["x0"] - clr, b["z0"] - clr
+    oL, oW = b["L"] + 2 * clr, b["W"] + 2 * clr
 
-    body = _box(ox0, base_y, oz0, oL, t, oW)
+    body = _box(ox0 - 2.0, y_in - PM_COVER_T, oz0 - 2.0,
+                oL + 4.0, PM_COVER_T, oW + 4.0)
 
-    # Short-end rims only.  The long edges stay open for the castellated pads.
-    for dx in (0.0, oL - rim):
-        body = body.union(_box(ox0 + dx, base_y - rim, oz0, rim, rim, oW))
+    # Perimeter wall down onto the board's component-side border.  This is the
+    # clamping surface: it bears on the PCB, not on the components.
+    y_face = board_y(b) - b["pcb"]                 # component face
+    wall_t = 2.0
+    for dx, dz, sx, sz in ((-2.0, -2.0, oL + 4.0, wall_t),
+                           (-2.0, oW + 2.0 - wall_t, oL + 4.0, wall_t),
+                           (-2.0, -2.0, wall_t, oW + 4.0),
+                           (oL + 2.0 - wall_t, -2.0, wall_t, oW + 4.0)):
+        body = body.union(_box(ox0 + dx, y_in, oz0 + dz,
+                               sx, y_face - y_in, sz))
 
-    # Corner clips: short tabs that hook over the board's corners in Z, which
-    # is what the missing long rims used to do.
-    clip = 5.0
-    for cx in (b["x0"], b["x0"] + b["L"] - clip):
-        for cz in (b["z0"] - clr - rim, b["z0"] + b["W"] + clr):
-            body = body.union(_box(cx, base_y - rim, cz, clip, rim, rim))
-
-    # USB-C notch in the aft rim: the connector is at v=8.85, 9.0 wide, and has
-    # to be reachable with the pod closed-up-but-plate-off for reflashing.
+    # USB-C must stay reachable for reflashing: notch the aft wall.
     usb = next(c for c in b["conns"] if c["name"] == "usb_c")
-    body = body.cut(_box(ox0 + oL - rim - 1.0, base_y - rim - 1.0,
+    body = body.cut(_box(ox0 + oL + 2.0 - wall_t - 1.0, y_in - PM_COVER_T - 1.0,
                          b["z0"] + usb["at"] - usb["w"] / 2 - 1.0,
-                         rim + 2.0, rim + 2.0, usb["w"] + 2.0))
+                         wall_t + 2.0, PM_COVER_T + (y_face - y_in) + 2.0,
+                         usb["w"] + 2.0))
+    # Qwiic leaves the up edge.
+    qw = next(c for c in b["conns"] if c["name"] == "qwiic")
+    body = body.cut(_box(b["x0"] + qw["at"] - qw["w"] / 2 - 1.0,
+                         y_in - PM_COVER_T - 1.0,
+                         oz0 + oW + 2.0 - wall_t - 1.0,
+                         qw["w"] + 2.0, PM_COVER_T + (y_face - y_in) + 2.0,
+                         wall_t + 2.0))
 
-    # NO window.  There used to be a 25.5 x 11.7 cut through the floor of a
-    # 33.5 x 17.7 board, "so the Pro Micro's underside parts clear the tray" --
-    # but the measured back-face height is 0.00, so there are no underside
-    # parts and the window only removed the support the board sits on.  It let
-    # the board rock, and it read as an invitation to push the ESP32 and its
-    # antenna through, which is the one thing the tray must not ask for.  The
-    # floor is solid: the board lies flat on it, back face down.
-
-    # Fixing ears + their clearance holes.  These are the tray's screws, not
-    # the board's -- the board has none.
-    for hx, hz in board_tray_screws(b):
-        x, z = b["x0"] + hx, b["z0"] + hz
-        body = body.union(_cyl_y(x, z, base_y, t, ear))
-        body = body.cut(_cyl_y(x, z, base_y - 1.0, t + 2.0, LID_SCREW_D / 2))
+    # Ears and clearance holes into the cup's bosses.
+    for cx, cz in pm_cover_screws():
+        body = body.union(_cyl_y(cx, cz, y_in - PM_COVER_T, PM_COVER_T, BOSS_D / 2))
+        body = body.cut(_cyl_y(cx, cz, y_in - PM_COVER_T - 1.0,
+                               PM_COVER_T + 2.0, LID_SCREW_D / 2))
     return body
-
 
 def build_sun_placeholder() -> cq.Workplane:
     """Not printed — purchased brass, shown in the assembly STEP."""
@@ -2262,14 +2350,14 @@ def main() -> None:
 
     panel = build_tail_panel()
     cup = build_static_bay_cup()
-    tray = build_pm_tray()
+    cover = build_pm_cover()
     clamp = build_sun_clamp()
 
     export_part(for_print_half(right, 1), "pod_right")
     export_part(for_print_half(left, -1), "pod_left")
     for name, part, axis in (("tail_panel", panel, "x"),
                              ("static_bay", cup, "y"),
-                             ("pm_tray", tray, "y"),
+                             ("pm_cover", cover, "y"),
                              ("sun_clamp", clamp, "y")):
         flat = flat_for_print(part, axis)
         export_part(flat, name)
@@ -2377,7 +2465,7 @@ def assembly_parts() -> list[tuple[str, cq.Workplane]]:
     no check could see because the tray is not part of either half.
     """
     return [("sun_clamp", build_sun_clamp()),
-            ("pm_tray", build_pm_tray()),
+            ("pm_cover", build_pm_cover()),
             ("static_bay", build_static_bay_cup()),
             ("tail_panel", build_tail_panel())]
 

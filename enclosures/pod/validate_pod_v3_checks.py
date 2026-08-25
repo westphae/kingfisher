@@ -576,6 +576,16 @@ def check_board_envelopes(r, pod) -> None:
             if o:
                 hits.append((n, "battery", o))
                 break
+        for obs in pod.rail_obstacles(1):
+            done = False
+            for e in pod.board_envelope(pod.BOARDS[n]):
+                o = _overlap(e, obs)
+                if o:
+                    hits.append((n, "flange rail", o))
+                    done = True
+                    break
+            if done:
+                break
         # the MS4525 is one END of the hose run, so it is exempt from it
         for obs in (pod.hose_obstacles() if n != "MS4525" else ()):
             done = False

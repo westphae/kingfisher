@@ -26,8 +26,8 @@ from pathlib import Path
 
 POD_DIR = Path(__file__).resolve().parent
 STL_FILES = ("pod_right.stl", "pod_left.stl", "tail_panel.stl",
-             "static_bay.stl", "pm_tray.stl")
-SMALL_PARTS = ("tail_panel.stl", "static_bay.stl", "pm_tray.stl")
+             "static_bay.stl", "pm_cover.stl")
+SMALL_PARTS = ("tail_panel.stl", "static_bay.stl", "pm_cover.stl")
 
 
 class CheckResult:
@@ -140,7 +140,14 @@ def check_interior(r: CheckResult, pod) -> None:
         nubs = pod.board_nubs(b)
         tray = pod.board_tray_screws(b)
         keepers = 2 if b.get("keepers") else 0
-        if len(tray) >= 3:
+        if b.get("cover"):
+            pads, cs = len(pod.pm_support_pads()), len(pod.pm_cover_screws())
+            if pads >= 3 and cs >= 3:
+                r.ok(f"I8 {name} restrained by {pads} pads + a {cs}-screw cover")
+            else:
+                r.fail(f"I8 {name} declares a cover but has {pads} pads / "
+                       f"{cs} cover screws")
+        elif len(tray) >= 3:
             r.ok(f"I8 {name} restrained by a {len(tray)}-screw tray")
         elif len(screws) >= 2:
             r.ok(f"I8 {name} restrained by {len(screws)} screws"
