@@ -451,6 +451,7 @@ PM_Z0 = 0.5 * (CUP_Z0 + CUP_Z1) - PM_W / 2
 PM_STANDOFF = 1.0
 PM_Y = CUP_Y0 - PM_STANDOFF
 # Inner face of the cover's roof: past the tallest component with clearance.
+QWIIC_HOLE = 8.0          # roof opening for the Qwiic cable
 PM_COVER_CLR = 0.6
 PM_COVER_T = 2.0
 # Outer face of the cover roof; the cup's bosses run out to meet it.
@@ -462,7 +463,11 @@ BABY_X0, BABY_Z0 = 162.0, 12.0                     # Babysitter, beside the ESP3
 BATT_X0 = AFT_BH_X1 + 2.5
 # In the bowl, not straddling the seam.  That is what removed the flange-rail
 # clearance problem; the pocket no longer notches the sealing land at all.
-BATT_Y0 = -24.0
+# Hard against the L1 limit (WALL + BATT_SEAL_KEEP off the bowl skin) rather
+# than 7.5 mm inboard of it.  That was dead space, and it is exactly what the
+# ESP32's Qwiic cable needs: the cable turns at y -15.4 and the battery used to
+# start at -16.1, leaving 0.7 mm.
+BATT_Y0 = -LEFT_EXTENT + WALL + BATT_SEAL_KEEP
 BATT_Z0 = (OUTER_H - BATT_POCKET_Z) / 2
 
 # Static ports sit mid-body, where a side port reads closest to freestream.
@@ -930,7 +935,13 @@ BOARD_SPECS: dict[str, dict] = {
         cover=True,
         conns=[dict(name="usb_c", edge="aft", at=8.85, w=9.0, need=30.0,
                     when="service"),
-               dict(name="qwiic", edge="up", at=0.00, w=2.6, need=7.0)],
+               # Stands UP off the component face 4.4 mm -- it is the
+               # tallest feature on the board, which is what C4 records -- and
+               # the mated cable needs 8.0 mm off the face before it can turn.
+               # So "face", not "up": the cable leaves in -Y through a hole in
+               # pm_cover's roof, not sideways past the top edge.  need is the
+               # room BEYOND the body: 8.0 - 4.4.
+               dict(name="qwiic", edge="face", at=0.00, w=2.6, need=3.6)],
     ),
     "BABY": dict(
         L=32.90, W=33.09, pcb=1.6, comp=5.52, back=0.5,
@@ -2044,9 +2055,14 @@ def build_static_bay_cup() -> cq.Workplane:
         pad = _cyl_y(px, pz, CUP_Y0 - PM_STANDOFF, PM_STANDOFF, BOARD_POST_D / 2)
         body = _union_if_solid(body, pad)
     for bx, bz in pm_cover_screws():
-        boss = _cyl_y(bx, bz, PM_COVER_Y, CUP_Y0 - PM_COVER_Y, BOSS_D / 2)
+        # Stops at the ear's INNER face.  Running it to PM_COVER_Y put the
+        # boss and the cover's ear in the same 2 mm of Y at the same x, z and
+        # radius -- 413.6 mm^3 of overlap, so the cover could not seat.  Nothing
+        # caught it because part-vs-part interference was never checked.
+        boss_y0 = PM_COVER_Y + PM_COVER_T
+        boss = _cyl_y(bx, bz, boss_y0, CUP_Y0 - boss_y0, BOSS_D / 2)
         body = _union_if_solid(body, boss)
-        body = body.cut(_cyl_y(bx, bz, PM_COVER_Y - 1.0,
+        body = body.cut(_cyl_y(bx, bz, boss_y0 - 1.0,
                                INS_DEPTH + 1.0, INS_HOLE_D / 2))
     return body
 
@@ -2089,19 +2105,31 @@ def build_pm_cover() -> cq.Workplane:
         body = body.union(_box(ox0 + dx, y_in, oz0 + dz,
                                sx, y_face - y_in, sz))
 
+    # The cup's bosses rise through where the perimeter wall runs, so the wall
+    # is notched to let them pass up to the ears.  Without this the wall and
+    # the bosses share the same Y band and the cover cannot seat -- the other
+    # half of the 413 mm^3 the printed part ran into.
+    for cx, cz in pm_cover_screws():
+        body = body.cut(_cyl_y(cx, cz, y_in - 1.0,
+                               (y_face - y_in) + 2.0, BOSS_D / 2 + 0.4))
+
     # USB-C must stay reachable for reflashing: notch the aft wall.
     usb = next(c for c in b["conns"] if c["name"] == "usb_c")
     body = body.cut(_box(ox0 + oL + 2.0 - wall_t - 1.0, y_in - PM_COVER_T - 1.0,
                          b["z0"] + usb["at"] - usb["w"] / 2 - 1.0,
                          wall_t + 2.0, PM_COVER_T + (y_face - y_in) + 2.0,
                          usb["w"] + 2.0))
-    # Qwiic leaves the up edge.
+    # Qwiic stands up off the FACE, so its cable leaves through the ROOF.
+    # A solid roof over it is what made the printed cover unusable: the
+    # connector needs 8.0 mm off the board face for the cable to turn, and the
+    # roof sits at 5.0.  The hole lets the cable through to turn beyond it.
+    # Generous, and open to the top edge so the cable may also lie sideways.
     qw = next(c for c in b["conns"] if c["name"] == "qwiic")
-    body = body.cut(_box(b["x0"] + qw["at"] - qw["w"] / 2 - 1.0,
-                         y_in - PM_COVER_T - 1.0,
-                         oz0 + oW + 2.0 - wall_t - 1.0,
-                         qw["w"] + 2.0, PM_COVER_T + (y_face - y_in) + 2.0,
-                         wall_t + 2.0))
+    body = body.cut(_box(b["x0"] - 1.0, y_in - PM_COVER_T - 1.0,
+                         b["z0"] + b["W"] - QWIIC_HOLE, 
+                         QWIIC_HOLE + 1.0,
+                         PM_COVER_T + (y_face - y_in) + 2.0,
+                         QWIIC_HOLE + 4.0))
 
     # Ears and clearance holes into the cup's bosses.
     for cx, cz in pm_cover_screws():

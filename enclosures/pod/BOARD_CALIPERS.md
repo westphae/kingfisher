@@ -141,7 +141,8 @@ mounting holes, which is why it sits in `pm_tray.stl`.
 | C1  | Outline **L**                                                | 33.51      |
 | C2  | Outline **W**                                                | 17.70      |
 | C3  | PCB thickness                                                | 0.78       |
-| C4  | Tallest component height, component face                     | 4.40       |
+| C4  | Tallest component height, component face — **see note**      | 4.40       |
+| C4a | Mated Qwiic height off the component face (connector + cable)|            |
 | C5  | Tallest feature on the back face                             | 0.00       |
 | C6  | Which short end carries the **USB-C** (fore or aft)          | aft        |
 | C7  | USB-C centre position along that end (`at`, from v=0)        | 8.85       |
@@ -155,6 +156,21 @@ Connectors:
 |-------|------|------|------------|-------------|------------|
 | USB-C | aft  | 8.85 | 9.00       | 3.20        | 30.00      |
 | Qwiic | up   | 0.00 | 2.60       | 6.00        | 7.00       |
+
+> **C4 is inconsistent with the Qwiic row and the model believed C4.** The
+> tallest thing on this board is the Qwiic connector, whose body is 6.00 —
+> 1.6 mm taller than the 4.40 recorded as "tallest component height" — and it
+> is taller again with a cable in it. `board_keepout` takes the component
+> height, so the Pro Micro has been modelled too shallow, and `pm_cover`'s roof
+> was set from it.
+>
+> **Rule, restated:** *component height* is the tallest obstruction standing off
+> the component face **including connector bodies and their mated cables**, not
+> just the tallest chip. Where a connector is the tallest feature, its row and
+> C4 must agree. This is what the "with the mating cable fitted" clause in *How
+> to measure* step 3 was for, and it is the second time it has bitten: the
+> Boost's VIN/VOUT had the same shape of error (recorded as an edge connector
+> when it is wires leaving the face).
 
 ## 4. SparkFun Battery Babysitter (PRT-13777)
 
@@ -279,6 +295,8 @@ Connectors:
 - [x] `BOARD_SPECS` populated from these tables
 - [x] **I6′** green — every board envelope clears its neighbours, the battery,
       the SUN and its cradle, and the static bay
+- [ ] **C4a** (Pro Micro mated Qwiic height) open and BLOCKING: it decides
+      whether the ESP32 can stay stacked on the static bay
 - [ ] D8 / D9 (Babysitter soldered-wire standoff heights) still open; the
       model currently charges the VIN/VOUT run 4 mm of Y depth
 - [ ] **I9** (no invented holes)

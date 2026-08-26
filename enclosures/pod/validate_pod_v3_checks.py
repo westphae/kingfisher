@@ -433,6 +433,33 @@ def check_open_bay(r, pod, left, right) -> None:
                 r.ok(f"I4 {what} clear in {name} ({v:.1f} mm^3)")
 
 
+def check_parts_against_each_other(r, pod) -> None:
+    """I6'' — separately printed parts must not collide with EACH OTHER.
+
+    check_part_interference compares every part against the two halves, which
+    is where the pm_tray's rim was caught.  It never compared parts against one
+    another, and once the ESP32 moved onto the static bay that became the
+    interesting case: the cup's mounting bosses and pm_cover's ears were placed
+    from the same list of positions with the same radius, and both ran the full
+    depth, so they occupied the same 2 mm of Y -- 413 mm^3 of solid overlap in
+    a cover that could not seat.  Every other check passed: both parts were
+    watertight single solids, both cleared both halves, and neither was outside
+    the envelope.
+    """
+    parts = pod.assembly_parts()
+    hits = []
+    for i in range(len(parts)):
+        for j in range(i + 1, len(parts)):
+            (na, pa), (nb, pb) = parts[i], parts[j]
+            v = pa.val().intersect(pb.val()).Volume()
+            if v > 1.0:
+                hits.append(f"{na}/{nb} by {v:.0f} mm^3")
+    if hits:
+        r.fail("I6'' printed parts collide: " + "; ".join(hits))
+    else:
+        r.ok(f"I6'' all {len(parts)} printed parts clear each other")
+
+
 def check_insert_access(r, pod, right) -> None:
     """I7 — a heat-set iron must physically reach every insert pilot.
 

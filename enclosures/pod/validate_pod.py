@@ -241,6 +241,7 @@ def check_geometry(r: CheckResult) -> None:
     check_interior(r, pod)
     g.check_no_invented_holes(r, pod)
     g.check_board_envelopes(r, pod)
+    g.check_parts_against_each_other(r, pod)
     g.check_aero(r, pod)
     g.check_flats(r, pod)
 
