@@ -433,6 +433,76 @@ def check_open_bay(r, pod, left, right) -> None:
                 r.ok(f"I4 {what} clear in {name} ({v:.1f} mm^3)")
 
 
+def check_holddown_footprints(r, pod) -> None:
+    """I10 — a hold-down may not land on a connector or component unless the
+    board model says it bears on one.
+
+    pm_cover's corner posts were placed at the geometric corners of the board
+    and two of them came down squarely on the USB-C -- whose position, width
+    and height were all sitting in BOARD_CALIPERS.md at the time.  The status
+    LEDs run almost to both aft corners as well, so that end has no bare PCB
+    at all.  Nothing compared a hold-down against the things it would land on,
+    because no such rule existed.
+
+    A hold-down declares what it rests on via `rests_on` in PM_HOLD: 0.0 means
+    bare PCB, and anything else means it deliberately bears on a connector of
+    at least that height.  This checks the declaration against the connectors.
+    """
+    b = pod.BOARDS["PROMICRO"]
+    bad = []
+    for u0, v0, du, dv, rests in pod.PM_HOLD:
+        for c in b["conns"]:
+            if c["edge"] == "face":
+                cu, cv = c["at"] if isinstance(c["at"], tuple) else (c["at"], b["W"] / 2)
+                cu0, cu1 = cu - c["w"] / 2, cu + c["w"] / 2
+                cv0, cv1 = cv - c["w"] / 2, cv + c["w"] / 2
+            elif c["edge"] in ("fore", "aft"):
+                cu0, cu1 = (0.0, 2.0) if c["edge"] == "fore" else (b["L"] - 2.0, b["L"])
+                cv0, cv1 = c["at"] - c["w"] / 2, c["at"] + c["w"] / 2
+            else:
+                cu0, cu1 = c["at"] - c["w"] / 2, c["at"] + c["w"] / 2
+                cv0, cv1 = (0.0, 2.0) if c["edge"] == "down" else (b["W"] - 2.0, b["W"])
+            ou = min(u0 + du, cu1) - max(u0, cu0)
+            ov = min(v0 + dv, cv1) - max(v0, cv0)
+            if ou > 0.01 and ov > 0.01:
+                h = c.get("body_h", 0.0) or 0.0
+                if rests <= 0.01:
+                    bad.append(f"hold-down at (u{u0:.1f},v{v0:.1f}) lands on "
+                               f"{c['name']} but declares bare PCB")
+    if bad:
+        r.fail("I10 " + "; ".join(bad))
+    else:
+        r.ok(f"I10 all {len(pod.PM_HOLD)} hold-downs clear of connectors, "
+             "or declared to bear on one")
+
+
+def check_print_pose(r, pod) -> None:
+    """P13 — a part must not export balanced on its smallest face.
+
+    flat_for_print laid parts flat but said nothing about which way up, and
+    pm_cover came out standing on its four corner posts: 100 mm^2 of bed
+    contact against 873 for the other way up, with the whole ring floating
+    2.7 mm in the air on supports.  It printed only because it was rotated by
+    hand in the slicer.
+
+    Not simply "maximise bed contact": sun_clamp's two poses are within 9% and
+    the bore has to face up so it self-supports.  So this flags only a pose
+    that is DRAMATICALLY worse than its alternative -- the case where the
+    choice was never made on purpose.
+    """
+    bad = []
+    for name, (axis, flip) in pod.PRINT_POSE.items():
+        part = dict(pod.assembly_parts())[name]
+        chosen = pod.bed_contact(pod.flat_for_print(part, axis, flip))
+        other = pod.bed_contact(pod.flat_for_print(part, axis, not flip))
+        if other > 0 and chosen < 0.4 * other:
+            bad.append(f"{name} {chosen:.0f} vs {other:.0f} mm^2 the other way up")
+    if bad:
+        r.fail("P13 part exported in the worse print pose: " + "; ".join(bad))
+    else:
+        r.ok(f"P13 all {len(pod.PRINT_POSE)} small parts exported bed-side down")
+
+
 def check_parts_against_each_other(r, pod) -> None:
     """I6'' — separately printed parts must not collide with EACH OTHER.
 

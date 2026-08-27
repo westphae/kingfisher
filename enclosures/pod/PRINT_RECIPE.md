@@ -1,7 +1,7 @@
 # Wing pod v3 — AnkerMake print recipe
 
 Slicer settings for `pod_left.stl`, `pod_right.stl`, `tail_panel.stl`,
-`static_bay.stl`, `pm_tray.stl`, and `sun_clamp.stl` on an **AnkerMake M5C** in **PETG**. STLs do not carry support or
+`static_bay.stl`, `pm_cover.stl`, and `sun_clamp.stl` on an **AnkerMake M5C** in **PETG**. STLs do not carry support or
 slice settings — use this recipe in AnkerMake Studio (or PrusaSlicer with an
 M5C profile).
 
@@ -75,7 +75,7 @@ face instead of a thin flange ring. Two consequences worth knowing:
   expect to dress the brim witness line near the parting line.
 | `tail_panel.stl` | Large face down | Aft service plate — the face with the counterbores goes **up** |
 | `static_bay.stl` | **Closed face down** | BMP plenum cup; tabs overhang slightly at the top |
-| `pm_tray.stl` | Large face down | Pro Micro clamp tray |
+| `pm_cover.stl` | **Frame face down** | Pro Micro hold-down frame; corner posts and ears point **up** |
 | `sun_clamp.stl` | **Split face down** | Cap that closes the SUN saddle; the bore half-cylinder faces up |
 
 Print one half at a time if the diagonal + skirt crowds the bed. The SUN-B
@@ -88,7 +88,7 @@ adapter is purchased metal — not printed.
 | `pod_left` / `pod_right` | **On** | Ogive outer, hollow shell, SUN cradle, standoffs (right) leave overhangs above ~45° |
 | `tail_panel` | **Off** | Flat plate |
 | `static_bay` | **Off** | Shallow cup, tabs are a short overhang |
-| `pm_tray` | **Off** | Flat tray |
+| `pm_cover` | **Off** | Open frame, posts point up and are self-supporting |
 | `sun_clamp` | **Off** | Half-bore in the up face, so it self-supports |
 
 Suggested support settings (tune after first preview):
@@ -132,8 +132,12 @@ skin looks fuzzy or stringy.
    in from the **open mating face** (iron along Y) before installing PCBs; BMP
    through the static-bay window; aft-panel inserts from **outside the base**
    (iron along X). Left cover is clearance only. Same pilot/depth/screw-relief
-   scheme as the hub case. Seat the Pro Micro in `pm_tray.stl` and screw the
-   tray down, mount the BMP581 and heat-set its inserts on the OPEN wall, then screw `static_bay.stl` over it on a foam/RTV gasket.
+   scheme as the hub case. Mount the BMP581 and heat-set its
+   inserts on the OPEN wall, screw `static_bay.stl` over it on a foam/RTV
+   gasket, then lay the Pro Micro **bare back down on the four pads on the
+   bay's back face** and trap it with `pm_cover.stl` — four screws into the
+   bay's bosses. The cover has no roof: the Qwiic sits mid-face and there are
+   wires off both long edges, so the whole component side stays open.
 4. **Populate `tail_panel.stl` on the bench, before it goes on the pod** — this
    is the whole point of it being a separate plate. Snap in the COM-08837
    rocker (SYSOFF → JP12 / GND; leave onboard S1 OFF). RTV the CAB-15464 flange
@@ -157,3 +161,16 @@ skin looks fuzzy or stringy.
 - [ ] Brim on; fits bed at 45°
 - [ ] Inserts heat-set before first assembly torque
 - [ ] SUN-B dry-fit + hose routing checked before flight hardware
+
+## Print pose comes baked into the STL
+
+Every small part is exported already laid on the bed in its intended pose — you
+should not need to rotate anything in the slicer. `PRINT_POSE` in
+`wing_pod_v3.py` records the choice per part and **P13** checks it, after
+`pm_cover` shipped balanced on its four corner posts: 100 mm² of bed contact
+with the ring floating 2.7 mm in the air, against 873 mm² the other way up.
+
+P13 deliberately does *not* just maximise bed contact. `sun_clamp`'s two poses
+are within 9% of each other and it wants the bore facing **up** so the
+half-cylinder self-supports, so the check only flags a pose dramatically worse
+than its alternative — the case where nobody chose on purpose.

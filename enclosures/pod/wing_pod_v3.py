@@ -451,7 +451,27 @@ PM_Z0 = 0.5 * (CUP_Z0 + CUP_Z1) - PM_W / 2
 PM_STANDOFF = 1.0
 PM_Y = CUP_Y0 - PM_STANDOFF
 # Inner face of the cover's roof: past the tallest component with clearance.
-QWIIC_HOLE = 8.0          # roof opening for the Qwiic cable
+# pm_cover is an open frame, so there is no roof clearance to set -- only how
+# far the ring stands off the board (the edge wires pass through that gap) and
+# how much the corner fingers overlap it.
+# pm_cover hold-downs, in board (u, v): (u0, v0, du, dv, rests_on).
+# rests_on is the height ABOVE the board face at which the hold-down stops:
+# 0.0 where it bears on bare PCB, the connector's body height where it lands on
+# a connector.  Only three, and none at the aft corners: the USB-C occupies
+# v 4.35..13.35 of that edge and the status LEDs run almost to both corners,
+# leaving no bare PCB there at all.  The aft hold-down therefore bears on the
+# USB-C shell -- not ideal, but it is the only clear ground on that end.
+PM_HOLD = [
+    (0.0, 0.0, 2.0, 2.0, 0.0),                    # fore, lower — bare PCB
+    (0.0, 17.70 - 2.0, 2.0, 2.0, 0.0),            # fore, upper — bare PCB
+    (33.51 - 2.0, 8.85 - 2.0, 2.0, 4.0, 3.20),    # aft — on the USB-C shell
+]
+PM_LIP = 1.2              # corner lip, traps the board in u and v
+PM_FRAME_CLR_X = 2.0      # ring inner edge, fore/aft of the board
+PM_FRAME_CLR_Z = 3.0      # ring inner edge, off the long edges (wires exit here)
+PM_FRAME_W = 4.0          # ring width
+PM_FINGER = 5.0           # corner hold-down, square
+PM_BOSS_H = 4.5           # cup boss height, >= INS_DEPTH so an insert fits
 PM_COVER_CLR = 0.6
 PM_COVER_T = 2.0
 # Outer face of the cover roof; the cup's bosses run out to meet it.
@@ -1990,9 +2010,15 @@ def pm_support_pads() -> list[tuple[float, float]]:
     is the whole reason it needs a cover rather than screws.
     """
     b = BOARDS["PROMICRO"]
-    return [(b["x0"] + dx, b["z0"] + dz)
-            for dx in (5.0, b["L"] - 5.0)
-            for dz in (4.0, b["W"] - 4.0)]
+    # Directly UNDER each of pm_cover's hold-downs, so the clamping load goes
+    # straight through the board instead of bending it.  Pads anywhere else
+    # would be a fulcrum, not a support.
+    #
+    # Boxes matching the hold-down footprint, not discs: a Ø7 disc centred on
+    # the fore hold-downs reached 2.5 mm PAST the board's fore edge and fouled
+    # the cover's corner lips.
+    return [(b["x0"] + u0, b["z0"] + v0, du, dv)
+            for u0, v0, du, dv, _r in PM_HOLD]
 
 
 def pm_cover_screws() -> list[tuple[float, float]]:
@@ -2051,16 +2077,16 @@ def build_static_bay_cup() -> cq.Workplane:
     # The bosses go on the Z sides: the board is as long as the cup, so there
     # is no room fore or aft, but ~7.7 mm above and below.
     pm = BOARDS["PROMICRO"]
-    for px, pz in pm_support_pads():
-        pad = _cyl_y(px, pz, CUP_Y0 - PM_STANDOFF, PM_STANDOFF, BOARD_POST_D / 2)
+    for px, pz, pdx, pdz in pm_support_pads():
+        pad = _box(px, CUP_Y0 - PM_STANDOFF, pz, pdx, PM_STANDOFF, pdz)
         body = _union_if_solid(body, pad)
     for bx, bz in pm_cover_screws():
         # Stops at the ear's INNER face.  Running it to PM_COVER_Y put the
         # boss and the cover's ear in the same 2 mm of Y at the same x, z and
         # radius -- 413.6 mm^3 of overlap, so the cover could not seat.  Nothing
         # caught it because part-vs-part interference was never checked.
-        boss_y0 = PM_COVER_Y + PM_COVER_T
-        boss = _cyl_y(bx, bz, boss_y0, CUP_Y0 - boss_y0, BOSS_D / 2)
+        boss_y0 = CUP_Y0 - PM_BOSS_H
+        boss = _cyl_y(bx, bz, boss_y0, PM_BOSS_H, BOSS_D / 2)
         body = _union_if_solid(body, boss)
         body = body.cut(_cyl_y(bx, bz, boss_y0 - 1.0,
                                INS_DEPTH + 1.0, INS_HOLE_D / 2))
@@ -2068,74 +2094,87 @@ def build_static_bay_cup() -> cq.Workplane:
 
 
 def build_pm_cover() -> cq.Workplane:
-    """L7: the lid that CLAMPS the Pro Micro down (pm_cover.stl).
+    """L7: open frame that holds the Pro Micro down by its four corners.
 
-    This was a "tray" for three revisions and should never have been one.  A
-    tray is a floor with a rim: the board lies in it, nothing holds it, and the
-    rim could just as well have been printed into the plate -- which is exactly
-    what the printed part turned out to be.  The Pro Micro has no mounting
-    holes, so the only way to retain it is to trap it, and that needs something
-    ABOVE it.
+    Third shape for this part, and the first that matches the board.  It was a
+    tray (a floor with a rim, which retained nothing), then a lid with a roof
+    and a hole for the Qwiic -- but the Qwiic is not where the caliper sheet
+    said, and it is not the only thing leaving the top: there are wires off
+    BOTH long edges as well.  No roof opening can be right when the whole
+    component face has to stay clear.
 
-    The board now sits on four pads on the static bay's back face, bare back
-    down.  This is a shallow lid that goes over its components and bears on the
-    component-side border, bolting into four bosses on the cup.  Openings for
-    the two things that must stay reachable: the USB-C on the aft end, and the
-    Qwiic on the up edge.
+    So there is no roof.  A rectangular ring stands off the board's outline,
+    carrying four ears that bolt to the cup and four fingers that reach in to
+    press the board's corners.  Everything between them is open sky: the Qwiic
+    wherever it sits, the castellated-pad wires down both sides, and the USB-C
+    off the aft end all leave without meeting anything.
     """
     b = BOARDS["PROMICRO"]
-    ko = board_keepout(b)
-    clr = 0.4
-    # roof: outboard of the tallest component
-    y_in = ko[2] - PM_COVER_CLR                    # inner face of the roof
-    ox0, oz0 = b["x0"] - clr, b["z0"] - clr
-    oL, oW = b["L"] + 2 * clr, b["W"] + 2 * clr
+    y_face = board_y(b) - b["pcb"]            # what the fingers bear on
+    x0, x1 = b["x0"], b["x0"] + b["L"]
+    z0, z1 = b["z0"], b["z0"] + b["W"]
 
-    body = _box(ox0 - 2.0, y_in - PM_COVER_T, oz0 - 2.0,
-                oL + 4.0, PM_COVER_T, oW + 4.0)
+    # Frame plane, set so the cup's bosses are deep enough to take an insert.
+    y_frame = CUP_Y0 - PM_BOSS_H               # underside of the frame
+    t = PM_COVER_T
 
-    # Perimeter wall down onto the board's component-side border.  This is the
-    # clamping surface: it bears on the PCB, not on the components.
-    y_face = board_y(b) - b["pcb"]                 # component face
-    wall_t = 2.0
-    for dx, dz, sx, sz in ((-2.0, -2.0, oL + 4.0, wall_t),
-                           (-2.0, oW + 2.0 - wall_t, oL + 4.0, wall_t),
-                           (-2.0, -2.0, wall_t, oW + 4.0),
-                           (oL + 2.0 - wall_t, -2.0, wall_t, oW + 4.0)):
-        body = body.union(_box(ox0 + dx, y_in, oz0 + dz,
-                               sx, y_face - y_in, sz))
+    # Ring: inner edge stands off the board so the edge wires clear it.
+    ix0, ix1 = x0 - PM_FRAME_CLR_X, x1 + PM_FRAME_CLR_X
+    iz0, iz1 = z0 - PM_FRAME_CLR_Z, z1 + PM_FRAME_CLR_Z
+    ox0, ox1 = ix0 - PM_FRAME_W, ix1 + PM_FRAME_W
+    oz0, oz1 = iz0 - PM_FRAME_W, iz1 + PM_FRAME_W
 
-    # The cup's bosses rise through where the perimeter wall runs, so the wall
-    # is notched to let them pass up to the ears.  Without this the wall and
-    # the bosses share the same Y band and the cover cannot seat -- the other
-    # half of the 413 mm^3 the printed part ran into.
+    body = _box(ox0, y_frame - t, oz0, ox1 - ox0, t, oz1 - oz0)
+    body = body.cut(_box(ix0, y_frame - t - 1.0, iz0,
+                         ix1 - ix0, t + 2.0, iz1 - iz0))
+
+    # Hold-downs: a TAB at the ring plane reaching in over the board, then a
+    # POST down onto whatever that hold-down bears on.  Stepping it keeps the
+    # tab clear of the cup's bosses, whose tops are the ring's underside.
+    for u0, v0, du, dv, rests in PM_HOLD:
+        hx, hz = x0 + u0, z0 + v0
+        # tab spans from the ring's inner edge to the far side of the post
+        # Overlapping the ring by PM_FRAME_W, not stopping on its inner face:
+        # a tab that merely touches leaves a separate solid after the union.
+        if u0 < b["L"] / 2:
+            tx0 = x0 - PM_FRAME_CLR_X - PM_FRAME_W
+            tlen = PM_FRAME_CLR_X + PM_FRAME_W + u0 + du
+        else:
+            tx0, tlen = hx, (x1 + PM_FRAME_CLR_X + PM_FRAME_W) - hx
+        tz0 = min(hz, z0 - PM_FRAME_CLR_Z) if v0 < 1.0 else hz
+        tlen_z = max(dv, (hz + dv) - tz0)
+        body = body.union(_box(tx0, y_frame - t, tz0, tlen, t, tlen_z))
+        body = body.union(_box(hx, y_frame - t, hz, du,
+                               (y_face - rests) - (y_frame - t), dv))
+
+    # Corner lips at the fore end: a bracket outside the board that traps it in
+    # u and v.  Only at that corner -- the long edges must stay clear for the
+    # castellated-pad wires, and the aft end cannot take one because the USB-C
+    # protrudes 1.3 mm past the edge and has to stay pluggable.
+    #
+    # Both legs run back to the ring's inner edge.  Sized to the board instead,
+    # the v-leg reached neither the ring nor the tab and came away as a loose
+    # 29 mm^3 sliver.
+    lip_y1 = board_y(b) + 0.3
+    lip_h = lip_y1 - (y_frame - t)
+    for u0, v0, du, dv, _r in PM_HOLD[:2]:
+        low = v0 < b["W"] / 2
+        # leg along u: blocks the board sliding fore
+        lz0 = (z0 + v0 - PM_LIP) if low else (z0 + v0)
+        body = body.union(_box(x0 - PM_LIP, y_frame - t, lz0,
+                               PM_LIP, lip_h, dv + PM_LIP))
+        # leg along v: blocks it sliding sideways, run out to the ring
+        vz0 = (z0 - PM_FRAME_CLR_Z) if low else (z0 + b["W"])
+        # Stops at the hold-down's far face: run 1 mm longer and it clips the
+        # cup's boss, whose near edge is at u 2.5.
+        body = body.union(_box(x0 - PM_LIP, y_frame - t, vz0,
+                               PM_LIP + du, lip_h, PM_FRAME_CLR_Z))
+
+    # Ears + clearance holes, in the ring.
     for cx, cz in pm_cover_screws():
-        body = body.cut(_cyl_y(cx, cz, y_in - 1.0,
-                               (y_face - y_in) + 2.0, BOSS_D / 2 + 0.4))
-
-    # USB-C must stay reachable for reflashing: notch the aft wall.
-    usb = next(c for c in b["conns"] if c["name"] == "usb_c")
-    body = body.cut(_box(ox0 + oL + 2.0 - wall_t - 1.0, y_in - PM_COVER_T - 1.0,
-                         b["z0"] + usb["at"] - usb["w"] / 2 - 1.0,
-                         wall_t + 2.0, PM_COVER_T + (y_face - y_in) + 2.0,
-                         usb["w"] + 2.0))
-    # Qwiic stands up off the FACE, so its cable leaves through the ROOF.
-    # A solid roof over it is what made the printed cover unusable: the
-    # connector needs 8.0 mm off the board face for the cable to turn, and the
-    # roof sits at 5.0.  The hole lets the cable through to turn beyond it.
-    # Generous, and open to the top edge so the cable may also lie sideways.
-    qw = next(c for c in b["conns"] if c["name"] == "qwiic")
-    body = body.cut(_box(b["x0"] - 1.0, y_in - PM_COVER_T - 1.0,
-                         b["z0"] + b["W"] - QWIIC_HOLE, 
-                         QWIIC_HOLE + 1.0,
-                         PM_COVER_T + (y_face - y_in) + 2.0,
-                         QWIIC_HOLE + 4.0))
-
-    # Ears and clearance holes into the cup's bosses.
-    for cx, cz in pm_cover_screws():
-        body = body.union(_cyl_y(cx, cz, y_in - PM_COVER_T, PM_COVER_T, BOSS_D / 2))
-        body = body.cut(_cyl_y(cx, cz, y_in - PM_COVER_T - 1.0,
-                               PM_COVER_T + 2.0, LID_SCREW_D / 2))
+        body = _union_if_solid(body, _cyl_y(cx, cz, y_frame - t, t, BOSS_D / 2))
+        body = body.cut(_cyl_y(cx, cz, y_frame - t - 1.0, t + 2.0,
+                               LID_SCREW_D / 2))
     return body
 
 def build_sun_placeholder() -> cq.Workplane:
@@ -2312,15 +2351,41 @@ def _boundary_edges(path: str) -> int:
     return sum(1 for v in seen.values() if v % 2)
 
 
-def flat_for_print(body: cq.Workplane, axis: str) -> cq.Workplane:
+def flat_for_print(body: cq.Workplane, axis: str, flip: bool = False) -> cq.Workplane:
     """Lay a small flat part on the bed with its thickness in Z, then drop it to
     z=0.  Without this the plates export wherever they sit in model space —
-    tail_panel's thickness is along X and the cover's is along Y."""
+    tail_panel's thickness is along X and the cover's is along Y.
+
+    `flip` picks the other way up about the same axis.  Laying a part flat says
+    nothing about which face lands on the bed, and pm_cover exported balanced on
+    its four corner posts: 100 mm^2 of bed contact with the whole ring floating
+    2.7 mm in the air, when the other way up gives 873.  P13 now measures that
+    rather than leaving it to whoever slices the file.
+    """
     if axis == "x":
-        body = body.rotate((0, 0, 0), (0, 1, 0), 90.0)
+        body = body.rotate((0, 0, 0), (0, 1, 0), 90.0 if not flip else -90.0)
     elif axis == "y":
-        body = body.rotate((0, 0, 0), (1, 0, 0), -90.0)
+        body = body.rotate((0, 0, 0), (1, 0, 0), -90.0 if not flip else 90.0)
     return _centre_on_bed(body)
+
+
+def bed_contact(body: cq.Workplane) -> float:
+    """Face area lying in the bed plane of an already-oriented part (P13)."""
+    v = body.val()
+    z0 = v.BoundingBox().zmin
+    return sum(f.Area() for f in v.Faces() if abs(f.Center().z - z0) < 0.05)
+
+
+# How each separately printed part is laid on the bed.  Explicit, not derived:
+# maximising bed contact is the right rule for pm_cover but the wrong one for
+# sun_clamp, where the two orientations are within 9% and the bore must face UP
+# so it self-supports.
+PRINT_POSE = {
+    "tail_panel": ("x", False),
+    "static_bay": ("y", False),
+    "pm_cover":   ("y", True),
+    "sun_clamp":  ("y", False),
+}
 
 
 def model_stamp() -> str:
@@ -2383,11 +2448,10 @@ def main() -> None:
 
     export_part(for_print_half(right, 1), "pod_right")
     export_part(for_print_half(left, -1), "pod_left")
-    for name, part, axis in (("tail_panel", panel, "x"),
-                             ("static_bay", cup, "y"),
-                             ("pm_cover", cover, "y"),
-                             ("sun_clamp", clamp, "y")):
-        flat = flat_for_print(part, axis)
+    for name, part in (("tail_panel", panel), ("static_bay", cup),
+                       ("pm_cover", cover), ("sun_clamp", clamp)):
+        axis, flip = PRINT_POSE[name]
+        flat = flat_for_print(part, axis, flip)
         export_part(flat, name)
         check_print_bb(flat, name)
     lap("STL/STEP exported")
