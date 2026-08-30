@@ -1,0 +1,15 @@
+# Runs kingfisher-timesync-floor-touch shortly after boot (once chrony has had
+# a chance to lock, per docs/time-sync.md's ~15-20s figure) and periodically
+# after that. Persistent=false on purpose: a catch-up run immediately at boot,
+# before chrony has locked, would just skip (see the script) — no value in it.
+
+[Unit]
+Description=Periodic + boot trigger for kingfisher-timesync-floor-touch
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

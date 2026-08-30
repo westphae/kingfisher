@@ -94,3 +94,29 @@ Set `clock.resync_helper` in `~/.config/kingfisher/config.json` if you use a
 non-default path. **Retry sync** (light) uses `chronyc reselect` only and needs no
 sudo. Auto-retry runs the light path on a cooldown when unsynced with a fresh GPS
 fix.
+
+## 7. Timesync clock-floor touch (recommended if the RTC doesn't hold time)
+
+This box uses chrony, not `systemd-timesyncd`, so nothing normally advances
+`/var/lib/systemd/timesync/clock` — the file systemd uses as a "never step the
+clock backward past this" floor. If the RTC isn't retaining time across power
+cycles, every boot's pre-GPS-lock window (~15-20s) falls back to that floor
+instead of a recent time, and it can be stale by weeks instead of minutes. See
+`deploy/time-sync/kingfisher-timesync-floor-touch.sh` for the full story.
+
+```bash
+sudo install -m 755 deploy/time-sync/kingfisher-timesync-floor-touch.sh      /usr/local/bin/
+sudo install -m 644 deploy/time-sync/kingfisher-timesync-floor-touch.service /etc/systemd/system/
+sudo install -m 644 deploy/time-sync/kingfisher-timesync-floor-touch.timer   /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now kingfisher-timesync-floor-touch.timer
+```
+
+Verify:
+
+```bash
+sudo systemctl start kingfisher-timesync-floor-touch.service
+journalctl -u kingfisher-timesync-floor-touch.service -n 5 --no-pager
+# Expect: "floor advanced to <UTC time> (synced to #* PPS)" once chrony has locked.
+stat -c '%y' /var/lib/systemd/timesync/clock   # mtime should track "now", refreshed every ~15 min
+```
