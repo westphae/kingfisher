@@ -270,14 +270,15 @@ func ScanDB(path string) (Summary, error) {
 	sum.Aircraft = aircraft.String
 	sum.Notes = notes.String
 	sum.StartUTC = start.String
-	// A fallback-named DB may carry the corrected start in metadata.
+	// clock_true_start_utc is computed by back-tracking the monotonic clock
+	// after chrony's first sync, so it's always at least as trustworthy as the
+	// raw open-time start_time — including when start_time merely *looks*
+	// plausible (e.g. a stale systemd clock floor) rather than failing outright.
 	var trueStart sql.NullString
 	_ = db.QueryRow(`SELECT value FROM metadata WHERE key='clock_true_start_utc'`).Scan(&trueStart)
 	if trueStart.Valid && trueStart.String != "" {
 		if t, err := time.Parse(time.RFC3339Nano, trueStart.String); err == nil {
-			if st, err2 := time.Parse(time.RFC3339, sum.StartUTC); err2 != nil || st.Year() < 2025 {
-				sum.StartUTC = t.UTC().Format(time.RFC3339)
-			}
+			sum.StartUTC = t.UTC().Format(time.RFC3339)
 		}
 	}
 
