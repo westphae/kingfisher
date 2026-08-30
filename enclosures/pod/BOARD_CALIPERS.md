@@ -149,12 +149,13 @@ mounting holes, which is why it needs `pm_cover.stl` to trap it.
 | C8  | How far the USB-C **plug** protrudes past the board edge     | 1.30       |
 | C9  | Clearance needed off a long edge to solder a castellated pad | 2.00       |
 | C10 | Must Reset/Boot be reachable after assembly? (y/n)           | n          |
+| C14 | USB-C shell height off the board face (re-measured 2026-08-29; was 3.20) | 3.50 |
 
 Connectors:
 
 | Name       | Edge | `at` / (u,v)  | Body width | Body height | Cable room |
 |------------|------|---------------|------------|-------------|------------|
-| USB-C      | aft  | 8.85          | 9.00       | 3.20        | 30.00      |
+| USB-C      | aft  | 8.85          | 9.00       | 3.50        | 30.00      |
 | Qwiic      | face | (18.51, 8.85) | 2.60       | 4.40        | 3.60       |
 | edge wires | face | both long edges | —        | —           | see C11    |
 
@@ -187,6 +188,16 @@ Connectors:
 > bare PCB, else a connector's body height), and the check tests that against
 > the connector table. Fed the old four-corner geometry it fails both aft posts
 > by name.
+>
+> **A connector's height constrains the COVER, not just the hold-down.** I10
+> asks whether a hold-down lands on a connector. It does not ask whether the
+> cover's own body runs through one, and that is the question that was missing:
+> the ring plane is set by the boss height (chosen for insert depth) with no
+> reference to the tallest thing the cover passes over. The aft cross-piece sat
+> 1.5 mm inside the USB-C shell, so the brace's post was buried in the ring's
+> own thickness and did nothing — the ring itself bore on the connector and
+> held the whole cover 1.6 mm off its bosses. **I12** now intersects the cover
+> against every connector body; fed the old boss height it reports 32 mm³.
 >
 > **The deeper lesson is that this board has no usable roof at all.** Between
 > the Qwiic in the middle of the face and wires off both long edges, any

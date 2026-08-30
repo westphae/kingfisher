@@ -244,6 +244,8 @@ def check_geometry(r: CheckResult) -> None:
     g.check_parts_against_each_other(r, pod)
     g.check_print_pose(r, pod)
     g.check_holddown_footprints(r, pod)
+    g.check_backface_clearance(r, pod)
+    g.check_cover_clears_components(r, pod)
     g.check_aero(r, pod)
     g.check_flats(r, pod)
 

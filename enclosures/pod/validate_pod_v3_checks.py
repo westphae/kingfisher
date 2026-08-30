@@ -433,6 +433,73 @@ def check_open_bay(r, pod, left, right) -> None:
                 r.ok(f"I4 {what} clear in {name} ({v:.1f} mm^3)")
 
 
+def check_cover_clears_components(r, pod) -> None:
+    """I12 — pm_cover must not intersect anything on the board it covers.
+
+    I10 asks whether a hold-down LANDS on a connector.  This asks the different
+    question of whether the cover's own body runs THROUGH one, and it is the
+    question that was missing: the ring plane is set by the boss height, chosen
+    for insert depth, with no reference to the tallest thing the cover passes
+    over.  The aft cross-piece sat 1.5 mm inside the USB-C shell -- the brace's
+    post was buried in the ring's own thickness and did nothing, so the ring
+    itself bore on the connector and held the whole cover off its bosses.
+
+    A hold-down that bears on a connector touches its top FACE, which is zero
+    volume, so any positive intersection is a fault however it arises.
+    """
+    import cadquery as cq
+    b = pod.BOARDS["PROMICRO"]
+    y_face = pod.board_y(b) - b["pcb"]
+    cover = pod.build_pm_cover().val()
+    hits = []
+    for c in b["conns"]:
+        h = c.get("body_h")
+        if not h:
+            continue
+        if c["edge"] == "aft":
+            x0, dx = b["x0"] + b["L"] - 6.0, 6.0 + 1.3
+            z0, dz = b["z0"] + c["at"] - c["w"] / 2, c["w"]
+        elif c["edge"] == "fore":
+            x0, dx = b["x0"] - 1.3, 7.3
+            z0, dz = b["z0"] + c["at"] - c["w"] / 2, c["w"]
+        else:
+            cu, cv = c["at"] if isinstance(c["at"], tuple) else (c["at"], b["W"] / 2)
+            x0, dx = b["x0"] + cu - c["w"] / 2, c["w"]
+            z0, dz = b["z0"] + cv - c["w"] / 2, c["w"]
+        box = (cq.Workplane("XY").transformed(offset=(x0, y_face - h, z0))
+               .box(dx, h, dz, centered=(False, False, False)).val())
+        v = cover.intersect(box).Volume()
+        if v > 0.5:
+            hits.append(f"{c['name']} by {v:.1f} mm^3")
+    if hits:
+        r.fail("I12 pm_cover runs through: " + "; ".join(hits))
+    else:
+        r.ok("I12 pm_cover clears every connector body on the Pro Micro")
+
+
+def check_backface_clearance(r, pod) -> None:
+    """I11 — a board must sit on its standoffs, not on its own back face.
+
+    `back` (the tallest feature on the underside) was recorded for every board
+    and used for exactly one thing: growing the keepout outboard.  Nothing ever
+    compared it against the standoff the board rests on.  The Pro Micro's back
+    was logged as 0.00 and is really ~1.0 -- wires soldered into the holes
+    beside the castellations -- against a 1.0 mm standoff, so the board would
+    have rocked on its wire stubs with its pads never touching.
+    """
+    bad = []
+    for name, b in pod.BOARDS.items():
+        stand = pod.PM_STANDOFF if b.get("cover") else pod.STANDOFF_H
+        back = b.get("back", 0.0)
+        if back + 0.4 > stand:
+            bad.append(f"{name}: back {back:.2f} vs {stand:.2f} mm standoff")
+    if bad:
+        r.fail("I11 board would rest on its own back-face features: "
+               + "; ".join(bad))
+    else:
+        r.ok(f"I11 all {len(pod.BOARDS)} boards clear their back-face features")
+
+
 def check_holddown_footprints(r, pod) -> None:
     """I10 — a hold-down may not land on a connector or component unless the
     board model says it bears on one.

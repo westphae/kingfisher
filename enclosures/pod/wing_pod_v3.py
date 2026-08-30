@@ -423,12 +423,19 @@ BOOST_X0, BOOST_Z0 = COL_B_X0, 20.0
 COL_B_W = BOOST_L
 
 # --- static bay, with the ESP32 stacked on its inboard face ---------------
-CUP_X0 = 122.0
-BMP_X0, BMP_Z0 = CUP_X0 + CUP_WALL + CUP_CLR, 17.8
+# 1.5 mm longer at each end than the plenum needs, to carry the pocket's end
+# walls.  The Pro Micro is 33.51 long against a 33.31 cup: the board was
+# fractionally LARGER than its own mount, which is why there was never anywhere
+# to put a wall, and why every retention scheme so far worked around that
+# instead of fixing it.  There is 2.2 mm free before the Boost's envelope and
+# 2.7 before the Babysitter's, so this costs no other board anything.
+CUP_END = 1.5
+CUP_X0 = 122.0 - CUP_END
+BMP_X0, BMP_Z0 = CUP_X0 + CUP_END + CUP_WALL + CUP_CLR, 17.8
 # BAY_* is the PLENUM volume (cup interior); CUP_* is the cup's outer shell.
 BAY_X0, BAY_X1 = BMP_X0 - CUP_CLR, BMP_X0 + BMP581_L + CUP_CLR
 BAY_Z0, BAY_Z1 = BMP_Z0 - CUP_CLR, BMP_Z0 + BMP581_W + CUP_CLR
-CUP_X1 = BAY_X1 + CUP_WALL
+CUP_X1 = BAY_X1 + CUP_WALL + 2 * CUP_END
 CUP_Z0, CUP_Z1 = BAY_Z0 - CUP_WALL, BAY_Z1 + CUP_WALL
 # The cup was 16.6 mm deep in Y for a board that needs 5.6, and its glands were
 # cut at the deep end where the BMP581 has nothing -- its two Qwiic connectors
@@ -448,7 +455,11 @@ PM_Z0 = 0.5 * (CUP_Z0 + CUP_Z1) - PM_W / 2
 # 1.0 is enough: the measured back-face height is 0.00, so this is solder-
 # clearance only.  The whole stack (standoff + PCB + components + cover) ends
 # 1.7 mm short of the battery, and every mm here comes straight off that gap.
-PM_STANDOFF = 1.0
+# 2.0, not 1.0.  The PCB is bare underneath but the wires soldered into the
+# holes beside the castellations stand ~1.0 mm proud of it (C5), so a 1.0 mm
+# standoff put the board on its wire stubs instead of its pads.  This must
+# stay clear of b["back"] -- I11.
+PM_STANDOFF = 2.0
 PM_Y = CUP_Y0 - PM_STANDOFF
 # Inner face of the cover's roof: past the tallest component with clearance.
 # pm_cover is an open frame, so there is no roof clearance to set -- only how
@@ -464,20 +475,35 @@ PM_Y = CUP_Y0 - PM_STANDOFF
 PM_HOLD = [
     (0.0, 0.0, 2.0, 2.0, 0.0),                    # fore, lower — bare PCB
     (0.0, 17.70 - 2.0, 2.0, 2.0, 0.0),            # fore, upper — bare PCB
-    (33.51 - 2.0, 8.85 - 2.0, 2.0, 4.0, 3.20),    # aft — on the USB-C shell
+    (33.51 - 2.0, 8.85 - 2.0, 2.0, 4.0, 3.50),    # aft — on the USB-C shell
 ]
-PM_LIP = 1.2              # corner lip, traps the board in u and v
+PM_POCKET_W = 1.5         # end-wall thickness
+PM_POCKET_CLR = 0.25      # per side, board edge to wall
+PM_POCKET_PROUD = 0.8     # wall height above the board's component face
+PM_POCKET_SIDE = 5.0      # fore-corner side ridge length, along u
+PM_USB_NOTCH = 14.0       # aft-wall opening, wide enough for a thick plug
 PM_FRAME_CLR_X = 2.0      # ring inner edge, fore/aft of the board
 PM_FRAME_CLR_Z = 3.0      # ring inner edge, off the long edges (wires exit here)
 PM_FRAME_W = 4.0          # ring width
 PM_FINGER = 5.0           # corner hold-down, square
-PM_BOSS_H = 4.5           # cup boss height, >= INS_DEPTH so an insert fits
+# Boss height sets where the ring plane sits, and the ring must clear the
+# tallest thing it passes over -- which is the USB-C shell, 3.5 mm off the
+# board face, under the aft cross-piece.  At 4.5 the ring's inner face landed
+# 1.5 mm INSIDE the connector: the aft brace's post was buried in the ring's
+# own 2 mm thickness and did nothing, so what actually bore on the shell was
+# the ring itself.  That is what held the cover 1.6 mm off its bosses.
+# 7.8 puts the inner face 1.5 mm clear of the shell, so the brace is a real
+# post again.  Still >= INS_DEPTH, so an insert fits.
+PM_BOSS_H = 7.8
 PM_COVER_CLR = 0.6
 PM_COVER_T = 2.0
 # Outer face of the cover roof; the cup's bosses run out to meet it.
 PM_COVER_Y = PM_Y - PM_PCB - PM_COMP - PM_COVER_CLR - PM_COVER_T
 
-BABY_X0, BABY_Z0 = 162.0, 12.0                     # Babysitter, beside the ESP32
+# 163.5: the cup grew 1.5 mm aft to carry the pocket's end wall, which ate the
+# Babysitter's fore cable clearance by 0.3 mm.  Its aft envelope still ends at
+# 222.4 against a tail rim at 227.
+BABY_X0, BABY_Z0 = 163.5, 12.0                     # Babysitter, beside the ESP32
 
 # Battery: laid down on the seam, clear of the SUN aft bulkhead.
 BATT_X0 = AFT_BH_X1 + 2.5
@@ -937,7 +963,7 @@ BOARD_SPECS: dict[str, dict] = {
                dict(name="vin_vout", edge="face", at=12.63, w=6.0, need=4.0)],
     ),
     "PROMICRO": dict(
-        L=33.51, W=17.70, pcb=0.78, comp=4.4, back=0.0, tray=True,
+        L=33.51, W=17.70, pcb=0.78, comp=4.4, back=1.0, tray=True,
         holes=[],                       # castellated edges, no mounting holes
         edge_clear=2.0,                 # room to solder a castellated pad
         # The board has no holes, so the TRAY carries the fasteners.  Three,
@@ -953,7 +979,7 @@ BOARD_SPECS: dict[str, dict] = {
         # four pads on the static bay's back face and is trapped by pm_cover,
         # whose four screws go into the CUP.
         cover=True,
-        conns=[dict(name="usb_c", edge="aft", at=8.85, w=9.0, need=30.0,
+        conns=[dict(name="usb_c", edge="aft", at=8.85, w=9.0, need=30.0, body_h=3.5,
                     when="service"),
                # Stands UP off the component face 4.4 mm -- it is the
                # tallest feature on the board, which is what C4 records -- and
@@ -2080,6 +2106,38 @@ def build_static_bay_cup() -> cq.Workplane:
     for px, pz, pdx, pdz in pm_support_pads():
         pad = _box(px, CUP_Y0 - PM_STANDOFF, pz, pdx, PM_STANDOFF, pdz)
         body = _union_if_solid(body, pad)
+
+    # --- pocket: this is what LOCATES the Pro Micro ------------------------
+    # Three covers failed before this because one part was asked to clamp the
+    # board AND locate it, through three small contact patches.  Three posts
+    # pressing down cannot stop a board sliding: the printed frame let it move
+    # 1.5 mm fore/aft and flip.  Location belongs to a pocket the board drops
+    # into; the cover then only has to push down, and can be short and stiff.
+    pm = BOARDS["PROMICRO"]
+    px0, px1 = pm["x0"], pm["x0"] + pm["L"]
+    pz0, pz1 = pm["z0"], pm["z0"] + pm["W"]
+    wall_h = PM_STANDOFF + pm["pcb"] + PM_POCKET_PROUD
+    wy = CUP_Y0 - wall_h
+    c = PM_POCKET_CLR
+
+    # End walls take the fore/aft slip, which is the axis that actually moved.
+    for wx0 in (px0 - c - PM_POCKET_W, px1 + c):
+        body = _union_if_solid(body, _box(wx0, wy, pz0 - c - PM_POCKET_W,
+                                          PM_POCKET_W, wall_h,
+                                          (pz1 - pz0) + 2 * (c + PM_POCKET_W)))
+    # ...but the aft wall must let a USB-C plug through, so notch it wide.
+    usb = next(k for k in pm["conns"] if k["name"] == "usb_c")
+    nz = pz0 + usb["at"]
+    body = body.cut(_box(px1, wy - 1.0, nz - PM_USB_NOTCH / 2,
+                         PM_POCKET_W + c + 2.0, wall_h + 2.0, PM_USB_NOTCH))
+
+    # Side ridges at the FORE corners only.  The long edges carry soldered
+    # castellated-pad wires needing 2 mm of clearance (C9), so a continuous
+    # side wall would foul the fillets; the fore corners are the only clear
+    # PCB on the board (C13).
+    for rz0 in (pz0 - c - PM_POCKET_W, pz1 + c):
+        body = _union_if_solid(body, _box(px0, wy, rz0, PM_POCKET_SIDE,
+                                          wall_h, PM_POCKET_W))
     for bx, bz in pm_cover_screws():
         # Stops at the ear's INNER face.  Running it to PM_COVER_Y put the
         # boss and the cover's ear in the same 2 mm of Y at the same x, z and
@@ -2118,57 +2176,44 @@ def build_pm_cover() -> cq.Workplane:
     y_frame = CUP_Y0 - PM_BOSS_H               # underside of the frame
     t = PM_COVER_T
 
-    # Ring: inner edge stands off the board so the edge wires clear it.
-    ix0, ix1 = x0 - PM_FRAME_CLR_X, x1 + PM_FRAME_CLR_X
+    # Ring: a U, not a rectangle.  It reaches out in Z to the ears and stops
+    # dead at the board's aft edge -- nothing of the cover lies aft of the
+    # board, which is what blocked thick USB-C plugs.  It no longer overhangs
+    # in X either: the ears are at u 6.0 and 27.5, both inside the board's
+    # length, so 6 mm of overhang at each end was never structural.  It only
+    # made the cover 45.5 mm long for a 33.5 mm board, and floppy along it.
+    #
+    # No lips either.  Locating the board is the pocket's job now.
+    ix0 = x0 - PM_FRAME_CLR_X
     iz0, iz1 = z0 - PM_FRAME_CLR_Z, z1 + PM_FRAME_CLR_Z
-    ox0, ox1 = ix0 - PM_FRAME_W, ix1 + PM_FRAME_W
+    ox0 = ix0 - PM_FRAME_W
     oz0, oz1 = iz0 - PM_FRAME_W, iz1 + PM_FRAME_W
 
-    body = _box(ox0, y_frame - t, oz0, ox1 - ox0, t, oz1 - oz0)
+    body = _box(ox0, y_frame - t, oz0, x1 - ox0, t, oz1 - oz0)
     body = body.cut(_box(ix0, y_frame - t - 1.0, iz0,
-                         ix1 - ix0, t + 2.0, iz1 - iz0))
+                         (x1 - ix0) + 1.0, t + 2.0, iz1 - iz0))
 
     # Hold-downs: a TAB at the ring plane reaching in over the board, then a
     # POST down onto whatever that hold-down bears on.  Stepping it keeps the
     # tab clear of the cup's bosses, whose tops are the ring's underside.
     for u0, v0, du, dv, rests in PM_HOLD:
         hx, hz = x0 + u0, z0 + v0
-        # tab spans from the ring's inner edge to the far side of the post
-        # Overlapping the ring by PM_FRAME_W, not stopping on its inner face:
-        # a tab that merely touches leaves a separate solid after the union.
         if u0 < b["L"] / 2:
-            tx0 = x0 - PM_FRAME_CLR_X - PM_FRAME_W
-            tlen = PM_FRAME_CLR_X + PM_FRAME_W + u0 + du
+            # fore pair: reach back to the fore ring segment
+            tx0, tlen = ox0, (hx + du) - ox0
+            if v0 < b["W"] / 2:
+                tz0, tlen_z = oz0, (hz + dv) - oz0
+            else:
+                tz0, tlen_z = hz, oz1 - hz
         else:
-            tx0, tlen = hx, (x1 + PM_FRAME_CLR_X + PM_FRAME_W) - hx
-        tz0 = min(hz, z0 - PM_FRAME_CLR_Z) if v0 < 1.0 else hz
-        tlen_z = max(dv, (hz + dv) - tz0)
+            # aft: a cross-piece between the two side rails.  It cannot hang
+            # off an aft ring segment because there isn't one -- that is what
+            # keeps the cover clear of a plugged USB-C.
+            tx0, tlen = hx, x1 - hx
+            tz0, tlen_z = oz0, oz1 - oz0
         body = body.union(_box(tx0, y_frame - t, tz0, tlen, t, tlen_z))
         body = body.union(_box(hx, y_frame - t, hz, du,
                                (y_face - rests) - (y_frame - t), dv))
-
-    # Corner lips at the fore end: a bracket outside the board that traps it in
-    # u and v.  Only at that corner -- the long edges must stay clear for the
-    # castellated-pad wires, and the aft end cannot take one because the USB-C
-    # protrudes 1.3 mm past the edge and has to stay pluggable.
-    #
-    # Both legs run back to the ring's inner edge.  Sized to the board instead,
-    # the v-leg reached neither the ring nor the tab and came away as a loose
-    # 29 mm^3 sliver.
-    lip_y1 = board_y(b) + 0.3
-    lip_h = lip_y1 - (y_frame - t)
-    for u0, v0, du, dv, _r in PM_HOLD[:2]:
-        low = v0 < b["W"] / 2
-        # leg along u: blocks the board sliding fore
-        lz0 = (z0 + v0 - PM_LIP) if low else (z0 + v0)
-        body = body.union(_box(x0 - PM_LIP, y_frame - t, lz0,
-                               PM_LIP, lip_h, dv + PM_LIP))
-        # leg along v: blocks it sliding sideways, run out to the ring
-        vz0 = (z0 - PM_FRAME_CLR_Z) if low else (z0 + b["W"])
-        # Stops at the hold-down's far face: run 1 mm longer and it clips the
-        # cup's boss, whose near edge is at u 2.5.
-        body = body.union(_box(x0 - PM_LIP, y_frame - t, vz0,
-                               PM_LIP + du, lip_h, PM_FRAME_CLR_Z))
 
     # Ears + clearance holes, in the ring.
     for cx, cz in pm_cover_screws():
