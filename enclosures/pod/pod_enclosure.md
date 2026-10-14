@@ -81,11 +81,11 @@ rejects the job. The `.step` files carry the same print orientation as the
 
 | File | Role |
 |------|------|
-| `pod_left.stl` / `.step` | Left half (cover + pitot cradle), print-oriented |
-| `pod_right.stl` / `.step` | Right half (electronics), print-oriented |
+| `pod_shell.stl` / `.step` | Deep half: SUN cradle, battery, aft rim, drain. Carries the flange inserts. |
+| `pod_tray.stl` / `.step` | Flat half: the board land. Through-drilled — screw heads counterbore into this flank. |
 | `tail_panel.stl` / `.step` | Aft service plate: rocker, USB, two LED holders |
 | `static_bay.stl` / `.step` | Isolated BMP plenum — a cup that seals to the wall land |
-| `pm_tray.stl` / `.step` | Pro Micro clamp tray (no OEM holes) |
+| `pm_cover.stl` / `.step` | Open frame that clamps the Pro Micro into the bay's pocket (no OEM holes) |
 | `pod_assembly.step` | Assembled + SUN-B placeholder |
 | `pod_v3_*_layout.png` | **Assembly sheet** — looking down −Y into the open right half: pod outline, every insert boss, board positions, and the hose/harness routes |
 | `pod_v3_*.png` | Other QC previews (profile/sections, interior, aft panel) — unique name per revision |
@@ -98,10 +98,10 @@ rejects the job. The `.step` files carry the same print orientation as the
 
    | Column | x | Lower row | Upper row |
    |---|---|---|---|
-   | A | 44 → 67 | MMC5983 (z 8.5) | MS4525 (z 32) |
-   | B | 86 → 120 | Pro Micro on `pm_tray` (z 6.6) | Qwiic Boost (z 32) |
-   | C | 127 → 160 | isolated static bay cup: BMP581 (z 17.8) | |
-   | D | 167 → 200 | Battery Babysitter (z 12) | |
+      | A | 44 → 74 | MMC5983 (z 8.5) | MS4525 (z 32) |
+      | B | 90 → 116 | — | Qwiic Boost (z 20) |
+      | C | 120 → 157 | static bay cup: BMP581 (z 17.8), **Pro Micro stacked on its back** (z 21.5) | |
+      | D | 163 → 196 | Battery Babysitter (z 12) | |
 
    Re-packed for print-4 against measured **envelopes** rather than outlines
    (I6′), which moved almost every board:
@@ -148,22 +148,29 @@ foam/RTV gasket. Integral walls plus a service window could not do both jobs —
 the window has to pass a heat-set iron yet leave a sealing frame, and at a
 25.4 mm board it did neither.
 
-The **Pro Micro tray** (`pm_tray.stl`) sits below the Qwiic Boost at
-x 81.5…126.6, z 3.0…31.6. The retaining rim runs in −Y so the board drops in
-from the open mating face. Rebuilt for print-4:
+The **Pro Micro** has no OEM mounting holes, so location and clamping are
+separate jobs — three earlier parts failed by asking one to do both.
 
-- **Outer size is the board plus 2 × (clearance + rim).** It used to be built
-  to the board's own outline with a rim on all four edges, so the rim ate
-  *into* the footprint and a 33.5 × 17.7 board had a 29.8 × 14.6 pocket to drop
-  into. It could not.
-- **The long edges are open**, held by corner clips instead of rims: SparkFun
-  document castellated pads along both, and they have to stay solderable.
-- **The aft rim is notched for the USB-C**, so the board can be reflashed.
-- **Three fixings, not four** — and they belong to the tray, because the board
-  has no holes at all. Two on a forward ear plus one on the upper edge at
-  mid-length: two in a line would still let the tray pivot about that line, and
-  the obvious third position, an aft ear, puts a post at x 127.0, which is
-  exactly the static bay's forward wall.
+It drops into a **pocket on the static bay's back face** (x 120…157). The bay
+grew 2 mm at each end to carry it: the board is 33.51 long against a 33.31 cup,
+so it was fractionally *larger than its own mount* and there was nowhere to put
+a wall. End walls take the fore/aft slip, with a 14 mm notch in the aft one so a
+thick USB-C plug passes; side ridges sit only at the fore corners, because the
+long edges carry soldered castellated-pad wires and the fore corners are the
+only clear PCB on the board.
+
+`pm_cover.stl` then only has to push down. It is an open frame — a ring standing
+off the board's outline, carrying four ears that bolt to the bay and three
+hold-downs: two 2 × 2 nubs flush into the fore corners on bare PCB, and one
+4 × 2 standoff bearing on the **USB-C shell**, because the status LEDs run to
+within 0.5 mm of both aft corners and leave no bare copper there. Nothing sits
+over the middle: the Qwiic is mid-face and wires leave both long edges, so no
+roof opening could be correct.
+
+The ring's height is set by the tallest thing it passes over, not by the boss
+depth. At the boss-derived height its inner face sat 1.5 mm *inside* the USB-C
+shell, so the aft brace's post was buried in the ring's own thickness and the
+ring itself bore on the connector, holding the cover 1.6 mm off its bosses.
 
 The **static bay cup** now has **two glands, in its fore and aft walls**, facing
 the BMP581's two Qwiic connectors. The single gland it had before was in the

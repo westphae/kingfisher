@@ -90,9 +90,15 @@ def _openings(pod):
                 if math.hypot(y - (cy + dy), z - pod.LED_Z) <= pod.LED_HOLE_D / 2 + 1.5:
                     return True
         # 4. flange screw counterbores: a designed recess in the left cover so
-        #    the M2.5 head sits flush in the aero skin.  Left half only.
-        if y < 0.0:
+        #    the M2.5 head sits flush in the aero skin.  PLATE side (y>0):
+        #    the counterbores moved there when the fastener scheme was
+        #    inverted, and this clause did not follow -- it still said "left
+        #    cover, left half only", which is what the bowl was called when it
+        #    was 10 mm thick.  W1 then reported the recesses as thin wall.
+        if y > 0.0:
             for sx, sz in pod.FLANGE_SCREWS:
+                if pod.section_params(sx)[1] <= pod.FLANGE_W:
+                    continue          # no plate there, so no counterbore
                 if math.hypot(x - sx, z - sz) <= pod.LID_CB_D / 2 + 1.5:
                     return True
         # 5. labyrinth drain
@@ -286,7 +292,7 @@ def check_flats(r, pod) -> None:
             r.ok(f"{tag} {name} planar, {area:.0f} mm^2 over {len(faces)} faces")
 
 
-def check_tips(r, pod, left, right) -> None:
+def check_tips(r, pod, shell, tray) -> None:
     """A8/A9 — the OML reaches both tips; no dropped tail scrap.
 
     Both halves used to have to reach the nose, because the seam ran down the
@@ -297,9 +303,9 @@ def check_tips(r, pod, left, right) -> None:
     material where the design deliberately has none.  The tail is different --
     both halves still run out to the tail rim, so A9 stays on both.
     """
-    for name, half in (("pod_left", left), ("pod_right", right)):
+    for name, half in (("pod_shell", shell), ("pod_tray", tray)):
         bb = half.val().BoundingBox()
-        if bb.xmin > 1.0 and name == "pod_left":
+        if bb.xmin > 1.0 and name == "pod_shell":
             r.fail(f"A8 {name} does not reach the nose (xmin={bb.xmin:.1f})")
         elif bb.xmax < pod.OUTER_L - 0.5:
             r.fail(f"A9 {name} tail tip not fused (xmax={bb.xmax:.1f})")
@@ -351,7 +357,7 @@ def check_drain(r, pod, closed) -> None:
     else:
         r.ok(f"L8 labyrinth intact: roof over the outlet, channel open beneath")
 
-def check_open_bay(r, pod, left, right) -> None:
+def check_open_bay(r, pod, shell, tray) -> None:
     """I4 — the mating face must stay OPEN for install.
 
     Every existing check looks for missing material (holes, thin walls,
@@ -363,7 +369,7 @@ def check_open_bay(r, pod, left, right) -> None:
     Two tests, both physical:
       * the BOWL's bay must be empty aft of the SUN bulkhead.  This survived
         the clamshell inversion unchanged in substance but not in reason: it
-        used to hold because pod_left was a bare cover, and it now holds
+        used to hold because pod_shell was a bare cover, and it now holds
         because every board moved to the plate.  What hangs into the bowl
         there is the battery pocket (a recess, not material), the drain, and
         the boards' own components past the seam — no printed material.
@@ -374,7 +380,7 @@ def check_open_bay(r, pod, left, right) -> None:
     from OCP.gp import gp_Pnt
     from OCP.TopAbs import TopAbs_IN, TopAbs_ON
 
-    cls = BRepClass3d_SolidClassifier(left.val().wrapped)
+    cls = BRepClass3d_SolidClassifier(shell.val().wrapped)
     blocked = []
     x0, x1 = pod.AFT_BH_X1 + 5.0, pod.FLANGE_X1 - 5.0
     for i in range(14):
@@ -424,13 +430,79 @@ def check_open_bay(r, pod, left, right) -> None:
         if pod.BATT_X0 - pod.BOSS_D <= sx <= pod.BATT_X0 + pod.BATT_POCKET_X + pod.BOSS_D:
             batt = batt.cut(pod._cyl_y(sx, sz, -pod.FLANGE_W - 1.0,
                                        2 * pod.FLANGE_W + 2.0, pod.BOSS_D / 2))
-    for name, half in (("pod_left", left), ("pod_right", right)):
+    for name, half in (("pod_shell", shell), ("pod_tray", tray)):
         for what, tool in (("battery", batt), ("SUN barrel", sun)):
             v = half.val().intersect(tool.val()).Volume()
             if v > 50.0:
                 r.fail(f"I4/I6 {what} insertion volume fouled in {name} by {v:.0f} mm^3")
             else:
                 r.ok(f"I4 {what} clear in {name} ({v:.1f} mm^3)")
+
+
+def check_clamp_extraction(r, pod, shell) -> None:
+    """I14 — sun_clamp must have a path out, not merely fit where it sits.
+
+    Every static check passed on a cap that could not be installed: it clears
+    the bowl perfectly in its seated position, and I6 only ever asks about that
+    position.  Sweeping it along +Y showed it blocked after 0.5 mm, because its
+    forward end was a wedge inside the converging nose cone.
+
+    The same blind spot as the SUN itself, which was captured by full-circle
+    bores while every solid check was green.  "Does it fit" and "can it get
+    there" are different questions.
+    """
+    clamp = pod.build_sun_clamp().val()
+    blocked = []
+    for dy in (0.5, 1.0, pod.SUN_CLAMP_LIFT):
+        v = shell.val().intersect(clamp.translate((0, dy, 0))).Volume()
+        if v > 1.0:
+            blocked.append(f"{v:.0f} mm^3 at +{dy:.1f}")
+    if blocked:
+        r.fail("I14 sun_clamp cannot be lifted out: " + "; ".join(blocked))
+    else:
+        r.ok("I14 sun_clamp lifts clear of the bowl along +Y")
+
+
+def check_glands_open(r, pod) -> None:
+    """S4 — each Qwiic gland must actually connect the plenum to the outside.
+
+    A sealed box whose cable entries are blind is not a bay, it is a box.  Both
+    glands were: their cut depth was hard-coded to CUP_WALL + 2.0, sized when
+    the walls were 2.0 mm thick, and growing the cup by CUP_END to carry the
+    Pro Micro pocket made them 3.5 -- so the cuts stopped short of the plenum.
+    Nothing noticed, because a blocked gland leaves a perfectly good solid.
+
+    Sampled along the gland's axis rather than compared arithmetically: the
+    arithmetic is what was wrong.
+    """
+    from OCP.BRepClass3d import BRepClass3d_SolidClassifier
+    from OCP.gp import gp_Pnt
+    from OCP.TopAbs import TopAbs_IN, TopAbs_ON
+
+    cup = pod.build_static_bay_cup().val()
+    cls = BRepClass3d_SolidClassifier(cup.wrapped)
+    bmp = pod.BOARDS["BMP581"]
+    y_mid = 0.5 * (pod.board_keepout(bmp)[2] + pod.board_y(bmp))
+    bad = []
+    for c in bmp["conns"]:
+        cz = bmp["z0"] + c["at"]
+        if c["edge"] == "fore":
+            x0, x1 = pod.CUP_X0, pod.BAY_X0
+        else:
+            x0, x1 = pod.BAY_X1, pod.CUP_X1
+        blocked = 0
+        for i in range(9):
+            x = x0 + (x1 - x0) * (i + 0.5) / 9.0
+            cls.Perform(gp_Pnt(x, y_mid, cz), 1e-7)
+            if cls.State() in (TopAbs_IN, TopAbs_ON):
+                blocked += 1
+        if blocked:
+            bad.append(f"{c['name']} ({c['edge']}) solid at {blocked}/9 samples "
+                       f"through the {x1 - x0:.1f} mm wall")
+    if bad:
+        r.fail("S4 static bay gland blocked: " + "; ".join(bad))
+    else:
+        r.ok(f"S4 both Qwiic glands open through the bay wall")
 
 
 def check_cover_clears_components(r, pod) -> None:
@@ -597,7 +669,7 @@ def check_parts_against_each_other(r, pod) -> None:
         r.ok(f"I6'' all {len(parts)} printed parts clear each other")
 
 
-def check_insert_access(r, pod, right) -> None:
+def check_insert_access(r, pod, tray) -> None:
     """I7 — a heat-set iron must physically reach every insert pilot.
 
     For each seam-access insert, sweep a corridor of the boss diameter along
@@ -617,7 +689,7 @@ def check_insert_access(r, pod, right) -> None:
             continue                      # flange pilots start at the seam itself
         corridor = pod._cyl_y(ins["x"], ins["z"], 0.5,
                               (ins["y"] - 0.2) - 0.5, pod.BOARD_POST_D / 2)
-        v = right.val().intersect(corridor.val()).Volume()
+        v = tray.val().intersect(corridor.val()).Volume()
         if v > 5.0:
             blocked.append((ins, v))
     if blocked:
@@ -632,7 +704,7 @@ def check_insert_access(r, pod, right) -> None:
              "entered from outside the base)")
 
 
-def check_part_interference(r, pod, left, right) -> None:
+def check_part_interference(r, pod, shell, tray) -> None:
     """I6 — every separately-printed part must fit where it is meant to sit.
 
     Each part is built in assembly position, so a straight intersection against
@@ -642,7 +714,7 @@ def check_part_interference(r, pod, left, right) -> None:
     somebody checks.
     """
     for pname, part in pod.assembly_parts():
-        for hname, half in (("pod_left", left), ("pod_right", right)):
+        for hname, half in (("pod_shell", shell), ("pod_tray", tray)):
             try:
                 v = half.val().intersect(part.val()).Volume()
             except Exception:
@@ -654,7 +726,7 @@ def check_part_interference(r, pod, left, right) -> None:
                 r.ok(f"I6 {pname} clears {hname} ({v:.1f} mm^3)")
 
 
-def check_fastener_holes(r, pod, left, right) -> None:
+def check_fastener_holes(r, pod, shell, tray) -> None:
     """P12 — every fastener hole must actually be open.
 
     I7 proves a tool can REACH a pilot; this proves the pilot exists.  They are
@@ -668,8 +740,8 @@ def check_fastener_holes(r, pod, left, right) -> None:
     from OCP.gp import gp_Pnt
     from OCP.TopAbs import TopAbs_IN
 
-    cr = BRepClass3d_SolidClassifier(right.val().wrapped)
-    cl = BRepClass3d_SolidClassifier(left.val().wrapped)
+    cr = BRepClass3d_SolidClassifier(tray.val().wrapped)
+    cl = BRepClass3d_SolidClassifier(shell.val().wrapped)
     filled = []
     for ins in pod.insert_inventory():
         if ins["access"] == "seam":

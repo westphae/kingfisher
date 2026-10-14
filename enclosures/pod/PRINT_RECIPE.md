@@ -1,6 +1,6 @@
 # Wing pod v3 — AnkerMake print recipe
 
-Slicer settings for `pod_left.stl`, `pod_right.stl`, `tail_panel.stl`,
+Slicer settings for `pod_shell.stl`, `pod_tray.stl`, `tail_panel.stl`,
 `static_bay.stl`, `pm_cover.stl`, and `sun_clamp.stl` on an **AnkerMake M5C** in **PETG**. STLs do not carry support or
 slice settings — use this recipe in AnkerMake Studio (or PrusaSlicer with an
 M5C profile).
@@ -26,7 +26,7 @@ Geometry / export contracts: [`REQUIREMENTS.md`](REQUIREMENTS.md). Layout:
    A part parked on the origin corner slices with its skirt/brim at negative
    X/Y and the job is rejected with *"a toolpath outside the print area"*.
 4. **Bed-edge budget.** Body halves leave **11.2 mm** from the part edge to the
-   bed edge (X binds on `pod_right`, Y on `pod_left`). Everything drawn outside
+   bed edge (X binds on `pod_tray`, Y on `pod_shell`). Everything drawn outside
    the object shares that margin:
 
    ```
@@ -85,7 +85,7 @@ adapter is purchased metal — not printed.
 
 | Part | Supports | Why |
 |------|----------|-----|
-| `pod_left` / `pod_right` | **On** | Ogive outer, hollow shell, SUN cradle, standoffs (right) leave overhangs above ~45° |
+| `pod_shell` / `pod_tray` | **On** | Ogive outer, hollow shell, SUN cradle; the tray's board standoffs leave overhangs above ~45° |
 | `tail_panel` | **Off** | Flat plate |
 | `static_bay` | **Off** | Shallow cup, tabs are a short overhang |
 | `pm_cover` | **Off** | Open frame, posts point up and are self-supporting |

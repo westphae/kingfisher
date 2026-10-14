@@ -25,7 +25,7 @@ from collections import Counter
 from pathlib import Path
 
 POD_DIR = Path(__file__).resolve().parent
-STL_FILES = ("pod_right.stl", "pod_left.stl", "tail_panel.stl",
+STL_FILES = ("pod_tray.stl", "pod_shell.stl", "tail_panel.stl",
              "static_bay.stl", "pm_cover.stl")
 SMALL_PARTS = ("tail_panel.stl", "static_bay.stl", "pm_cover.stl")
 
@@ -246,20 +246,22 @@ def check_geometry(r: CheckResult) -> None:
     g.check_holddown_footprints(r, pod)
     g.check_backface_clearance(r, pod)
     g.check_cover_clears_components(r, pod)
+    g.check_glands_open(r, pod)
     g.check_aero(r, pod)
     g.check_flats(r, pod)
 
-    right = pod.as_single_solid(pod.build_right(), "pod_right")
-    left = pod.as_single_solid(pod.build_left(), "pod_left")
-    g.check_tips(r, pod, left, right)
-    g.check_open_bay(r, pod, left, right)
-    g.check_insert_access(r, pod, right)
-    g.check_part_interference(r, pod, left, right)
-    g.check_fastener_holes(r, pod, left, right)
+    tray = pod.as_single_solid(pod.build_tray(), "pod_tray")
+    shell = pod.as_single_solid(pod.build_shell(), "pod_shell")
+    g.check_tips(r, pod, shell, tray)
+    g.check_open_bay(r, pod, shell, tray)
+    g.check_insert_access(r, pod, tray)
+    g.check_part_interference(r, pod, shell, tray)
+    g.check_clamp_extraction(r, pod, shell)
+    g.check_fastener_holes(r, pod, shell, tray)
 
     # I2 — nothing may poke outside the envelope.
     outer = pod.full_body_solid(0.0)
-    for name, half in (("pod_right", right), ("pod_left", left)):
+    for name, half in (("pod_tray", tray), ("pod_shell", shell)):
         extra = half.val().cut(outer.val()).Volume()
         if extra > 25.0:
             r.fail(f"I2 {name} protrudes {extra:.1f} mm^3 outside the envelope")
@@ -275,7 +277,7 @@ def check_geometry(r: CheckResult) -> None:
         .intersect(outer)
     )
     closed = pod.as_single_solid(
-        left.union(right).union(seam).union(pod.build_tail_panel()), "sealed_pod"
+        shell.union(tray).union(seam).union(pod.build_tail_panel()), "sealed_pod"
     )
     g.check_min_wall(r, pod, closed)
     g.check_leak(r, pod, closed)

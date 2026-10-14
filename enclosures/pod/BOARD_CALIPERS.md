@@ -164,6 +164,7 @@ Connectors:
 | C11 | Wires soldered to the castellated pads leave the **top** of the board along **both** long edges. They and the Qwiic together mean the whole component face must stay clear. | — |
 | C12 | Status LEDs flank the USB-C and run to within ~0.5 mm of **both aft corners**, so that end has no bare PCB for a hold-down. | ~0.5 |
 | C13 | The two **fore** corners are the only clear PCB on the board: no wires, no holes. Both bare-PCB hold-downs go there, flush to the corner. | — |
+| C15 | **Answered 2026-08-29:** the edge wires need **no lateral room** along the top of the bay — only room *away* from it, in −Y toward the bowl. So the bay's bosses and the cover's ears reaching to 0.5 mm off the long edge are fine. The binding clearance is the battery: wires leave the board face at y −8.36 and the battery starts at −23.60. | 0 lateral |
 
 > **A `face` connector needs two coordinates, and the sheet only had one.**
 > `at` is a single number because it was written for edge connectors, where the
