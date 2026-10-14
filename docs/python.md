@@ -21,6 +21,7 @@ uv sync --all-packages
 
 # Analysis CLI
 uv run --project analysis python scripts/analyze_flights.py all
+uv run --project analysis python scripts/analyze_flights.py serve  # http://0.0.0.0:8765
 
 # Enclosure regen (cwd = script dir so STEP/STL land beside the script)
 cd enclosures/case && uv run --project .. python pi5_aviation_case.py

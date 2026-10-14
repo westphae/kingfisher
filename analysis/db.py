@@ -32,7 +32,10 @@ OPTIONAL_SYS = ("system", "ups", "clock_offsets", "press_alt")
 
 
 def connect_ro(db_path: Path) -> sqlite3.Connection:
-    return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10.0)
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA query_only=ON")
+    return conn
 
 
 def session_start_ns(conn: sqlite3.Connection) -> int | None:
