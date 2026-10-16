@@ -208,7 +208,7 @@ After Phases 2–4 on at least one golden flight (+ pitot flight after zero).
 | AHRS | Raw IMU scale/bias/mount; weak gyro bias | Calibrated IMU; online bias; validate vs GPS |
 | Compass | Distortion, align, pod↔cabin frame | Mount + hard/soft iron; WMM align |
 | press_alt | Baro lag/bias vs GPS | Lag estimate; optional GPS blend |
-| airspeed | Pitot zero historically bad; OAT | Zero routine; TAS vs GPS−wind |
+| airspeed | Live `ias_kt` / `tas_kt` now use the subsonic pitot equation; position error and recovery OAT remain | Zero routine; TAS vs GPS−wind (`analysis/performance.py`) |
 
 ### 5b. Near-term fused parameters
 

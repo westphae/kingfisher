@@ -107,6 +107,37 @@ func TestAppendCapDropsOldest(t *testing.T) {
 	}
 }
 
+func TestRequeueCompactsBackingArray(t *testing.T) {
+	b := newTestBuffer(&fakeStore{})
+	old := make([]live.Sample, MaxPendingPerDevice)
+	for i := range old {
+		old[i] = sample(int64(i))
+	}
+	// Samples that arrived while the failed flush held the previous queue.
+	arrived := make([]live.Sample, 1000)
+	for i := range arrived {
+		arrived[i] = sample(int64(MaxPendingPerDevice + i))
+	}
+	b.pending["d"] = arrived
+	b.requeue(map[string][]live.Sample{"d": old}, []string{"d"})
+
+	b.mu.Lock()
+	q := b.pending["d"]
+	b.mu.Unlock()
+	if len(q) != MaxPendingPerDevice {
+		t.Fatalf("len=%d want %d", len(q), MaxPendingPerDevice)
+	}
+	if cap(q) != MaxPendingPerDevice {
+		t.Fatalf("cap=%d want %d (dropped prefix must not pin the backing array)", cap(q), MaxPendingPerDevice)
+	}
+	if q[0].TsNs != 1000 {
+		t.Fatalf("oldest retained ts=%d want 1000", q[0].TsNs)
+	}
+	if got := b.RecordingState().DroppedRows; got != 1000 {
+		t.Fatalf("DroppedRows=%d want 1000", got)
+	}
+}
+
 func TestRecordingStateDegradedThreshold(t *testing.T) {
 	b := newTestBuffer(&fakeStore{})
 	if b.RecordingState().Degraded {

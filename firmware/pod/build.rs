@@ -42,9 +42,10 @@ struct PodSection {
     protect_soc_pct: u8,
     #[serde(default = "default_low_debounce_s", rename = "low_debounce_s")]
     low_debounce_s: u16,
-    // Default OFF: bench test 2026-07-14 showed PowerSaveMode::Minimum breaks
-    // AP→pod unicast delivery on the Pi's brcmfmac AP (pod misses all Cmd/Ping
-    // frames; re-Hellos every 30 s; SetRate never applies).
+    // Default off for a fresh setup. A 2026-07-14 bench failure looked like
+    // the AP dropping unicast to a dozing STA; it was the Ping handler not
+    // refreshing the Hello timer. That is fixed. The aircraft config turns
+    // this on. See docs/pod-power.md.
     #[serde(default, rename = "modem_power_save")]
     modem_power_save: bool,
     #[serde(default = "default_flush_interval_s", rename = "flush_interval_s")]

@@ -31,10 +31,13 @@
       "750": 710,
       "2000": 1840
     },
-    "sleep_soc_pct": 20,
-    "sleep_voltage_v_uncalibrated": 3.60,
-    "sleep_debounce_s": 45,
-    "sleep_emergency_voltage_v": 3.50,
+    "burst_soc_pct": 30,
+    "burst_window_s": 60,
+    "burst_voltage_v_uncalibrated": 3.60,
+    "protect_voltage_v": 3.50,
+    "protect_soc_pct": 5,
+    "low_debounce_s": 45,
+    "modem_power_save": false,
     "buffer_max_readings": 128,
     "flush_interval_s": 3,
     "flush_high_watermark": 24

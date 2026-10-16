@@ -23,6 +23,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from analysis.cal_accel import run as run_cal_accel
+from analysis.performance import summarize
 from analysis.catalog import load_catalog, scan_flights_dir, write_catalog
 from analysis.health import analyze_health, write_health_report
 from analysis.report import write_ledger
@@ -40,6 +41,27 @@ def default_cache_dir() -> Path:
 
 def default_ledger() -> Path:
     return _ROOT / "docs" / "analysis" / "ledger.md"
+
+
+def cmd_perf(args: argparse.Namespace) -> int:
+    import sqlite3
+
+    path = Path(args.file)
+    if not path.is_file():
+        print(f"flight db not found: {path}", file=sys.stderr)
+        print(
+            "Required for a full reduction: gps, bmp581 static pressure and "
+            "temperature, ms4525 or airspeed ΔP, press_alt.vs_ms, "
+            "compass.heading_true_deg. See docs/research-program.md.",
+            file=sys.stderr,
+        )
+        return 2
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        print(summarize(conn, dp_zero_pa=args.dp_zero_pa).text(), end="")
+    finally:
+        conn.close()
+    return 0
 
 
 def cmd_catalog(args: argparse.Namespace) -> int:
@@ -315,6 +337,17 @@ def main() -> int:
         help="write before/after ‖a‖ PNG (default: <cache>/cal_accel_norms.png)",
     )
     sub.add_parser("all", help="catalog + health(flights) + report")
+    pf = sub.add_parser(
+        "perf",
+        help="CAS/TAS/density altitude/ROC/wind geometry for one flight DB",
+    )
+    pf.add_argument("--file", type=Path, required=True, help="one flight SQLite DB")
+    pf.add_argument(
+        "--dp-zero-pa",
+        type=float,
+        default=0.0,
+        help="subtract from raw ms4525 ΔP when airspeed_dp_cal_pa is absent",
+    )
 
     args = p.parse_args()
     if args.cmd == "catalog":
@@ -331,6 +364,8 @@ def main() -> int:
         return cmd_cal_accel(args)
     if args.cmd == "all":
         return cmd_all(args)
+    if args.cmd == "perf":
+        return cmd_perf(args)
     return 1
 
 

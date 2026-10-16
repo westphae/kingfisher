@@ -85,7 +85,9 @@ func AltitudeFromHub(ctx context.Context, holder *config.Holder, hub *live.Hub, 
 				kollsmanAttrName:   kollsman,
 			}
 			if tempC, ok := findOATC(snap, source); ok {
-				vals["density_alt_ft"] = DensityAltFt(altFt, tempC)
+				if da, ok := DensityAltFtFromPT(pressPa, tempC); ok {
+					vals["density_alt_ft"] = da
+				}
 			}
 			// Baro vertical speed: EMA-smoothed rate of pressure altitude
 			// (independent of altimeter setting). Reset across long gaps so
@@ -125,18 +127,81 @@ func AltitudeFromHub(ctx context.Context, holder *config.Holder, hub *live.Hub, 
 	}
 }
 
+// Standard-atmosphere constants matching goflying sensors/bmp280.CalcAltitude
+// (US feet form). 29.92 inHg is defined as 1013.25 hPa for the Kollsman
+// window; that is the altimetry convention, not the NIST inch of mercury.
+const (
+	pressAltScaleFt = 145366.45
+	pressAltExp     = 0.190284
+	isaP0HPa        = 1013.25
+	tropopauseM     = 11000.0
+	lapseKPerM      = 0.0065
+	gravityMS2      = 9.80665
+)
+
 // IndicatedAltFt returns indicated altitude in feet for a pressure altitude
-// and altimeter setting in inches of mercury. Standard setting is 29.92 inHg.
+// and altimeter setting in inches of mercury. It inverts the same standard
+// atmosphere used for pressure altitude and recomputes height against the
+// Kollsman pressure. The "1000 ft per inHg" rule is about 8% high near sea
+// level relative to that model, and it does not match a panel altimeter.
 func IndicatedAltFt(pressureAltFt, kollsmanInHg float64) float64 {
-	return pressureAltFt + (kollsmanInHg-config.DefaultKollsmanInHg)*1000.0
+	if math.IsNaN(pressureAltFt) || math.IsNaN(kollsmanInHg) || kollsmanInHg <= 0 {
+		return pressureAltFt
+	}
+	pHPa, ok := pressureHPaFromAltFt(pressureAltFt)
+	if !ok {
+		return pressureAltFt
+	}
+	pSet := kollsmanInHg * (isaP0HPa / config.DefaultKollsmanInHg)
+	return pressAltScaleFt * (1 - math.Pow(pHPa/pSet, pressAltExp))
 }
 
-// DensityAltFt returns density altitude in feet from pressure altitude (ft)
-// and outside air temperature (°C), using ISA temperature at PA and the
-// standard 120 ft/°C correction above/below ISA.
+func pressureHPaFromAltFt(altFt float64) (float64, bool) {
+	ratio := 1 - altFt/pressAltScaleFt
+	if ratio <= 0 || math.IsNaN(ratio) {
+		return 0, false
+	}
+	return isaP0HPa * math.Pow(ratio, 1/pressAltExp), true
+}
+
+// DensityAltFt is the pilot rule of thumb: 120 ft per °C from ISA, with a
+// 2 °C/1000 ft lapse. The recorder does not store this. Live density_alt_ft
+// is DensityAltFtFromPT.
 func DensityAltFt(pressureAltFt, oatC float64) float64 {
 	isa := isaTempCAtPAFt(pressureAltFt)
 	return pressureAltFt + 120.0*(oatC-isa)
+}
+
+// DensityAltFtFromPT returns density altitude in feet: the ISA altitude
+// whose density equals P/(R T). Troposphere to 11 km, then the isothermal
+// stratosphere. Temperature is the caller's sensor (pod static_temp_c or
+// cabin temp), not a recovery-corrected OAT.
+func DensityAltFtFromPT(pressPa, oatC float64) (float64, bool) {
+	if !validPressurePa(pressPa) || !validTempC(oatC) {
+		return 0, false
+	}
+	tK := oatC + 273.15
+	rho := pressPa / (dryAirR * tK)
+	rho0 := isaP0Pa / (dryAirR * isaT0K)
+	if rho <= 0 || rho0 <= 0 || math.IsNaN(rho) {
+		return 0, false
+	}
+	sigma := rho / rho0
+	exp := gravityMS2/(dryAirR*lapseKPerM) - 1
+	tTrop := isaT0K - lapseKPerM*tropopauseM
+	sigmaTrop := math.Pow(tTrop/isaT0K, exp)
+	var hM float64
+	if sigma >= sigmaTrop {
+		theta := math.Pow(sigma, 1/exp)
+		hM = (isaT0K / lapseKPerM) * (1 - theta)
+	} else {
+		rhoTrop := rho0 * sigmaTrop
+		hM = tropopauseM + (dryAirR*tTrop/gravityMS2)*math.Log(rhoTrop/rho)
+	}
+	if math.IsNaN(hM) {
+		return 0, false
+	}
+	return hM / 0.3048, true
 }
 
 func isaTempCAtPAFt(paFt float64) float64 {
