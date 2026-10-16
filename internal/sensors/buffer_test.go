@@ -21,6 +21,18 @@ func TestDeviceWantBuffer(t *testing.T) {
 	}
 }
 
+func TestBoxcarMidNs(t *testing.T) {
+	if got := boxcarMidNs(1000, 3000); got != 2000 {
+		t.Fatalf("mid=%d want 2000", got)
+	}
+	if got := boxcarMidNs(3000, 1000); got != 2000 {
+		t.Fatalf("reversed mid=%d want 2000", got)
+	}
+	if got := boxcarMidNs(50, 50); got != 50 {
+		t.Fatalf("equal=%d", got)
+	}
+}
+
 func TestRecordToValues(t *testing.T) {
 	rec := iio.Record{
 		Time: time.Unix(100, 0),

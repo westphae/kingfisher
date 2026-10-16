@@ -192,38 +192,95 @@ func firstFloat(vals map[string]float64, existing float64, has bool, keys ...str
 
 func degToRad(d float64) float64 { return d * math.Pi / 180.0 }
 
-// findIMU picks the first device whose values look like an IMU (has any
-// accel_* or anglvel_* channel), preferring devices with a known IMU name
-// prefix. Returns the chosen device name alongside its sample so callers
-// can log the active wiring or skip self-matches.
+// findIMU returns one IMU sample for attitude. A combined chip (accel and
+// gyro on the same device) is used as-is. The cabin ICM-45686 publishes
+// accel and gyro as two IIO devices; those are merged so a single tick sees
+// both. Map iteration order is not a tie-break — equal scores pick the
+// lexicographically smaller device name so the source cannot flap.
 func findIMU(s live.Snapshot) (string, live.Sample, bool) {
-	var best live.Sample
+	aName, aSm, haveA := bestIMUDevice(s, accelChannelScore)
+	gName, gSm, haveG := bestIMUDevice(s, gyroChannelScore)
+	switch {
+	case !haveA && !haveG:
+		return "", live.Sample{}, false
+	case haveA && !haveG:
+		return aName, aSm, true
+	case !haveA && haveG:
+		return gName, gSm, true
+	case aName == gName:
+		return aName, aSm, true
+	default:
+		return aName + "+" + gName, mergeSplitIMU(aSm, gSm), true
+	}
+}
+
+func bestIMUDevice(s live.Snapshot, scoreFn func(string, live.Sample) int) (string, live.Sample, bool) {
 	bestName := ""
+	var best live.Sample
 	bestScore := 0
 	for name, sm := range s.Devices {
-		score := imuScore(name, sm)
-		if score > bestScore {
-			bestScore = score
+		sc := scoreFn(name, sm)
+		if sc <= 0 {
+			continue
+		}
+		if bestName == "" || sc > bestScore || (sc == bestScore && name < bestName) {
+			bestScore = sc
 			bestName = name
 			best = sm
 		}
 	}
-	return bestName, best, bestScore > 0
+	return bestName, best, bestName != ""
 }
 
-func imuScore(name string, sm live.Sample) int {
+func accelChannelScore(name string, sm live.Sample) int {
+	return channelFamilyScore(name, sm, func(k string) bool {
+		return strings.HasPrefix(k, "accel_") || k == "ax" || k == "ay" || k == "az"
+	})
+}
+
+func gyroChannelScore(name string, sm live.Sample) int {
+	return channelFamilyScore(name, sm, func(k string) bool {
+		return strings.HasPrefix(k, "anglvel_") || k == "gx" || k == "gy" || k == "gz"
+	})
+}
+
+func channelFamilyScore(name string, sm live.Sample, match func(string) bool) int {
 	score := 0
 	for k := range sm.Values {
-		if strings.HasPrefix(k, "accel_") || strings.HasPrefix(k, "anglvel_") {
-			score += 2
-		}
-		if k == "ax" || k == "ay" || k == "az" || k == "gx" || k == "gy" || k == "gz" {
+		if match(k) {
 			score += 2
 		}
 	}
-	low := strings.ToLower(name)
-	if strings.Contains(low, "icm") || strings.Contains(low, "mpu") || strings.Contains(low, "bmi") {
-		score += 1
+	if score > 0 && imuFamilyName(name) {
+		score++
 	}
 	return score
+}
+
+func imuFamilyName(name string) bool {
+	low := strings.ToLower(name)
+	return strings.Contains(low, "icm") || strings.Contains(low, "mpu") || strings.Contains(low, "bmi")
+}
+
+// mergeSplitIMU copies accel-device channels and fills any missing keys from
+// the gyro device. Timestamp follows whichever half actually carries a
+// magnetometer, so the stale-mag check in buildMeasurement still sees that
+// sample's capture time.
+func mergeSplitIMU(accel, gyro live.Sample) live.Sample {
+	vals := make(map[string]float64, len(accel.Values)+len(gyro.Values))
+	for k, v := range accel.Values {
+		vals[k] = v
+	}
+	for k, v := range gyro.Values {
+		if _, exists := vals[k]; !exists {
+			vals[k] = v
+		}
+	}
+	ts := accel.TsNs
+	if _, ok := extractMag(accel.Values); !ok {
+		if _, ok := extractMag(gyro.Values); ok {
+			ts = gyro.TsNs
+		}
+	}
+	return live.Sample{Device: accel.Device, TsNs: ts, Values: vals}
 }

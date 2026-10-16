@@ -100,9 +100,24 @@ func headingTrueFromAircraftToEarth(R field.Mat3) float64 {
 	return field.HeadingDeg360(math.Atan2(earth.Y, earth.X) * 180 / math.Pi)
 }
 
+// wmmLevelHeading returns magnetic heading (degrees) and the yaw that maps
+// the current body-frame mag onto the WMM field, assuming body +Z is down.
+// Call it on every sample. The rotation stored at align time is only the
+// snapshot from that instant; reusing it freezes heading through later turns.
+// Banked flight still needs an AHRS down vector (see the FRD/NED note).
+func wmmLevelHeading(magAircraft, bEarth field.Vec3, declDeg float64) (headingMag float64, R field.Mat3, ok bool) {
+	R, err := solveAircraftToEarthMagDown(magAircraft, bEarth)
+	if err != nil {
+		return 0, field.Mat3{}, false
+	}
+	hdgTrue := headingTrueFromAircraftToEarth(R)
+	return field.HeadingDeg360(hdgTrue - declDeg), R, true
+}
+
 func solveAircraftToEarthMagDown(magAircraft, bEarth field.Vec3) (field.Mat3, error) {
 	// TODO(ahrs-frd-ned): Harmonize AHRS package conventions to FRD/NED and share
 	// a single aircraft->earth rotation pipeline across compass and AHRS pages.
+	// Until then this yaw assumes body +Z is down (wings level).
 	down := field.Vec3{X: 0, Y: 0, Z: 1}
 	hA, ok := projectHorizDown(magAircraft, down)
 	if !ok {

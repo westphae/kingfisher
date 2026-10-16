@@ -22,6 +22,9 @@ uv sync --all-packages
 # Analysis CLI
 uv run --project analysis python scripts/analyze_flights.py all
 
+# JPI EDM-930 post-flight merge (dry-run unless --apply). See docs/jpi-edm930.md.
+uv run --project analysis python scripts/analyze_flights.py jpi --jpi FILE.jpi --db FLIGHT.sqlite --flight N --apply
+
 # Enclosure regen (cwd = script dir so STEP/STL land beside the script)
 cd enclosures/case && uv run --project .. python pi5_aviation_case.py
 cd enclosures/pod  && uv run --project .. python wing_pod_v3.py

@@ -108,14 +108,39 @@ func TestDensityAltFt_hotDayRaisesDA(t *testing.T) {
 
 func TestIndicatedAltFt_usesKollsmanSetting(t *testing.T) {
 	const paFt = 5000.0
-	if got := IndicatedAltFt(paFt, 29.92); math.Abs(got-paFt) > 1e-9 {
+	if got := IndicatedAltFt(paFt, 29.92); math.Abs(got-paFt) > 0.05 {
 		t.Fatalf("standard: got %.2f want %.2f", got, paFt)
 	}
-	if got := IndicatedAltFt(paFt, 30.12); math.Abs(got-5200) > 1e-9 {
-		t.Fatalf("high setting: got %.2f want 5200", got)
+	high := IndicatedAltFt(paFt, 30.12)
+	delta := high - paFt
+	// Hypsometric correction near 5000 ft is ~180 ft per 0.20 inHg.
+	// The old 1000 ft/inHg rule returned exactly 200 and does not match a
+	// panel altimeter built on the same standard atmosphere as pressure altitude.
+	if delta < 150 || delta > 220 {
+		t.Fatalf("+0.20 inHg at 5000 ft moved IA by %.1f ft, want ~180", delta)
 	}
-	if got := IndicatedAltFt(paFt, 29.42); math.Abs(got-4500) > 1e-9 {
-		t.Fatalf("low setting: got %.2f want 4500", got)
+	low := paFt - IndicatedAltFt(paFt, 29.72)
+	if low < 150 || low > 220 {
+		t.Fatalf("-0.20 inHg at 5000 ft moved IA by %.1f ft, want ~180", low)
+	}
+	lib := bmp280.CalcAltitude(900)
+	if math.Abs(IndicatedAltFt(lib, 29.92)-lib) > 1 {
+		t.Fatalf("29.92 inHg disagrees with bmp280.CalcAltitude: lib=%.2f ind=%.2f", lib, IndicatedAltFt(lib, 29.92))
+	}
+}
+
+func TestDensityAltFtFromPT_seaLevelAndHot(t *testing.T) {
+	da, ok := DensityAltFtFromPT(101325, 15)
+	if !ok || math.Abs(da) > 5 {
+		t.Fatalf("ISA sea level DA=%v ok=%v want ~0", da, ok)
+	}
+	hot, ok := DensityAltFtFromPT(101325, 30)
+	if !ok {
+		t.Fatal("expected hot-day density altitude")
+	}
+	// 120 ft/°C rule gives 1800 ft. Tropospheric density altitude is lower.
+	if hot < 1600 || hot > 1850 {
+		t.Fatalf("30°C sea-level DA=%.0f ft, want ~1720", hot)
 	}
 }
 

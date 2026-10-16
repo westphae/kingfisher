@@ -54,9 +54,9 @@ pub const PROTECT_VOLTAGE: f32 = parse_env_millivolts(env!("PROTECT_VOLTAGE"));
 pub const PROTECT_SOC_PCT: u8 = parse_env_u8(env!("PROTECT_SOC_PCT"));
 pub const LOW_DEBOUNCE_US: u64 = parse_env_u16(env!("LOW_DEBOUNCE_S")) as u64 * 1_000_000;
 
-/// Modem power-save (DTIM doze) while associated. Default off: the Pi's
-/// brcmfmac AP fails to deliver buffered unicast to a dozing STA (verified
-/// 2026-07-14), which silently kills the Cmd/Ping inbound path.
+/// Modem power-save (DTIM doze) while associated. Build default is off.
+/// The 2026-07-14 "AP drops unicast" result was a Ping keepalive bug, since
+/// fixed; the aircraft config enables this. See docs/pod-power.md.
 pub const MODEM_POWER_SAVE: bool = matches!(env!("MODEM_POWER_SAVE").as_bytes(), b"1");
 pub const FLUSH_INTERVAL_US: u64 = parse_env_u16(env!("FLUSH_INTERVAL_S")) as u64 * 1_000_000;
 pub const FLUSH_HIGH_WATERMARK: u16 = parse_env_u16(env!("FLUSH_HIGH_WATERMARK"));

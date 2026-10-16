@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -152,6 +153,47 @@ func TestStoreCheckpointWALTruncatesWal(t *testing.T) {
 	}
 	if fi.Size() != 0 {
 		t.Fatalf("wal size after checkpoint: got %d, want 0", fi.Size())
+	}
+}
+
+func TestFlushBatchChunksPastVariableLimit(t *testing.T) {
+	s := openTemp(t)
+	defer s.Close()
+	const (
+		nRows = 2000
+		nCols = 8
+	)
+	cols := make([]string, nCols)
+	for i := range cols {
+		cols[i] = fmt.Sprintf("c%d", i)
+	}
+	samples := make([]live.Sample, nRows)
+	for i := range samples {
+		vals := make(map[string]float64, nCols)
+		for _, c := range cols {
+			vals[c] = float64(i)
+		}
+		samples[i] = live.Sample{Device: "imu", TsNs: int64(i + 1), Values: vals}
+	}
+	if err := s.EnsureTable("imu", cols); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FlushBatch("imu", cols, samples); err != nil {
+		t.Fatalf("chunked flush: %v", err)
+	}
+	var n int
+	if err := s.DB().QueryRow(`SELECT COUNT(*) FROM imu`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != nRows {
+		t.Fatalf("rows=%d want %d", n, nRows)
+	}
+	var last float64
+	if err := s.DB().QueryRow(`SELECT c0 FROM imu WHERE ts_ns=?`, int64(nRows)).Scan(&last); err != nil {
+		t.Fatal(err)
+	}
+	if last != float64(nRows-1) {
+		t.Fatalf("last c0=%v want %v", last, nRows-1)
 	}
 }
 

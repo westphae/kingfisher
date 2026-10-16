@@ -428,6 +428,14 @@ func (s *Store) addMissingColumns(tbl string, want []string) error {
 	return nil
 }
 
+// sqliteVarBudget stays under SQLITE_MAX_VARIABLE_NUMBER. The historical
+// compile-time default is 999; modernc builds raise it, but a single INSERT
+// of a full backlog (MaxPendingPerDevice rows × IMU columns) still exceeds
+// 32766 host parameters. That statement fails even after the disk recovers,
+// so the recorder would drop rows for the rest of the flight. Chunking keeps
+// a backlog flush legal and bounds the per-statement allocation on a Pi.
+const sqliteVarBudget = 900
+
 // FlushBatch writes all pending samples for one device in a single
 // transaction. `samples` is in arrival order; missing channels write NULL.
 func (s *Store) FlushBatch(device string, columns []string, samples []live.Sample) error {
@@ -447,6 +455,29 @@ func (s *Store) FlushBatch(device string, columns []string, samples []live.Sampl
 	for _, c := range cols {
 		colList = append(colList, fmt.Sprintf("%q", c))
 	}
+	maxRows := sqliteVarBudget / len(colList)
+	if maxRows < 1 {
+		maxRows = 1
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	for start := 0; start < len(samples); start += maxRows {
+		end := start + maxRows
+		if end > len(samples) {
+			end = len(samples)
+		}
+		if err := execSampleInsert(tx, tbl, colList, cols, samples[start:end]); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func execSampleInsert(tx *sql.Tx, tbl string, colList, cols []string, samples []live.Sample) error {
 	placeholders := "(" + strings.Repeat("?,", len(colList)-1) + "?)"
 	stmt := fmt.Sprintf(`INSERT INTO %q (%s) VALUES %s`,
 		tbl, strings.Join(colList, ","),
@@ -463,16 +494,8 @@ func (s *Store) FlushBatch(device string, columns []string, samples []live.Sampl
 			}
 		}
 	}
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	if _, err := tx.Exec(stmt, args...); err != nil {
-		tx.Rollback()
-		return err
-	}
-	return tx.Commit()
+	_, err := tx.Exec(stmt, args...)
+	return err
 }
 
 var sanitizeRe = regexp.MustCompile(`[^A-Za-z0-9_]+`)

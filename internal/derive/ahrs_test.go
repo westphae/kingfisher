@@ -71,6 +71,48 @@ func TestBuildMeasurementRejectsStalePodMag(t *testing.T) {
 	}
 }
 
+// The cabin ICM-45686 is two IIO devices. Both must land in one measurement;
+// picking either device alone zeros gyro or accel, and map iteration would
+// flap between them.
+func TestFindIMUMergesSplitAccelGyro(t *testing.T) {
+	snap := live.Snapshot{
+		Devices: map[string]live.Sample{
+			"icm45686-accel": {TsNs: 10, Values: map[string]float64{
+				"accel_x": 0, "accel_y": 0, "accel_z": 9.80665,
+			}},
+			"icm45686-gyro": {TsNs: 11, Values: map[string]float64{
+				"anglvel_x": 0.01, "anglvel_y": -0.02, "anglvel_z": 0.03,
+			}},
+			"bmp581": {Values: map[string]float64{"static_pressure_pa": 101325}},
+		},
+	}
+	var name string
+	for i := 0; i < 30; i++ {
+		n, sm, ok := findIMU(snap)
+		if !ok {
+			t.Fatal("expected merged IMU")
+		}
+		if i == 0 {
+			name = n
+		} else if n != name {
+			t.Fatalf("IMU source flapped %q -> %q", name, n)
+		}
+		if sm.Values["accel_z"] != 9.80665 || sm.Values["anglvel_z"] != 0.03 {
+			t.Fatalf("merged values = %+v", sm.Values)
+		}
+	}
+	m, _ := buildMeasurement(snap, gps.Fix{}, nil)
+	if m == nil {
+		t.Fatal("nil measurement")
+	}
+	if m.A3 < 0.9 || m.A3 > 1.1 {
+		t.Fatalf("A3=%v want ~1 g from the accel device", m.A3)
+	}
+	if m.B3 == 0 {
+		t.Fatal("B3=0; gyro device was dropped")
+	}
+}
+
 // A single-chip IMU+mag (icm magn_*) is used raw and is unaffected by the
 // pod mount correction.
 func TestBuildMeasurementSingleChipMagRaw(t *testing.T) {

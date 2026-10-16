@@ -16,11 +16,18 @@ const airspeedDeviceName = "airspeed"
 
 const chAirspeedDpCal = "airspeed_dp_cal_pa"
 
-// ISA sea-level density (kg/m³) for incompressible pitot IAS.
+// ISA sea-level density (kg/m³). Kept for the incompressible cross-check;
+// live CAS/TAS use the compressible impact-pressure equation below.
 const rho0KgM3 = 1.225
 
-// Dry-air gas constant (J/(kg·K)) for density from static P and OAT.
+// Dry-air gas constant (J/(kg·K)), shared with density altitude.
 const dryAirR = 287.053
+
+const (
+	gammaAir = 1.4
+	isaP0Pa  = 101325.0
+	isaT0K   = 288.15
+)
 
 const airspeedTick = 200 * time.Millisecond
 
@@ -89,8 +96,10 @@ type airspeedProcessor struct {
 }
 
 // AirspeedFromHub reads MS4525 differential pressure and static baro every
-// 200 ms and publishes indicated/true airspeed on the "airspeed" virtual
-// device. Publishing is skipped until pitot data is present (MS4525 connected).
+// 200 ms and publishes calibrated and true airspeed on the "airspeed" virtual
+// device. ias_kt is the sea-level ASI equation (no position error). tas_kt is
+// the isentropic true airspeed at the static source's temperature.
+// Publishing is skipped until pitot data is present (MS4525 connected).
 func AirspeedFromHub(ctx context.Context, holder *config.Holder, hub *live.Hub, buf *store.Buffer) {
 	t := time.NewTicker(airspeedTick)
 	defer t.Stop()
@@ -124,8 +133,12 @@ func AirspeedFromHub(ctx context.Context, holder *config.Holder, hub *live.Hub, 
 				vals[pod.ChStaticP] = staticPa
 				if oatC, ok := findOATC(snap, source); ok {
 					vals[pod.ChStaticTemp] = oatC
-					if tas, ok := CalcTASKt(iasKt, staticPa, oatC); ok {
-						vals["tas_kt"] = tas
+					// Floor-suppressed IAS means we are not claiming an
+					// airspeed; do not publish a TAS from residual q_c.
+					if iasKt > 0 {
+						if tas, ok := CalcTASFromQcKt(dpCal, staticPa, oatC); ok {
+							vals["tas_kt"] = tas
+						}
 					}
 				}
 			}
@@ -203,18 +216,54 @@ func ApplyLowSpeedFloor(iasKt, floorKt float64) float64 {
 	return iasKt
 }
 
-// CalcIASKt returns indicated airspeed in knots from differential pressure (Pa)
-// using incompressible flow at ISA sea-level density.
+// CalcIASKt returns calibrated airspeed in knots from impact pressure (Pa).
+// This is the subsonic airspeed-indicator equation at sea-level ISA: what a
+// mechanical ASI reads from q_c. It is not a position-error correction, and
+// it is not the incompressible √(2q/ρ₀) which reads high by a knot or two at
+// Bonanza cruise. The stored column remains ias_kt.
 func CalcIASKt(dpPa float64) float64 {
-	if math.IsNaN(dpPa) || dpPa <= 0 {
+	v, ok := isentropicSpeedKt(dpPa, isaP0Pa, isaT0K)
+	if !ok {
 		return 0
 	}
-	vMps := math.Sqrt(2 * dpPa / rho0KgM3)
-	return vMps * mpsPerKt
+	return v
 }
 
-// CalcTASKt returns true airspeed in knots from IAS (kt), static pressure (Pa),
-// and outside air temperature (°C) via the density-ratio correction.
+// CalcTASFromQcKt returns true airspeed in knots from impact pressure, static
+// pressure, and outside air temperature via the subsonic isentropic pitot
+// equation at the local speed of sound. Temperature is whatever the caller
+// has (pod static_temp_c today); it is not a recovery-corrected OAT.
+func CalcTASFromQcKt(qcPa, staticPa, oatC float64) (float64, bool) {
+	if !validPressurePa(staticPa) || !validTempC(oatC) {
+		return 0, false
+	}
+	return isentropicSpeedKt(qcPa, staticPa, oatC+273.15)
+}
+
+// isentropicSpeedKt is
+//
+//	V = a √(5 [ (q_c/P + 1)^((γ-1)/γ) − 1 ])
+//
+// with a = √(γ R T). γ = 1.4, so 2/(γ−1) = 5 and (γ−1)/γ = 2/7.
+func isentropicSpeedKt(qcPa, staticPa, tempK float64) (float64, bool) {
+	if math.IsNaN(qcPa) || math.IsNaN(staticPa) || math.IsNaN(tempK) || qcPa <= 0 || staticPa <= 0 || tempK <= 0 {
+		return 0, false
+	}
+	inner := math.Pow(qcPa/staticPa+1, (gammaAir-1)/gammaAir) - 1
+	if inner <= 0 || math.IsNaN(inner) {
+		return 0, false
+	}
+	a := math.Sqrt(gammaAir * dryAirR * tempK)
+	vMps := a * math.Sqrt((2/(gammaAir-1))*inner)
+	if math.IsNaN(vMps) || vMps < 0 {
+		return 0, false
+	}
+	return vMps * mpsPerKt, true
+}
+
+// CalcTASKt returns the incompressible density-ratio TAS estimate
+// TAS ≈ IAS √(ρ₀/ρ). The live airspeed device uses CalcTASFromQcKt instead.
+// Kept so an offline comparison against the old recorder formula stays explicit.
 func CalcTASKt(iasKt, staticPa, oatC float64) (float64, bool) {
 	if math.IsNaN(iasKt) || iasKt <= 0 || !validPressurePa(staticPa) || !validTempC(oatC) {
 		return 0, false

@@ -22,6 +22,7 @@ fusion — especially GPS.
 | Pod sensors (`bmp581`, `mmc5983`, `ms4525`, …) | Sample time reconstructed on Pi clock | Pod `uptime − age_us`, mapped via EMA sync | UDP / batch jitter adds uncertainty |
 | Derived (`ahrs`, `press_alt`, `geo`, `compass`) | `time.Now()` when value is **computed** | Inputs may be tens of ms older | Not the timestamp of fused inputs |
 | **Howgozit** (`hgz_*` tables) | `time.Now()` when the pilot taps **+** (editable) | User may backdate via time cell | Manual annotations; join to sensors on `ts_ns` |
+| **`jpi_edm930`** | Pi clock after a post-flight fit (`offset + drift`) | JPI face is not GNSS-disciplined; original time is `jpi_time` | Written by `analyze_flights.py jpi`. See `docs/jpi-edm930.md` |
 | `sensor_attrs` | When the attr snapshot was logged | N/A (configuration, not a sample) | |
 | `_session.start_time`, DB filename | Pi wall clock at session open | N/A | |
 
@@ -36,10 +37,16 @@ in `internal/sensors/buffer.go`):
 2. Otherwise kingfisher falls back to the buffer's raw `timestamp_ns` channel (if
    any), or finally `time.Now()` when the frame is read.
 
+When `sampling_frequency` is above the stored `sample_hz`, frames are
+boxcar-averaged and **`ts_ns` is the midpoint** of the first and last kernel
+timestamps in that window (not the last frame, and not `time.Now()`).
+
 Typical residual error vs the chip's physical sample instant:
 
 - Trigger/FIFO depth and batch read latency (often **sub‑ms to a few ms** at
   100 Hz+).
+- Half a boxcar when the average spans many chip frames (about 18 ms for a
+  200 Hz chip stored at 25 Hz) — the midpoint removes the previous end-of-window bias.
 - Any host clock slewing from chrony (usually negligible with PPS).
 
 Implementation: `internal/sensors/buffer.go::sampleTimeNs`.
@@ -117,13 +124,35 @@ semantics per reading.
 
 ## Derived virtual devices
 
-`ahrs`, `press_alt`, `geo`, and `compass` set `ts_ns` to **`time.Now()`** when
-the derivation runs (`internal/derive/*.go`). They read the latest hub snapshot
-at that moment; input samples may be slightly older.
+`ahrs`, `press_alt`, `geo`, `compass`, and `airspeed` set `ts_ns` to
+**`time.Now()`** when the derivation runs (`internal/derive/*.go`). They read
+the latest hub snapshot at that moment; input samples may be slightly older.
 
-For tight fusion, prefer **source** device timestamps (IMU, GPS, mag, baro)
-rather than derived `ts_ns`. Derived rows are convenient for logging and UI, not
-a substitute for input-sample time alignment.
+For tight fusion, prefer **source** device timestamps (IMU, GPS, mag, baro,
+pitot) rather than derived `ts_ns`. Derived rows are convenient for logging
+and UI, not a substitute for input-sample time alignment.
+
+### AHRS and the GPS fix epoch
+
+`internal/derive/ahrs.go` sets goflying's `Measurement.T` from the hub
+snapshot's wall clock and `Measurement.TW` from `gps.Fix.Time` (the GNSS fix
+epoch, not receive `ts_ns`). Simple AHRS differences `TW` and, when `TW` does
+not advance, returns without integrating gyro. A constant 600–700 ms pipeline
+lag cancels in that difference, so GPS acceleration uses the interval between
+fix epochs. Stamp `TW` with a new value only when the fix is new. Putting wall
+clock into `TW` on every 20 Hz tick would assign one GPS velocity change to a
+single AHRS period.
+
+### Airspeed and altitude columns
+
+`airspeed.ias_kt` is calibrated airspeed from the subsonic ASI equation at
+sea-level ISA (impact pressure only; no position error). `airspeed.tas_kt` is
+isentropic true airspeed at the static pressure and the temperature paired
+with that static source. `press_alt.indicated_alt_ft` uses the same standard
+atmosphere as pressure altitude, with 29.92 inHg defined as 1013.25 hPa.
+`press_alt.density_alt_ft` is ISA density altitude from that pressure and
+temperature. The temperature is the sensor reading (`static_temp_c` or cabin
+`temp_c`), not a recovery-corrected OAT.
 
 ## Other database timestamps
 

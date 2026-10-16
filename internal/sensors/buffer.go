@@ -248,12 +248,14 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 		fallbackToPolled   bool
 		boxSum             map[string]float64
 		boxCount           int
+		boxStartNs         int64
 	)
 	const maxStallRestartCycles = 8
 
 	resetBoxcar := func() {
 		boxSum = nil
 		boxCount = 0
+		boxStartNs = 0
 	}
 
 	restartCapture := func(newDev config.Device) bool {
@@ -468,6 +470,7 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 			}
 			if boxSum == nil {
 				boxSum = make(map[string]float64, len(values))
+				boxStartNs = ts
 			}
 			for k, v := range values {
 				boxSum[k] += v
@@ -481,7 +484,10 @@ func runBuffered(ctx context.Context, r *iioReader, name string, holder *config.
 			for k, v := range boxSum {
 				avg[k] = v * inv
 			}
-			sm := live.Sample{Device: name, TsNs: ts, Values: avg}
+			// The average represents the middle of the window, not the
+			// last frame. Stamping the end biases fusion by half the
+			// boxcar (about 18 ms at 200 Hz chip / 25 Hz stored).
+			sm := live.Sample{Device: name, TsNs: boxcarMidNs(boxStartNs, ts), Values: avg}
 			hub.Publish(sm)
 			if buf != nil {
 				buf.Append(sm)
@@ -545,6 +551,16 @@ func cooldownAndRetryBuffered(
 		}
 	}
 	return false
+}
+
+// boxcarMidNs is the midpoint of the first and last kernel timestamps in
+// one averaged window. A backwards pair (clock step) is ordered first so
+// the result stays inside the window.
+func boxcarMidNs(start, end int64) int64 {
+	if end < start {
+		start, end = end, start
+	}
+	return start + (end-start)/2
 }
 
 // sampleTimeNs preserves kernel capture time when the driver timestamps the
