@@ -52,8 +52,17 @@ EDM-900/930/960 family (JPI's USB stick file, which EZTrends opens).
 A channel that never leaves the seed is omitted. A stored 0 is a real zero
 (for example fuel flow after the first delta lands on 0). `alt_ft` is the
 same rule. `lat_deg` / `lon_deg` come from the header plus later deltas of
-1/6000 degree. A header position that never moves is stored and is not used
-as an alignment track.
+1/6000 degree (about 19 m of latitude, about 16 m of longitude). A header
+position that never moves is stored and is not used as an alignment track.
+
+Two GPS patterns are not motion. A step of exactly ±100 counts on both
+axes at once is the init mark and is not applied; on a real EDM-930 it
+showed up once near the start of several flights and the later fixes did
+not cancel it. A sample whose step from the last published fix is faster
+than 250 kt is omitted from `lat_deg`/`lon_deg`. The running total is
+kept, so the next plausible fix is still on the track. That is what a
+high byte of 0xFF does: one sample about 1,200 km away, cancelled by the
+next record down to a few counts.
 
 Flight split for a binary download: one flight per `$D` record. The monitor
 already closes a flight when it stops recording. A non-zero repeat byte is
@@ -72,13 +81,25 @@ are refused.
 Checked against a real protocol-2 EDM-830 download (public sample, not in
 this repo): flight 1196, 216 samples at 1 s, first row RPM 1024, EGT1 1159 °F,
 CHT1 125 °F, fuel flow 0.3 gph, 12.7 V. That flight had no MAP and no TIT
-bits set. No EDM-930 dump was in the workspace; the synthetic fixture is
-model 930 and exercises MAP, TIT, RPM, fuel flow, and a second flight.
-Fuel-used tenths follow the published scale. On that 830 file the totalizer
+bits set. A model-930 download was parsed locally and left untracked. It
+has 12 flights, one per `$D`, every one at a 2 s interval, about 20,000
+samples from a few seconds up to about 3.4 h. Every flight has RPM, MAP,
+fuel flow, fuel used, EGT1–6, CHT1–6, TIT1, oil temperature and pressure,
+OAT in °C, CDT, IAT, volts, amps, percent power, and lat/lon. `tit2_f` and
+`alt_ft` are absent, so altitude cannot align this installation. Eight of
+the twelve flights have a GPS path longer than 1.5 km and at least 20
+fixes (about 60 km to about 950 km). The others are a frozen header, a
+short run whose GPS steps never settled, or a 2 km hop with two fixes.
+Fixes arrive about every 10–14 s. The step between them is about 0.9–1.1 km
+at cruise because that is how far the airplane flew, not because the
+quantization is a kilometer. The synthetic fixture is still the committed
+model-930 sample.
+Fuel-used tenths follow the published scale. On the 830 file the totalizer
 moved 38 counts over a stretch whose integrated fuel flow was about 7.4 gal,
-so `fuel_used_gal` is the monitor's counter divided by 10, not a
-cross-check that closed. Amps use the same tenths scale when the field
-appears; that 830 file never sent it.
+so that cross-check did not close. On the 930 download the same `/10`
+counter tracked integrated fuel flow within about a gallon on the flights
+whose totalizer was not reset. Amps use the tenths scale; on this download
+they sit within a few amps of zero.
 
 ## Alignment
 
@@ -94,9 +115,18 @@ clock, minus one. The report also prints `drift_s_per_h`. The JPI timestamp
 is read as UTC. The default search is ±15 minutes and ±3 minutes of
 accumulated drift. Widen it with `--window-s` only on purpose.
 
-1. If lat/lon form a track longer than 1.5 km, match it to `gps.lat` /
-   `gps.lon`. The score is median horizontal error. Above 750 m, or a flat
-   peak, refuses.
+1. If lat/lon form a track longer than 1.5 km and at least 20 fixes, match
+   it to `gps.lat` / `gps.lon`. Only samples where the position changes are
+   scored. The held rows between GPS sentences are not extra measurements;
+   at a 10–14 s update they would add about half a kilometer of along-track
+   staleness and sit next to the refusal line. The score is the median
+   horizontal error of the fixes. Above 750 m, or a flat peak, refuses.
+   That gate is unchanged. At a correct match the residual should be the
+   1/6000-degree quantization (about 20 m) plus groundspeed times whatever
+   time error is left: about 150 m for 2 s at 150 kt, and the 750 m line is
+   about 10 s of along-track error at that speed. A different route stays
+   well above it. No Kingfisher flight database was in this environment, so
+   the 930 download was not written into one.
 2. Otherwise correlate rate of climb, with demeaned altitude at 25% weight
    so a constant altimeter bias does not dominate. Kingfisher source, in
    order: `press_alt.pressure_alt_ft`, `press_alt.indicated_alt_ft`,
