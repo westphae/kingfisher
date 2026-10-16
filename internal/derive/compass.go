@@ -259,19 +259,28 @@ func (e *Engine) tick(hub *live.Hub, gpsc *gps.Client, buf *store.Buffer, dt flo
 
 	var headingVehDeg float64
 	headingVehOK := false
+	// liveA2E is the align-time snapshot unless a fresh level WMM solve
+	// replaces it. The field table below must use the same yaw as the heading.
+	liveA2E := alignA2E
 	if alignActive {
 		magVeh := field.ApplyRot(alignR, magAircraft)
-		if alignMethod == compassAlignWMM && field.IsValidRot(alignA2E) {
-			headingVehDeg = headingTrueFromAircraftToEarth(alignA2E)
-			if decl, ok := snap.Devices["geo"]; ok {
-				if d, ok := decl.Values["declination"]; ok {
-					headingVehDeg = field.HeadingDeg360(headingVehDeg - d)
+		if alignMethod == compassAlignWMM {
+			if bNed, ok := nedFieldUt(snap); ok {
+				if hdg, Rnow, ok := wmmLevelHeading(magAircraft, bNed, modelDecl); ok {
+					headingVehDeg = hdg
+					liveA2E = Rnow
+					headingVehOK = true
 				}
+			}
+			if !headingVehOK && field.IsValidRot(alignA2E) {
+				headingVehDeg = headingTrueFromAircraftToEarth(alignA2E)
+				headingVehDeg = field.HeadingDeg360(headingVehDeg - modelDecl)
+				headingVehOK = true
 			}
 		} else {
 			headingVehDeg = field.HeadingDeg360(field.HeadingFromAligned(magVeh) * 180 / math.Pi)
+			headingVehOK = true
 		}
-		headingVehOK = true
 	}
 
 	measFull := inTaxi && headingVehOK && fix.HasFix && !math.IsNaN(trackTrue)
@@ -300,8 +309,8 @@ func (e *Engine) tick(hub *live.Hub, gpsc *gps.Client, buf *store.Buffer, dt flo
 
 	if alignActive && alignMethod == compassAlignWMM {
 		bEarth := magAircraft
-		if field.IsValidRot(alignA2E) {
-			bEarth = field.ApplyRot(alignA2E, magAircraft)
+		if field.IsValidRot(liveA2E) {
+			bEarth = field.ApplyRot(liveA2E, magAircraft)
 		}
 		publishNEDField(vals, bEarth)
 	} else {
