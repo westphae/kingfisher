@@ -33,6 +33,7 @@ uv run --project analysis python scripts/analyze_flights.py windows
 uv run --project analysis python scripts/analyze_flights.py noise
 uv run --project analysis python scripts/analyze_flights.py report
 uv run --project analysis python scripts/analyze_flights.py cal-accel --json ~/kingfisher/calibration/cabin_accel_….json --plot
+uv run --project analysis python scripts/analyze_flights.py perf --file ~/kingfisher/flights/<session>.db
 uv run --project analysis python scripts/analyze_flights.py windows --file 20260722T203620Z_n456t.db
 
 # Bench cal UI (cabin accel six-face + cabin gyro still + pod mag TBD): [calibrate.md](calibrate.md)
@@ -173,4 +174,5 @@ not required for v1 catalog/health.
 
 - `scripts/analyze_flight_sampling.py` — earlier gap/plot tool; health logic is
   being folded into `analysis/health.py` (legacy script kept for now).
+- `analysis/performance.py` — one-flight CAS, TAS, density altitude, climb, and wind geometry. Limits: [`../research-program.md`](../research-program.md).
 - `docs/timestamps.md` — what `ts_ns` means per source.
