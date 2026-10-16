@@ -241,7 +241,13 @@ func (b *Buffer) requeue(pending map[string][]live.Sample, devs []string) {
 		if len(merged) > MaxPendingPerDevice {
 			drop := len(merged) - MaxPendingPerDevice
 			b.droppedRows.Add(uint64(drop))
-			merged = merged[drop:]
+			// Reslicing keeps the dropped prefix alive in the backing
+			// array. Under a sustained flush failure each cycle allocates
+			// a larger array and the Pi would grow without bound. Compact
+			// to a fresh slice of exactly the retained rows.
+			kept := make([]live.Sample, MaxPendingPerDevice)
+			copy(kept, merged[drop:])
+			merged = kept
 		}
 		b.pending[d] = merged
 	}
