@@ -22,6 +22,7 @@ fusion — especially GPS.
 | Pod sensors (`bmp581`, `mmc5983`, `ms4525`, …) | Sample time reconstructed on Pi clock | Pod `uptime − age_us`, mapped via EMA sync | UDP / batch jitter adds uncertainty |
 | Derived (`ahrs`, `press_alt`, `geo`, `compass`) | `time.Now()` when value is **computed** | Inputs may be tens of ms older | Not the timestamp of fused inputs |
 | **Howgozit** (`hgz_*` tables) | `time.Now()` when the pilot taps **+** (editable) | User may backdate via time cell | Manual annotations; join to sensors on `ts_ns` |
+| **`jpi_edm930`** | Pi clock after a post-flight fit (`offset + drift`) | JPI face is not GNSS-disciplined; original time is `jpi_time` | Written by `analyze_flights.py jpi`. See `docs/jpi-edm930.md` |
 | `sensor_attrs` | When the attr snapshot was logged | N/A (configuration, not a sample) | |
 | `_session.start_time`, DB filename | Pi wall clock at session open | N/A | |
 

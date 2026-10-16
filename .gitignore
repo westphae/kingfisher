@@ -16,6 +16,13 @@ target/
 *.py[cod]
 .python-version
 
+# Pilot JPI / EDM-930 USB dumps and CSV exports. Private flight logs stay
+# local. The README and the small synthetic fixtures are the exceptions.
+analysis/testdata/jpi/*
+!analysis/testdata/jpi/README.md
+!analysis/testdata/jpi/synthetic_edm930.jpi
+!analysis/testdata/jpi/synthetic_edm930.csv
+
 # Editor / OS.
 *.swp
 .DS_Store
