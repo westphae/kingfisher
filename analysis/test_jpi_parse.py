@@ -193,6 +193,61 @@ class ParseCsvTests(unittest.TestCase):
             parse_bytes(b"name,value\nalpha,1\n", "notes.csv")
 
 
+class GpsQuirkTests(unittest.TestCase):
+    """Init mark and one-sample high-byte spikes seen on a real EDM-930."""
+
+    def _one(self, records, interval=6, lat_raw=180000, lon_raw=-600000):
+        blob = encode_download(
+            [(9, START, interval, records, lat_raw, lon_raw)]
+        )
+        return parse_bytes(blob, "gps-quirk.jpi").flights[0]
+
+    def test_handshake_100_counts_is_not_applied(self):
+        flight = self._one(
+            [
+                encode_record({87: 100, 86: -100}),
+                encode_record({87: 30, 86: -12}),
+            ]
+        )
+        first, second = flight.samples
+        self.assertAlmostEqual(first.values["lat_deg"], 180000 / 6000.0)
+        self.assertAlmostEqual(first.values["lon_deg"], -600000 / 6000.0)
+        self.assertAlmostEqual(second.values["lat_deg"], (180000 + 30) / 6000.0)
+        self.assertAlmostEqual(second.values["lon_deg"], (-600000 - 12) / 6000.0)
+
+    def test_high_byte_ff_spike_is_omitted_and_track_continues(self):
+        # Low 255 sign-negative with high 255 is -65535 counts (~1,200 km).
+        # The next record's high 255 and low 244 lands 11 counts from the
+        # pre-spike fix. That intermediate sample is not a position.
+        flight = self._one(
+            [
+                encode_record({87: 20}),
+                encode_record({87: -255, 82: 255, 86: 4}),
+                encode_record({87: 244, 82: 255}),
+            ]
+        )
+        self.assertAlmostEqual(flight.samples[0].values["lat_deg"], (180000 + 20) / 6000.0)
+        self.assertIsNone(flight.samples[1].values.get("lat_deg"))
+        self.assertIsNone(flight.samples[1].values.get("lon_deg"))
+        # Net of the pair is -11 counts from the first fix. Lon +4 stays.
+        self.assertAlmostEqual(flight.samples[2].values["lat_deg"], (180000 + 9) / 6000.0)
+        self.assertAlmostEqual(flight.samples[2].values["lon_deg"], (-600000 + 4) / 6000.0)
+        self.assertTrue(any("omitted" in w for w in flight.warnings))
+
+    def test_long_gap_16bit_delta_is_kept(self):
+        # (2<<8)|167 = 679 counts, about 12.6 km. repeat=40 at 6 s is a
+        # 246 s gap, so the implied speed is a cruise groundspeed.
+        flight = self._one(
+            [
+                encode_record({87: 30}),
+                encode_record({87: 167, 82: 2}, repeat=40),
+            ]
+        )
+        self.assertAlmostEqual(
+            flight.samples[1].values["lat_deg"], (180000 + 30 + 679) / 6000.0
+        )
+
+
 class RealDownloadTests(unittest.TestCase):
     """Optional. Set JPI_SAMPLE to a protocol-2 .JPI the pilot dropped locally."""
 
@@ -217,6 +272,55 @@ class RealDownloadTests(unittest.TestCase):
             self.assertNotIn("tit1_f", flight.channels)
             self.assertAlmostEqual(row["lat_deg"], 201044 / 6000.0, places=5)
             self.assertAlmostEqual(row["lon_deg"], -673704 / 6000.0, places=5)
+        if dl.model == 930 and any(f.flight_id == 306 for f in dl.flights):
+            self.assertGreaterEqual(len(dl.flights), 12)
+            self.assertTrue(all(f.interval_s == 2 for f in dl.flights))
+            self.assertNotIn("alt_ft", set().union(*(f.channels for f in dl.flights)))
+            long = max(dl.flights, key=lambda f: len(f.samples))
+            for name in (
+                "rpm",
+                "map_inhg",
+                "fuel_flow_gph",
+                "tit1_f",
+                "egt1_f",
+                "cht1_f",
+                "oat_c",
+                "volts",
+                "amps",
+                "hp_pct",
+                "lat_deg",
+                "lon_deg",
+            ):
+                self.assertIn(name, long.channels)
+            self._assert_gps_steps_are_physical(dl)
+
+    def _assert_gps_steps_are_physical(self, dl):
+        import math
+
+        limit = 130.0
+
+        def hav(a, b, c, d):
+            r = 6_371_000.0
+            p1, p2 = math.radians(a), math.radians(c)
+            dp, dl = math.radians(c - a), math.radians(d - b)
+            h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+            return 2 * r * math.asin(min(1.0, math.sqrt(h)))
+
+        for flight in dl.flights:
+            prev = None
+            for sample in flight.samples:
+                lat = sample.values.get("lat_deg")
+                lon = sample.values.get("lon_deg")
+                if lat is None or lon is None:
+                    continue
+                if prev is None:
+                    prev = (lat, lon, sample.t)
+                    continue
+                if lat == prev[0] and lon == prev[1]:
+                    continue
+                dt = max((sample.t - prev[2]).total_seconds(), 1.0)
+                self.assertLessEqual(hav(prev[0], prev[1], lat, lon) / dt, limit)
+                prev = (lat, lon, sample.t)
 
 
 if __name__ == "__main__":

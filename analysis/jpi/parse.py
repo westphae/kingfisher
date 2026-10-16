@@ -21,6 +21,10 @@ protocol-2 download (EDM-830, the same record family the EDM-930 writes):
 * Fuel flow, fuel used, manifold pressure, and volts are stored in tenths
   when ``$F`` fuel unit is 0 (US gallons). GPS lat/lon in the header are
   signed int32 counts of 1/6000 degree. Later records add the same units.
+  A step of exactly ±100 counts on both axes at once is the GPS-init mark
+  and is not applied. A sample whose step from the last published fix
+  exceeds 250 kt is omitted (the running total is kept, so the next
+  plausible fix is still on the track).
 
 CSV is the fallback (EZTrends "Export", or a spreadsheet save). Values are
 already in display units. Blank cells are missing, not zero.
@@ -32,6 +36,7 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 import struct
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -46,6 +51,10 @@ _GPS_LON_LO = 86
 _GPS_LAT_HI = 82
 _GPS_LON_HI = 81
 _GPS_SCALE = 6000.0
+# Both axes stepping by exactly 100 counts is the GPS-init mark, not motion.
+_GPS_HANDSHAKE = 100
+# Above Bonanza Vne (~196 kt). A real fix can be sparse; the limit is speed.
+_GPS_MAX_SPEED_MPS = 130.0
 _SEED = 240
 
 # (stem, lo index, hi index or None, kind)
@@ -469,11 +478,18 @@ def _parse_flight(
     gps_lat_units = 0
     gps_lon_units = 0
     gps_moved = False
+    gps_dropped = 0
     names = _name_table(engine_unit, oat_unit, fuel_unit)
     samples: list[Sample] = []
     pos = 29
     resyncs = 0
     t = clock
+    # Header position is the fix at the start. The first record is stamped
+    # at that same clock, so give the speed check one interval of budget.
+    header_lat, header_lon = _gps_degrees(lat_raw, lon_raw, 0, 0)
+    last_fix: tuple[float, float, datetime] | None = None
+    if header_lat is not None:
+        last_fix = (header_lat, header_lon, clock - timedelta(seconds=interval))
     while pos + 6 <= len(blob):
         rec = _try_record(blob, pos)
         if rec is None:
@@ -504,8 +520,19 @@ def _parse_flight(
         values = _sample_values(acc, names, fuel_unit)
         lat, lon = _gps_degrees(lat_raw, lon_raw, gps_lat_units, gps_lon_units)
         if lat is not None:
-            values["lat_deg"] = lat
-            values["lon_deg"] = lon
+            if _gps_step_ok(last_fix, lat, lon, t):
+                values["lat_deg"] = lat
+                values["lon_deg"] = lon
+                # Holds repeat the last fix. The speed budget is the time
+                # since the position actually changed, not since the last row.
+                if (
+                    last_fix is None
+                    or lat != last_fix[0]
+                    or lon != last_fix[1]
+                ):
+                    last_fix = (lat, lon, t)
+            else:
+                gps_dropped += 1
         samples.append(Sample(t=t, values=values))
         t += timedelta(seconds=interval)
         pos = next_pos
@@ -515,6 +542,12 @@ def _parse_flight(
         warnings.append(
             "GPS lat/lon is constant across this flight (header position only); "
             "alignment will not treat it as a track"
+        )
+    if gps_dropped:
+        noun = "sample" if gps_dropped == 1 else "samples"
+        warnings.append(
+            f"omitted {gps_dropped} GPS {noun} whose step exceeded "
+            f"{_GPS_MAX_SPEED_MPS:.0f} m/s; the running fix is kept"
         )
     # Drop keys that never took a value so absent channels are absent.
     for sample in samples:
@@ -604,29 +637,60 @@ def _apply(acc: list[int | None], deltas: dict[int, tuple[int, int]]) -> None:
             acc[index] += delta
 
 
+def _signed_gps_delta(
+    deltas: dict[int, tuple[int, int]], lo_index: int, hi_index: int
+) -> int:
+    if lo_index not in deltas:
+        return 0
+    raw, sign = deltas[lo_index]
+    if hi_index in deltas:
+        raw = (deltas[hi_index][0] << 8) | raw
+    return -raw if sign else raw
+
+
 def _apply_gps(
     lat_units: int,
     lon_units: int,
     deltas: dict[int, tuple[int, int]],
 ) -> tuple[int, int, bool]:
+    dlat = _signed_gps_delta(deltas, _GPS_LAT_LO, _GPS_LAT_HI)
+    dlon = _signed_gps_delta(deltas, _GPS_LON_LO, _GPS_LON_HI)
+    # Seen at GPS start on a real EDM-930: both axes step by exactly 100
+    # counts (about 1.6–1.9 km) and the following fixes do not cancel it.
+    # Applying it shifts the whole track by that amount. It is the init mark.
+    if abs(dlat) == _GPS_HANDSHAKE and abs(dlon) == _GPS_HANDSHAKE:
+        return lat_units, lon_units, False
     moved = False
-    if _GPS_LAT_LO in deltas:
-        raw, sign = deltas[_GPS_LAT_LO]
-        if _GPS_LAT_HI in deltas:
-            raw = (deltas[_GPS_LAT_HI][0] << 8) | raw
-        delta = -raw if sign else raw
-        if delta:
-            lat_units += delta
-            moved = True
-    if _GPS_LON_LO in deltas:
-        raw, sign = deltas[_GPS_LON_LO]
-        if _GPS_LON_HI in deltas:
-            raw = (deltas[_GPS_LON_HI][0] << 8) | raw
-        delta = -raw if sign else raw
-        if delta:
-            lon_units += delta
-            moved = True
+    if dlat:
+        lat_units += dlat
+        moved = True
+    if dlon:
+        lon_units += dlon
+        moved = True
     return lat_units, lon_units, moved
+
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    radius = 6_371_000.0
+    p1 = math.radians(lat1)
+    p2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlmb = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlmb / 2) ** 2
+    return 2 * radius * math.asin(min(1.0, math.sqrt(a)))
+
+
+def _gps_step_ok(
+    last: tuple[float, float, datetime] | None,
+    lat: float,
+    lon: float,
+    when: datetime,
+) -> bool:
+    if last is None:
+        return True
+    prev_lat, prev_lon, prev_t = last
+    dt = max((when - prev_t).total_seconds(), 1.0)
+    return _haversine_m(prev_lat, prev_lon, lat, lon) / dt <= _GPS_MAX_SPEED_MPS
 
 
 def _gps_degrees(
