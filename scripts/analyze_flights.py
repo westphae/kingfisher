@@ -8,6 +8,7 @@ Examples (from repo root; uses uv workspace — see docs/python.md):
   uv run --project analysis python scripts/analyze_flights.py report
   uv run --project analysis python scripts/analyze_flights.py cal-accel --json ~/kingfisher/calibration/cabin_imu_….json
   uv run --project analysis python scripts/analyze_flights.py all
+  uv run --project analysis python scripts/analyze_flights.py jpi --jpi FILE.jpi --db FLIGHT.sqlite [--flight N] [--apply]
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from analysis.cal_accel import run as run_cal_accel
+from analysis.jpi.cli import add_parser as add_jpi_parser
+from analysis.jpi.cli import cmd_jpi
 from analysis.catalog import load_catalog, scan_flights_dir, write_catalog
 from analysis.health import analyze_health, write_health_report
 from analysis.report import write_ledger
@@ -315,6 +318,7 @@ def main() -> int:
         help="write before/after ‖a‖ PNG (default: <cache>/cal_accel_norms.png)",
     )
     sub.add_parser("all", help="catalog + health(flights) + report")
+    add_jpi_parser(sub)
 
     args = p.parse_args()
     if args.cmd == "catalog":
@@ -331,6 +335,8 @@ def main() -> int:
         return cmd_cal_accel(args)
     if args.cmd == "all":
         return cmd_all(args)
+    if args.cmd == "jpi":
+        return cmd_jpi(args)
     return 1
 
 
