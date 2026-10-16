@@ -20,12 +20,43 @@ func TestCalcIASKt_zeroDp(t *testing.T) {
 	}
 }
 
+func qcPaForCASKt(casKt float64) float64 {
+	vMps := casKt / mpsPerKt
+	a := math.Sqrt(gammaAir * dryAirR * isaT0K)
+	mach := vMps / a
+	return isaP0Pa * (math.Pow(1+0.2*mach*mach, gammaAir/(gammaAir-1)) - 1)
+}
+
 func TestCalcIASKt_seaLevel100Kt(t *testing.T) {
-	vMps := 100.0 / mpsPerKt
-	dp := 0.5 * rho0KgM3 * vMps * vMps
+	dp := qcPaForCASKt(100)
 	got := CalcIASKt(dp)
-	if math.Abs(got-100) > 0.5 {
-		t.Fatalf("CalcIASKt(%.1f Pa)=%.2f kt want ~100", dp, got)
+	if math.Abs(got-100) > 0.05 {
+		t.Fatalf("CalcIASKt(%.1f Pa)=%.3f kt want 100", dp, got)
+	}
+}
+
+func TestCalcIASKt_incompressibleOverreadsAtCruise(t *testing.T) {
+	const cas = 180.0
+	qc := qcPaForCASKt(cas)
+	got := CalcIASKt(qc)
+	if math.Abs(got-cas) > 0.05 {
+		t.Fatalf("CAS=%.3f want %.1f", got, cas)
+	}
+	incomp := math.Sqrt(2*qc/rho0KgM3) * mpsPerKt
+	if incomp < got+1 {
+		t.Fatalf("incompressible %.2f kt should exceed CAS %.2f by more than 1 kt", incomp, got)
+	}
+}
+
+func TestCalcTASFromQc_equalsCASAtSeaLevelISA(t *testing.T) {
+	qc := qcPaForCASKt(150)
+	cas := CalcIASKt(qc)
+	tas, ok := CalcTASFromQcKt(qc, isaP0Pa, 15)
+	if !ok {
+		t.Fatal("expected TAS")
+	}
+	if math.Abs(tas-cas) > 0.05 {
+		t.Fatalf("TAS %.3f vs CAS %.3f at SL ISA", tas, cas)
 	}
 }
 
