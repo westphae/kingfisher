@@ -80,7 +80,7 @@ The pod has no sysfs. `podReader` satisfies `sensors.Reader` purely so `sensors.
 
 ## The pod plan
 
-The current pod work is rolled out in phases (Phase 0 = wire crate, Phase 2 = Pi-side ingest, Phase 3 = I²C sensors, Phase 4 = control plane + link keepalive are done; Phase 5 = AHRS mag integration is pending). Wire `Cmd` frames carry a Pi-assigned `seq` echoed in `Ack.for_seq`. Phase 5 explicitly requires surgery on `internal/derive/ahrs.go::findIMU` — it currently expects accel/gyro/mag on the *same* device sample, which won't match the pod-vs-IMU split.
+The current pod work is rolled out in phases (Phase 0 = wire crate, Phase 2 = Pi-side ingest, Phase 3 = I²C sensors, Phase 4 = control plane + link keepalive are done). Wire `Cmd` frames carry a Pi-assigned `seq` echoed in `Ack.for_seq`. Phase 5 (split sensors into one attitude) is partial: `findIMU` merges `icm45686-accel` with `icm45686-gyro`, and a pod magnetometer is mount-corrected when it is not on the IMU sample. Still open: WMM compass heading assumes body +Z is down, and AHRS and compass do not share one FRD/NED rotation. Simple AHRS propagates gyro on ticks where the GPS fix epoch advances (`Measurement.TW`); see `docs/timestamps.md`. The research use of the recorder is `docs/research-program.md`.
 
 Plan files live under `~/.claude/plans/` outside the repo.
 

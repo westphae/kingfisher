@@ -441,14 +441,18 @@ type Pod struct {
 	BatteryLearnedMah map[string]uint16 `json:"battery_learned_mah,omitempty"`
 	// Three-stage power protocol thresholds; consumed by firmware build.rs
 	// (compile-time) and by the Pi for burst-quiet link expectations.
-	BurstSocPct       uint8             `json:"burst_soc_pct,omitempty"`
-	BurstWindowS      uint16            `json:"burst_window_s,omitempty"`
-	BurstVoltageUncal float64           `json:"burst_voltage_v_uncalibrated,omitempty"`
-	ProtectVoltageV   float64           `json:"protect_voltage_v,omitempty"`
-	ProtectSocPct     uint8             `json:"protect_soc_pct,omitempty"`
-	LowDebounceS      uint16            `json:"low_debounce_s,omitempty"`
-	ModemPowerSave    bool              `json:"modem_power_save,omitempty"` // off: brcmfmac AP drops unicast to dozing STA
-	Attrs             map[string]string `json:"attrs,omitempty"`            // e.g. in_mag_sampling_frequency
+	BurstSocPct       uint8   `json:"burst_soc_pct,omitempty"`
+	BurstWindowS      uint16  `json:"burst_window_s,omitempty"`
+	BurstVoltageUncal float64 `json:"burst_voltage_v_uncalibrated,omitempty"`
+	ProtectVoltageV   float64 `json:"protect_voltage_v,omitempty"`
+	ProtectSocPct     uint8   `json:"protect_soc_pct,omitempty"`
+	LowDebounceS      uint16  `json:"low_debounce_s,omitempty"`
+	// Default false for a fresh build. The 2026-07-14 bench failure was a
+	// firmware Ping path that never refreshed the Hello timer, not the AP
+	// dropping unicast to a dozing STA. Aircraft config sets this true.
+	// See docs/pod-power.md.
+	ModemPowerSave bool              `json:"modem_power_save,omitempty"`
+	Attrs          map[string]string `json:"attrs,omitempty"` // e.g. in_mag_sampling_frequency
 }
 
 const (

@@ -1,16 +1,20 @@
 # Flight DB: metadata table
 
-The `metadata` table is created at DB bootstrap but **nothing writes to it yet**
-(`SetMeta` exists in `store.go` but has no callers). `_session` holds the
-startup snapshot; `sensor_attrs` holds per-device configuration history.
+`metadata` is a string key/value table written throughout the session, not a
+placeholder. Callers today:
 
-## Future uses for `metadata`
+- Startup clock probe and chrony/PPS snapshot (`cmd/kingfisher`, keys
+  `clock_startup_*`). See `docs/timestamps.md`.
+- First chrony lock (`clock_synced_at_utc`, `clock_true_start_utc`).
+- In-flight clock nudges (`clock_nudge_*` in `internal/clock/nudger.go`).
+- Cockpit power-off (`shutdown_reason`, `shutdown_at_utc`).
+- UPS gauge version and host-health snapshots when those monitors run.
 
-- Final geomagnetic declination after GPS lock (today only `_session.declination`
-  is seeded to 0 at startup).
-- Pod firmware version / wire revision echoed from `Hello` (complement `_session.version`).
-- Effective `config.json` hash or path at flight start for reproducibility.
-- User flight notes mirrored from config if we want them queryable without parsing config.
-- AHRS tuning or calibration blobs that do not fit `sensor_attrs` rows.
+`_session` is still the one-row flight header (tail, notes, declination seeded
+to 0). `sensor_attrs` is the per-device configuration history.
 
-Handle in a later pass; do not block pod attr logging on this.
+## Not in metadata yet
+
+- Pod firmware version / wire revision echoed from `Hello`.
+- Hash of the effective `config.json` at flight start.
+- Final geomagnetic model epoch (declination itself is the `geo` table).
