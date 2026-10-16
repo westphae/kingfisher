@@ -112,6 +112,23 @@ Pi host wall clock (`CLOCK_REALTIME`), ideally GNSS-disciplined before recording
 See **[`docs/timestamps.md`](docs/timestamps.md)** for measurement error vs true
 sample time, GPS fusion guidance, and implementation references.
 
+## Engine data (JPI EDM-930)
+
+The EDM-930 is not on the live bus. After the flight, merge one download
+into the flight SQLite. This installation records no altitude and no second
+TIT, so the match is the GPS ground track. Format, refusal rules, and the
+`jpi_edm930` columns are in [`docs/jpi-edm930.md`](docs/jpi-edm930.md).
+
+```bash
+uv run --project analysis python scripts/analyze_flights.py jpi \
+  --jpi PATH/TO/FILE.JPI \
+  --db PATH/TO/FLIGHT.sqlite \
+  --flight N
+```
+
+That command is a dry run. Add `--apply` to write. Do not commit the `.jpi`
+file or the flight database.
+
 ## Building
 
 ```

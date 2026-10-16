@@ -8,6 +8,10 @@ Kingfisher is a Go flight data recorder for a turbonormalized Beech Bonanza V35B
 
 The Pi this repo lives on is also the *deployment target*. Tests can hit real sysfs / network paths; that is expected, not test smell.
 
+## JPI EDM-930 (post-flight)
+
+Engine-monitor ingest is not a live source. Do not wire it through `live.Hub` or `sensors.runOne`. Before editing it, read `AGENTS.md`, `docs/jpi-edm930.md`, and `analysis/testdata/jpi/README.md`. Code is `analysis/jpi/`; the command is `scripts/analyze_flights.py jpi` (dry-run unless `--apply`). This installation's download has no altitude, so the match is GPS ground track. Never commit a real `.jpi` / `.dat` dump or a flight SQLite.
+
 ## Repository layout (non-obvious parts only)
 
 - `cmd/kingfisher/main.go` — orchestrator; composes every long-running goroutine. New data sources are wired in here.

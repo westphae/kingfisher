@@ -25,5 +25,9 @@ Set the EDM clock to the same time base as the Pi (UTC), within a few
 minutes. The search is ±15 minutes by default. A timezone-sized error is
 refused.
 
+This installation's EDM-930 download has no altitude and no second TIT.
+Alignment is the GPS ground track. Altitude correlation is only a fallback
+for a file that actually carries `alt_ft`.
+
 `synthetic_edm930.jpi` and `synthetic_edm930.csv` are tiny authored fixtures,
 not flight data. The format is documented in `docs/jpi-edm930.md`.
