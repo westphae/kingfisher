@@ -149,6 +149,61 @@ class GpsAlignTests(unittest.TestCase):
         self.assertAlmostEqual(result.offset_s, offset, delta=1.5)
         self.assertAlmostEqual(result.drift_s_per_s, drift, delta=3e-4)
 
+    def test_held_fixes_do_not_set_the_residual(self):
+        # Cruise north at 150 kt. JPI repeats each fix for 12 s. Scoring the
+        # holds would leave a median staleness of several hundred meters.
+        start = datetime(2024, 6, 1, 18, 0, 0)
+        duration = 900.0
+        step = 2.0
+        jpi_t = np.arange(0.0, duration, step)
+        t_ref = float(np.mean(jpi_t))
+        offset = 80.0
+        drift = 0.0005
+        speed = 77.0  # m/s
+        deg_per_s = speed / 111_320.0
+        # Hold each 12 s fix across the following 2 s samples.
+        hold = np.floor(jpi_t / 12.0) * 12.0
+        lat = 35.0 + deg_per_s * hold
+        lon = np.full_like(lat, -110.0)
+        kf_t = np.arange(-200.0, duration + 200.0, 1.0)
+        # Continuous track on the Kingfisher clock: invert the warp so a
+        # fix taken at JPI time τ sits on the KF sample at τ+offset+drift.
+        t_j_of_kf = (kf_t - offset + drift * t_ref) / (1.0 + drift)
+        kf_lat = 35.0 + deg_per_s * t_j_of_kf
+        base = _unix(start)
+        conn = _conn()
+        conn.executemany(
+            "INSERT INTO gps(ts_ns, lat, lon) VALUES (?, ?, ?)",
+            [((base + t) * 1e9, float(la), -110.0) for t, la in zip(kf_t, kf_lat)],
+        )
+        flight = _flight(start, jpi_t, {"lat_deg": lat, "lon_deg": lon})
+        result = align_flight(flight, conn, window_s=900.0)
+        self.assertTrue(result.ok, result.summary())
+        self.assertEqual(result.method, "gps_track")
+        self.assertAlmostEqual(result.offset_s, offset, delta=1.5)
+        self.assertAlmostEqual(result.drift_s_per_s, drift, delta=3e-4)
+        self.assertLess(result.residual, 50.0)
+
+    def test_disjoint_track_is_refused(self):
+        start = datetime(2024, 6, 1, 18, 0, 0)
+        duration = 900.0
+        jpi_t = np.arange(0.0, duration, 6.0)
+        lat = 33.0 + 0.2 * (jpi_t / duration)
+        lon = np.full_like(lat, -112.0)
+        kf_t = np.arange(-100.0, duration + 100.0, 1.0)
+        kf_lat = np.full_like(kf_t, 34.2)
+        kf_lon = -112.0 + 0.2 * (kf_t / duration)
+        base = _unix(start)
+        conn = _conn()
+        conn.executemany(
+            "INSERT INTO gps(ts_ns, lat, lon) VALUES (?, ?, ?)",
+            [((base + t) * 1e9, float(la), float(lo)) for t, la, lo in zip(kf_t, kf_lat, kf_lon)],
+        )
+        flight = _flight(start, jpi_t, {"lat_deg": lat, "lon_deg": lon})
+        result = align_flight(flight, conn, window_s=900.0)
+        self.assertFalse(result.ok, result.summary())
+        self.assertIn("750", result.reason)
+
 
 if __name__ == "__main__":
     unittest.main()

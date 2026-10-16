@@ -15,8 +15,10 @@ per second of JPI clock, minus one). Reports also give ``drift_s_per_h``.
 Observables, in order:
 
 1. GPS track, when the JPI file has a lat/lon path longer than
-   ``GPS_MIN_PATH_M``. Coarse time still has to fall inside the search
-   window. This wins outright when the residual is under the refusal limit.
+   ``GPS_MIN_PATH_M``. The monitor holds the last fix between updates, so
+   the score uses only the samples where the position changes. Coarse time
+   still has to fall inside the search window. This wins outright when the
+   residual is under the refusal limit.
 2. Otherwise altitude rate-of-climb, with demeaned altitude as a smaller
    term so a constant altimeter bias does not dominate. Kingfisher
    ``press_alt.pressure_alt_ft`` is preferred, then ``indicated_alt_ft``,
@@ -169,13 +171,34 @@ def _jpi_track(flight: Flight, t_j: np.ndarray) -> tuple[np.ndarray, np.ndarray,
         return None
     lat = column_array(flight, "lat_deg")
     lon = column_array(flight, "lon_deg")
-    ok = np.isfinite(lat) & np.isfinite(lon)
+    ok = _gps_fix_epochs(lat, lon)
     if int(ok.sum()) < GPS_MIN_POINTS:
         return None
     path = _path_length_m(lat[ok], lon[ok])
     if path < GPS_MIN_PATH_M:
         return None
     return t_j[ok], lat[ok], lon[ok]
+
+
+def _gps_fix_epochs(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
+    """True on rows where a finite position differs from the previous fix.
+
+    Between GPS sentences the download repeats the last lat/lon. Those holds
+    are up to half an update of along-track staleness and are not extra
+    measurements. ``GPS_MIN_POINTS`` counts fixes.
+    """
+    keep = np.zeros(len(lat), dtype=bool)
+    finite = np.flatnonzero(np.isfinite(lat) & np.isfinite(lon))
+    if len(finite) == 0:
+        return keep
+    keep[finite[0]] = True
+    if len(finite) == 1:
+        return keep
+    prev = finite[:-1]
+    nxt = finite[1:]
+    moved = (np.abs(lat[nxt] - lat[prev]) > 1e-8) | (np.abs(lon[nxt] - lon[prev]) > 1e-8)
+    keep[nxt[moved]] = True
+    return keep
 
 
 def _path_length_m(lat: np.ndarray, lon: np.ndarray) -> float:
@@ -245,7 +268,8 @@ def _align_gps(track, conn, t_ref: float, window_s: float) -> AlignResult | None
         residual=best,
         residual_unit="m median horizontal",
         detail=(
-            f"Matched JPI lat/lon to gps.lat/lon. "
+            f"Matched {n} JPI GPS fixes to gps.lat/lon. "
+            f"Held samples between fixes are not scored. "
             f"Median horizontal residual {best:.1f} m."
         ),
         n_points=n,
