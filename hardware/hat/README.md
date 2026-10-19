@@ -1,76 +1,88 @@
-# Kingfisher Sensor HAT (rev 0.2)
+# Kingfisher Sensor HAT (rev 0.3)
 
-Custom Raspberry Pi HAT that consolidates the cabin sensors currently on SparkFun /
-breakout boards + ribbon cable:
+Custom HAT for the extra-tall GPIO header above the M.2 HAT+. It replaces the
+cabin SparkFun NEO-M9N and ICM-45686 breakouts. The schematic netlist is
+checked. The board is routed on JLCPCB stackup JLC04161H-7628. Gerbers
+and drills are in `fab/`. Confirm header engagement, the CR2032 against the
+lid, and that the GNSS antenna is active before ordering.
 
 | Ref | Part | Role |
 |-----|------|------|
-| U1 | ICM-45686 | Cabin IMU (I²C `0x68`, INT → GPIO17) |
-| U2 | BMP581 | Cabin baro / temp (I²C `0x47`) |
-| U3 | AP2112K-3.3 | 5 V → 3.3 V for GPS |
-| U4 | NEO-M9N | GNSS (UART0 + PPS → GPIO18); `V_BCKP` diode-OR’d |
-| U5 | RV-3028-C7 | I²C RTC (`0x52`), `VBACKUP` ← CR2032 |
-| BT1 | CR2032 + Keystone 3002 | Replaceable backup for RTC + GPS |
-| D1, D2 | BAT54 | Schottky OR: `+3V3_GPS` / `VBAT` → `V_BCKP` |
-| J1 | 2×20 pin socket | Mates **extended GPIO pins above the M.2 HAT+** (bottom side) |
-| J2 | U.FL | Antenna → existing SMA bulkhead pigtail |
+| U1 | ICM-45686 | Cabin IMU, I²C `0x68`, INT1 → GPIO17 |
+| U2 | BMP581 | Extra cabin baro, I²C `0x47` |
+| U3 | AP2112K-3.3 | 5 V → 3.3 V for the GPS only |
+| U4 | NEO-M9N | GNSS, UART0 + PPS on GPIO18 |
+| U5 | RV-3028-C7 | I²C RTC at `0x52` |
+| BT1 | CR2032, Keystone 3002 | Replaceable cell for the RTC `VBACKUP` only |
+| BT2 | ML414H | Soldered rechargeable cell on GPS `V_BCKP` |
+| D1 | PMEG4005EJ | GPS backup charge diode |
+| D2 | Green LED | `+3V3_GPS` through 1 kΩ |
+| J1 | 2×20 socket, bottom | Mates the extended Pi header. Do not move it |
+| J2 | U.FL | Antenna. 0.32 mm microstrip plus the bias-T stub |
+| J3 | 1×5 header | X1200 harness: +3V3, GND, SDA, SCL, GPIO6 |
 
-Form factor: official Pi HAT outline (65 × 56.5 mm, M2.5 holes 58 × 49).
+Outline is the official Pi HAT (65 × 56.5 mm, M2.5 on 58 × 49 mm).
 
-**Why RV-3028 not DS3231?** DS3231 sits on `0x68` and would collide with the ICM.
-**Why CR2032 not CR1220?** ~5× capacity for multi-year GPS/`V_BCKP` + RTC backup;
-Keystone 3002 is a common replaceable HAT holder (check lid height).
-
-See [docs/DESIGN.md](docs/DESIGN.md) for the backup topology, I²C map, retention
-estimates, and the “what else” resilience shortlist (test points / DNP pull-ups
-recommended; second watchdog / LED forest skipped).
+The GPS circuit follows the SparkFun NEO-M9N SMA board: LDO with EN on 5 V,
+UART pull-up on `D_SEL`, 33 Ω on TX/RX, ML414H directly on `V_BCKP`, and the
+ferrite bias-T into the antenna. The CR2032 does not back up the GPS and has
+no charge path. There is no UPS on this board. See
+[docs/DESIGN.md](docs/DESIGN.md).
 
 ## Open in KiCad
 
-Requires **KiCad 9** (project generated against 9.0.2).
+KiCad 9 (generated against 9.0.2).
 
 ```bash
 kicad hardware/hat/kingfisher-hat.kicad_pro
 ```
 
-Project-local libraries:
+Libraries:
 
 - `libs/Kingfisher.kicad_sym` — ICM-45686, BMP581, NEO-M9N
-- `libs/Kingfisher.pretty` — BMP581 land pattern (adapted from SparkFun Qwiic BMP581, CC-BY-SA 4.0)
+- `libs/Kingfisher.pretty` — ICM-45686 (TDK pin numbers), BMP581, ML414H
 
-Regenerate libraries / schematic scaffolding (stdlib only — **no uv project**):
+Regenerate with system Python, not a uv venv. `pcbnew` comes from
+`python3-pcbnew`.
 
 ```bash
 python3 hardware/hat/scripts/build_libs.py
-python3 hardware/hat/scripts/build_sch.py   # overwrites schematic
-kicad-cli sch export netlist hardware/hat/kingfisher-hat.kicad_sch
+python3 hardware/hat/scripts/build_sch.py
+kicad-cli sch export netlist -o /tmp/kingfisher-hat.net hardware/hat/kingfisher-hat.kicad_sch
+python3 hardware/hat/scripts/check_netlist.py /tmp/kingfisher-hat.net
+python3 hardware/hat/scripts/place_pcb.py
+python3 hardware/hat/scripts/route_pcb.py
 ```
 
-Any future `pcbnew` automation must use **system** Python with apt KiCad
-(`python3-pcbnew`), not a uv venv — the PCB API is not a PyPI package.
+`check_netlist.py` is the schematic check. It passed for rev 0.3 (64 nets).
+`place_pcb.py` keeps the template socket and mounting holes and deletes
+tracks. `route_pcb.py` restores the route and the 4-layer stackup.
 
-## Status (rev 0.2)
+## Status
 
 Done:
 
-- HAT mechanical from KiCad Raspberry Pi HAT template (outline, holes, bottom GPIO socket)
-- Custom symbols + BMP581 footprint
-- **Loadable** schematic rev 0.2 (ICM, BMP581, GPS, LDO, U.FL, RV-3028, CR2032, diode-OR)
-  — netlist exports 18 components; open in eeschema to tidy wire/label geometry
-- PCB: 4-layer stack selected; major footprints placed (not yet routed); BT1/U5/D1–D2 placement TBD
-- Design notes for RTC address, GPS backup, and resilience add-ons
+- Schematic for the GPS replica, TDK IMU land, BMP581, RV-3028, both backup
+  cells, X1200 header, test points, and the GPS power LED
+- Netlist check against datasheet pin numbers
+- Parts placed on the HAT outline, clear of the notch, the slot, the mounting
+  holes, and the header
+- Routed, including the 0.32 mm U.FL microstrip (bare Z0 about 50.2 Ω at the
+  pressed 7.1 mil / Er 4.4 height). Soldermask pulls that down about 1–2 Ω
+- JLC04161H-7628 stackup filled in. Error-level DRC is clean
+- Gerbers and drills in `fab/`
 
-Not done yet:
+Still to confirm on the aircraft, and still open in software:
 
-1. Schematic pin–label wiring cleanup + ERC green
-2. Place BT1 / U5 / diodes / test points; full routing
-3. Cardboard / 3D mockup (pin engagement + CR2032 lid clearance)
-4. JLCPCB BOM / CPL export
-5. Software: cabin BMP581 reader + `i2c-rtc` for RV-3028
+- Female-header engagement, lid clearance over the CR2032, pin 1 against the
+  real extender, and whether the GNSS antenna is active
+- `i2c-rtc` for the RV-3028, a cabin BMP581 reader, and an AHRS mount matrix
+  measured from this board's silk
 
 ## Attribution
 
-- Board outline / GPIO placement: KiCad `RaspberryPi-HAT` template
-- BMP581 pad geometry: adapted from [SparkFun Qwiic Pressure Sensor BMP581](https://github.com/sparkfun/SparkFun_Qwiic_Pressure_Sensor_BMP581) hardware (CC-BY-SA 4.0)
-- NEO-M9N symbol derived from KiCad library `NEO-M8N` (same NEO pinout family)
-- GPS backup idea: SparkFun NEO-M9N breakout (diode-OR backup supply; we use replaceable CR2032)
+- Outline and GPIO socket: KiCad Raspberry Pi HAT template
+- BMP581 pads: SparkFun Qwiic BMP581 hardware, CC-BY-SA 4.0
+- ML414H pads and the GPS power circuit: SparkFun NEO-M9N SMA / SparkFun-Batteries
+- NEO-M9N symbol: derived from the KiCad `NEO-M8N` symbol
+- ICM-45686 pad centers: IPC LGA-14. Pin numbers and axes: TDK DS-000577
