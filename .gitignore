@@ -2,6 +2,8 @@
 datasheets/
 docs/reports/
 research/
+.grok/
+*.log
 
 # Build artefacts.
 /kingfisher
