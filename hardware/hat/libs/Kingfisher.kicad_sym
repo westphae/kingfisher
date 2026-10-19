@@ -12,7 +12,7 @@
 		(property "Value" "ICM-45686"
 			(at 7.62 15.24 0)
 			(effects (font (size 1.27 1.27))))
-		(property "Footprint" "Package_LGA:Bosch_LGA-14_3x2.5mm_P0.5mm"
+		(property "Footprint" "Kingfisher:ICM-45686"
 			(at 0 0 0)
 			(effects (font (size 1.27 1.27)) (hide yes)))
 		(property "Datasheet" "https://invensense.tdk.com/download-pdf/ds-000577-icm-45686-datasheet/"
@@ -656,4 +656,5 @@
 			)
 			(embedded_fonts no)
 		)
+	
 )
