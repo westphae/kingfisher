@@ -31,7 +31,10 @@ Boards mount flat against the plate's land, in the **X–Z plane**:
 - **u** runs fore → aft; **v** runs down → up. Origin is the **forward-bottom**
   corner as the board sits in the pod.
 - **L** is the board's size along u. **W** is its size along v.
-- Edges are **fore** (u=0), **aft** (u=L), **down** (v=0), **up** (v=W).
+- Edges are **fore** (u=0), **aft** (u=L), **down** (v=0), **up** (v=W), and
+  **face** — wires soldered straight off the component side, leaving in −Y.
+  A `face` run costs the board depth rather than reaching into a neighbour's
+  area, which is why the Boost's VIN/VOUT is cheap and its Qwiic pair is not.
 - `at` means the distance along that edge from its low end. A **fore/aft**
   edge runs in v, so `at` is a **v** value (0…W). An **up/down** edge runs in
   u, so `at` is a **u** value (0…L).
@@ -61,6 +64,7 @@ Boards mount flat against the plate's land, in the **X–Z plane**:
 | component height      | inboard keepout depth, and how deep in Y the board can sit         |
 | back-face height      | whether the board sits flat on the standoffs                       |
 | connector edge + `at` | where the cable leaves, so the envelope grows there                |
+| edge = `face`         | wires leaving perpendicular to the PCB: costs Y depth, not X/Z area |
 | cable room            | clear space reserved beyond that edge                              |
 
 ---
@@ -124,33 +128,83 @@ Connectors:
 |----------|------|-------|------------|-------------|------------|
 | Qwiic 1  | fore | 12.63 | 6.00       | 3.00        | 4.00       |
 | Qwiic 2  | aft  | 12.63 | 6.00       | 3.00        | 4.00       |
-| VIN/VOUT | up   | 12.63 |            | 4.00        | 4.00       |
+| VIN/VOUT | face | 12.63 |            | 4.00        | 4.00       |
 
 ## 3. SparkFun Pro Micro ESP32-C3
 
 Assumed today: L 33.0, W 17.8, component height 8.0, four holes — there are
 **none**. SparkFun document castellated headers along both long edges and no
-mounting holes, which is why it sits in `pm_tray.stl`.
+mounting holes, which is why it needs `pm_cover.stl` to trap it.
 
 | ID  | Measure                                                      | Value (mm) |
 |-----|--------------------------------------------------------------|------------|
 | C1  | Outline **L**                                                | 33.51      |
 | C2  | Outline **W**                                                | 17.70      |
 | C3  | PCB thickness                                                | 0.78       |
-| C4  | Tallest component height, component face                     | 4.40       |
+| C4  | Tallest component height, component face (the Qwiic)         | 4.40       |
+| C4a | Clear height needed off the face for the Qwiic cable to turn | 8.00       |
 | C5  | Tallest feature on the back face                             | 0.00       |
 | C6  | Which short end carries the **USB-C** (fore or aft)          | aft        |
 | C7  | USB-C centre position along that end (`at`, from v=0)        | 8.85       |
 | C8  | How far the USB-C **plug** protrudes past the board edge     | 1.30       |
 | C9  | Clearance needed off a long edge to solder a castellated pad | 2.00       |
 | C10 | Must Reset/Boot be reachable after assembly? (y/n)           | n          |
+| C14 | USB-C shell height off the board face (re-measured 2026-08-29; was 3.20) | 3.50 |
 
 Connectors:
 
-| Name  | Edge | `at` | Body width | Body height | Cable room |
-|-------|------|------|------------|-------------|------------|
-| USB-C | aft  | 8.85 | 9.00       | 3.20        | 30.00      |
-| Qwiic | up   | 0.00 | 2.60       | 6.00        | 7.00       |
+| Name       | Edge | `at` / (u,v)  | Body width | Body height | Cable room |
+|------------|------|---------------|------------|-------------|------------|
+| USB-C      | aft  | 8.85          | 9.00       | 3.50        | 30.00      |
+| Qwiic      | face | (18.51, 8.85) | 2.60       | 4.40        | 3.60       |
+| edge wires | face | both long edges | —        | —           | see C11    |
+
+| ID  | Measure                                                      | Value (mm) |
+|-----|--------------------------------------------------------------|------------|
+| C11 | Wires soldered to the castellated pads leave the **top** of the board along **both** long edges. They and the Qwiic together mean the whole component face must stay clear. | — |
+| C12 | Status LEDs flank the USB-C and run to within ~0.5 mm of **both aft corners**, so that end has no bare PCB for a hold-down. | ~0.5 |
+| C13 | The two **fore** corners are the only clear PCB on the board: no wires, no holes. Both bare-PCB hold-downs go there, flush to the corner. | — |
+| C15 | **Answered 2026-08-29:** the edge wires need **no lateral room** along the top of the bay — only room *away* from it, in −Y toward the bowl. So the bay's bosses and the cover's ears reaching to 0.5 mm off the long edge are fine. The binding clearance is the battery: wires leave the board face at y −8.36 and the battery starts at −23.60. | 0 lateral |
+
+> **A `face` connector needs two coordinates, and the sheet only had one.**
+> `at` is a single number because it was written for edge connectors, where the
+> edge fixes one axis. The Qwiic is on the face, at **u 18.51, v 8.85** —
+> centred across the board, 15 mm from the USB-C end — and recording it as
+> `edge: up, at: 0.00` put it at the wrong end of the wrong edge. `pm_cover`'s
+> roof opening was cut from that, so it landed nowhere near the connector.
+>
+> **Use (u, v) for `face` connectors.** For fore/aft/up/down, `at` is still the
+> single distance along that edge.
+>
+> The body height was also wrong at 6.00: it is **4.40**, and C4 was right all
+> along. What the connector needs is not a taller body but **8.00 mm of clear
+> height off the face** before the mated cable can turn (C4a), carried in the
+> model as 3.60 mm of room beyond the 4.40 body.
+>
+> **Where a hold-down may bear is its own measurement.** `pm_cover`'s corner
+> posts were placed at the board's geometric corners and two came down on the
+> USB-C — whose position, width and height were all recorded here already.
+> Nothing compared a hold-down against what it would land on, because no rule
+> said to. **I10** does now: a hold-down declares what it rests on (0.0 for
+> bare PCB, else a connector's body height), and the check tests that against
+> the connector table. Fed the old four-corner geometry it fails both aft posts
+> by name.
+>
+> **A connector's height constrains the COVER, not just the hold-down.** I10
+> asks whether a hold-down lands on a connector. It does not ask whether the
+> cover's own body runs through one, and that is the question that was missing:
+> the ring plane is set by the boss height (chosen for insert depth) with no
+> reference to the tallest thing the cover passes over. The aft cross-piece sat
+> 1.5 mm inside the USB-C shell, so the brace's post was buried in the ring's
+> own thickness and did nothing — the ring itself bore on the connector and
+> held the whole cover 1.6 mm off its bosses. **I12** now intersects the cover
+> against every connector body; fed the old boss height it reports 32 mm³.
+>
+> **The deeper lesson is that this board has no usable roof at all.** Between
+> the Qwiic in the middle of the face and wires off both long edges, any
+> opening is the wrong opening. `pm_cover` is now an open frame: four corner
+> hold-downs and nothing over the board. Where a board's whole component face
+> is live, say so here — it changes the *kind* of part, not just a dimension.
 
 ## 4. SparkFun Battery Babysitter (PRT-13777)
 
@@ -181,7 +235,11 @@ Connectors:
 |-------------|------|-------|------------|-------------|------------|
 | battery JST | up   | 19.20 | 8.00       | 5.53        | 4.00       |
 | load / VOUT | fore | 16.55 | 9.20       | 3.00        | 4.00       |
-| USB-B       | aft  | 8.80  | 7.95       | 2.70        | 50.00      |
+| USB-B       | aft  | 8.80  | 7.95       | 2.70        | 25.00      |
+
+The 25 mm on USB-B is the revised figure: 50 was generous headroom for a
+stiff pigtail, and you confirmed the cable can be bent slightly around whatever
+is in the way. It is what buys the Babysitter its place in the aft column.
 
 **This board has no Qwiic or VIN/VOUT connectors fitted** — only PTH holes,
 with wires soldered directly. The I2C wires are along the **fore** edge and
@@ -268,6 +326,12 @@ Connectors:
 ## Status
 
 - [x] Measured (date: 2026-08-23)
-- [ ] `BOARD_SPECS` populated; every unmeasured value still marked assumed
-- [ ] `validate_pod.py` green with **I6′** (connector envelopes) and **I9**
-      (no invented holes)
+- [x] `BOARD_SPECS` populated from these tables
+- [x] **I6′** green — every board envelope clears its neighbours, the battery,
+      the SUN and its cradle, and the static bay
+- [x] **C4a** answered: 8.00 mm of clear height off the face for the cable to
+      turn; the ESP32 stays stacked on the bay (the battery moved outboard to
+      its L1 limit to pay for it, giving 8.2 mm of margin)
+- [ ] D8 / D9 (Babysitter soldered-wire standoff heights) still open; the
+      model currently charges the VIN/VOUT run 4 mm of Y depth
+- [ ] **I9** (no invented holes)

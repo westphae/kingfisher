@@ -21,6 +21,7 @@ uv sync --all-packages
 
 # Analysis CLI
 uv run --project analysis python scripts/analyze_flights.py all
+uv run --project analysis python scripts/analyze_flights.py serve  # http://0.0.0.0:8765
 
 # JPI EDM-930 post-flight merge (dry-run unless --apply). See docs/jpi-edm930.md.
 uv run --project analysis python scripts/analyze_flights.py jpi --jpi FILE.jpi --db FLIGHT.sqlite --flight N --apply

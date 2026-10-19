@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Kingfisher analysis</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/vendor/uPlot.min.css">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header>
+    <img src="/static/favicon.svg" width="22" height="22" alt="">
+    <strong>Kingfisher analysis</strong>
+    <span class="dim" id="hdrStatus"></span>
+  </header>
+  <aside>
+    <div class="sideHead">
+      <input id="sessSearch" type="search" placeholder="Filter sessions…" autocomplete="off">
+      <div class="filters" role="group" aria-label="Session class">
+        <button type="button" class="chip on" data-filter="flights">Flights</button>
+        <button type="button" class="chip" data-filter="all">All</button>
+      </div>
+    </div>
+    <div id="sessList" class="sessList">Loading…</div>
+  </aside>
+  <main>
+    <p id="emptyHint" class="emptyHint">Select a session.</p>
+    <section id="detail" hidden>
+      <div class="detailHead">
+        <div>
+          <h1 id="detailTitle">—</h1>
+          <p class="dim" id="detailMeta"></p>
+        </div>
+        <label class="alignToggle" title="Correct ts_ns onto the final wall clock using clock_offsets (realtime − monotonic)">
+          <input type="checkbox" id="alignClock" checked>
+          Align to clock_offsets
+        </label>
+      </div>
+      <div id="issues" class="issues" hidden></div>
+      <div id="clockBox" class="clockBox dim" hidden></div>
+      <div class="plotBar">
+        <div id="seriesChips" class="chips"></div>
+        <button type="button" id="addSeriesBtn">+ Series</button>
+        <button type="button" id="resetZoomBtn" class="ghost">Reset zoom</button>
+        <span class="dim" id="plotHint">drag-x zoom · wheel zoom · shift-wheel pan</span>
+      </div>
+      <div id="plotWrap" class="plotWrap"></div>
+      <div id="cursorVals" class="cursorVals dim"></div>
+      <h2>Tables</h2>
+      <div id="tables" class="tables"></div>
+      <div id="healthBox" class="healthBox dim">Sampling health…</div>
+    </section>
+  </main>
+  <dialog id="seriesDlg">
+    <form method="dialog">
+      <h2>Add series</h2>
+      <input id="seriesSearch" type="search" placeholder="table or column…">
+      <div id="seriesPicker" class="seriesPicker"></div>
+      <div class="dlgRow">
+        <button type="submit" value="cancel">Close</button>
+      </div>
+    </form>
+  </dialog>
+  <script src="/static/vendor/uPlot.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

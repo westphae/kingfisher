@@ -25,9 +25,9 @@ from collections import Counter
 from pathlib import Path
 
 POD_DIR = Path(__file__).resolve().parent
-STL_FILES = ("pod_right.stl", "pod_left.stl", "tail_panel.stl",
-             "static_bay.stl", "pm_tray.stl")
-SMALL_PARTS = ("tail_panel.stl", "static_bay.stl", "pm_tray.stl")
+STL_FILES = ("pod_tray.stl", "pod_shell.stl", "tail_panel.stl",
+             "static_bay.stl", "pm_cover.stl")
+SMALL_PARTS = ("tail_panel.stl", "static_bay.stl", "pm_cover.stl")
 
 
 class CheckResult:
@@ -129,9 +129,36 @@ def check_print_volume(r: CheckResult, pod) -> None:
 
 def check_interior(r: CheckResult, pod) -> None:
     """I1/I5/I6/I8 + L1/L2/L6 — layout rules that are cheap to state as numbers."""
+    # I8 is a RESTRAINT rule, not a hole count.  The old test was
+    # len(holes) < 2, which existed to catch a board whose fasteners had been
+    # forgotten.  With the holes now measured that test is simply wrong: the
+    # MMC5983 has one hole, the BMP581 two on a single edge, and the Pro Micro
+    # none at all, and no amount of asserting will give them more.  What has
+    # to hold is that nothing can rotate or rock.
     for name, b in pod.BOARDS.items():
-        if len(b["holes"]) < 2:
-            r.fail(f"I8 {name} has fewer than 2 insert positions")
+        screws = pod.board_standoffs(b)
+        nubs = pod.board_nubs(b)
+        tray = pod.board_tray_screws(b)
+        keepers = 2 if b.get("keepers") else 0
+        if b.get("cover"):
+            pads, cs = len(pod.pm_support_pads()), len(pod.pm_cover_screws())
+            if pads >= 3 and cs >= 3:
+                r.ok(f"I8 {name} restrained by {pads} pads + a {cs}-screw cover")
+            else:
+                r.fail(f"I8 {name} declares a cover but has {pads} pads / "
+                       f"{cs} cover screws")
+        elif len(tray) >= 3:
+            r.ok(f"I8 {name} restrained by a {len(tray)}-screw tray")
+        elif len(screws) >= 2:
+            r.ok(f"I8 {name} restrained by {len(screws)} screws"
+                 + (f" + {len(nubs)} nubs" if nubs else ""))
+        elif len(screws) == 1 and (len(nubs) + keepers) >= 2:
+            r.ok(f"I8 {name} restrained by 1 screw + {len(nubs)} nub(s) "
+                 f"+ {keepers} keeper(s)")
+        else:
+            r.fail(f"I8 {name} is not restrained: {len(screws)} screws, "
+                   f"{len(nubs)} nubs, {keepers} keepers, {len(tray)} tray screws "
+                   "— it can rotate or rock")
     if pod.Y_PCB <= pod.Y_LAND - pod.STANDOFF_H - 0.01:
         r.fail("I5 boards are flush on the land, not on raised standoffs")
     else:
@@ -212,22 +239,29 @@ def check_geometry(r: CheckResult) -> None:
 
     check_print_volume(r, pod)
     check_interior(r, pod)
-    import validate_pod_v3_checks as _g
-    _g.check_board_envelopes(r, pod)
+    g.check_no_invented_holes(r, pod)
+    g.check_board_envelopes(r, pod)
+    g.check_parts_against_each_other(r, pod)
+    g.check_print_pose(r, pod)
+    g.check_holddown_footprints(r, pod)
+    g.check_backface_clearance(r, pod)
+    g.check_cover_clears_components(r, pod)
+    g.check_glands_open(r, pod)
     g.check_aero(r, pod)
     g.check_flats(r, pod)
 
-    right = pod.as_single_solid(pod.build_right(), "pod_right")
-    left = pod.as_single_solid(pod.build_left(), "pod_left")
-    g.check_tips(r, pod, left, right)
-    g.check_open_bay(r, pod, left, right)
-    g.check_insert_access(r, pod, right)
-    g.check_part_interference(r, pod, left, right)
-    g.check_fastener_holes(r, pod, left, right)
+    tray = pod.as_single_solid(pod.build_tray(), "pod_tray")
+    shell = pod.as_single_solid(pod.build_shell(), "pod_shell")
+    g.check_tips(r, pod, shell, tray)
+    g.check_open_bay(r, pod, shell, tray)
+    g.check_insert_access(r, pod, tray)
+    g.check_part_interference(r, pod, shell, tray)
+    g.check_clamp_extraction(r, pod, shell)
+    g.check_fastener_holes(r, pod, shell, tray)
 
     # I2 — nothing may poke outside the envelope.
     outer = pod.full_body_solid(0.0)
-    for name, half in (("pod_right", right), ("pod_left", left)):
+    for name, half in (("pod_tray", tray), ("pod_shell", shell)):
         extra = half.val().cut(outer.val()).Volume()
         if extra > 25.0:
             r.fail(f"I2 {name} protrudes {extra:.1f} mm^3 outside the envelope")
@@ -243,7 +277,7 @@ def check_geometry(r: CheckResult) -> None:
         .intersect(outer)
     )
     closed = pod.as_single_solid(
-        left.union(right).union(seam).union(pod.build_tail_panel()), "sealed_pod"
+        shell.union(tray).union(seam).union(pod.build_tail_panel()), "sealed_pod"
     )
     g.check_min_wall(r, pod, closed)
     g.check_leak(r, pod, closed)

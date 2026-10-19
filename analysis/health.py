@@ -16,6 +16,7 @@ from typing import Any
 
 import numpy as np
 
+from analysis.clockalign import inspect_clock
 from analysis.db import (
     CORE_CABIN,
     CORE_POD,
@@ -352,6 +353,12 @@ def analyze_health(db_path: Path, *, max_rows: int = 400_000) -> SessionHealth:
             sh.aligned_pod_gaps_gt_1s = _aligned_pod_gaps(conn, session_ns=sess_ns)
         except Exception:  # noqa: BLE001
             sh.aligned_pod_gaps_gt_1s = 0
+
+        try:
+            clock = inspect_clock(conn)
+            sh.notes.extend(clock.issues)
+        except Exception:  # noqa: BLE001
+            pass
 
         # Session grade
         bad_tables = [t for t in sh.tables if t.grade == "bad"]

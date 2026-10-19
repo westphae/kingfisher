@@ -1,0 +1,21 @@
+# Advances systemd's timesync clock-floor file. Install alongside its timer:
+#
+#   sudo install -m 755 deploy/time-sync/kingfisher-timesync-floor-touch.sh      /usr/local/bin/
+#   sudo install -m 644 deploy/time-sync/kingfisher-timesync-floor-touch.service /etc/systemd/system/
+#   sudo install -m 644 deploy/time-sync/kingfisher-timesync-floor-touch.timer   /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now kingfisher-timesync-floor-touch.timer
+#
+# See kingfisher-timesync-floor-touch.sh for why this exists.
+
+[Unit]
+Description=Advance systemd's timesync clock-floor file (chrony disciplines this box, not timesyncd)
+Documentation=file:///usr/local/bin/kingfisher-timesync-floor-touch.sh
+After=chrony.service
+Wants=chrony.service
+
+[Service]
+Type=oneshot
+User=systemd-timesync
+Group=systemd-timesync
+ExecStart=/usr/local/bin/kingfisher-timesync-floor-touch.sh

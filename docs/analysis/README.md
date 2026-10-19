@@ -11,6 +11,8 @@ From repo root (Pi or workstation with a copy of `flights/`):
 ```bash
 uv sync --all-packages   # or: uv sync --project analysis
 uv run --project analysis python scripts/analyze_flights.py all
+uv run --project analysis python scripts/analyze_flights.py serve
+# → http://<host>:8765  (all interfaces; curated flights, table browser, zoomable plots)
 ```
 
 Outputs:
@@ -23,6 +25,7 @@ Outputs:
 | Noise study | `~/kingfisher/analysis-cache/noise/` + `docs/analysis/sensor_noise.md` |
 | Full plan | [`PLAN.md`](PLAN.md) |
 | Ledger (git) | `docs/analysis/ledger.md` |
+| Web UI | `analyze_flights.py serve` → http://0.0.0.0:8765 |
 
 Commands:
 
@@ -34,6 +37,7 @@ uv run --project analysis python scripts/analyze_flights.py noise
 uv run --project analysis python scripts/analyze_flights.py report
 uv run --project analysis python scripts/analyze_flights.py cal-accel --json ~/kingfisher/calibration/cabin_accel_….json --plot
 uv run --project analysis python scripts/analyze_flights.py perf --file ~/kingfisher/flights/<session>.db
+uv run --project analysis python scripts/analyze_flights.py serve
 uv run --project analysis python scripts/analyze_flights.py windows --file 20260722T203620Z_n456t.db
 
 # Bench cal UI (cabin accel six-face + cabin gyro still + pod mag TBD): [calibrate.md](calibrate.md)
@@ -49,6 +53,7 @@ Dependencies (locked in root `uv.lock`): Python ≥3.11, `numpy`, `matplotlib`, 
 
 ```
 analysis/                 # Python package (importable from scripts/)
+  web.py + static/        # local plot UI (serve)
 scripts/analyze_flights.py
 docs/analysis/
   README.md               # this file
@@ -65,7 +70,22 @@ docs/analysis/
 Recording stays on the Pi. Heavy modeling can run on a workstation against an
 `rsync`/`scp` of `flights/` (and later `engine/`, `weather/`).
 
+## Web browser
+
+```bash
+uv run --project analysis python scripts/analyze_flights.py serve
+```
+
+Opens a local UI on port **8765** (all interfaces): pick a curated session (catalog
+`class=flight`, plus recent uncatalogued DBs), inspect tables/columns, overlay
+any numeric series, drag or wheel-zoom in time. **Align to clock_offsets**
+(on by default) maps each sample onto the final wall clock using the
+session's `clock_offsets` table: ``o = ts_ns − monotonic_ns``, then
+``ts_aligned = ts_ns + (o_final − o_at_sample)``. That is what overlays cabin
+IMU with GPS after a chrony step (see [timestamps.md](../timestamps.md)).
+
 ## Classification
+
 
 | Class | Rule (v1) |
 |-------|-----------|

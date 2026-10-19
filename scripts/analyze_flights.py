@@ -9,6 +9,7 @@ Examples (from repo root; uses uv workspace — see docs/python.md):
   uv run --project analysis python scripts/analyze_flights.py cal-accel --json ~/kingfisher/calibration/cabin_imu_….json
   uv run --project analysis python scripts/analyze_flights.py all
   uv run --project analysis python scripts/analyze_flights.py jpi --jpi FILE.jpi --db FLIGHT.sqlite [--flight N] [--apply]
+  uv run --project analysis python scripts/analyze_flights.py serve
 """
 
 from __future__ import annotations
@@ -214,6 +215,22 @@ def cmd_cal_accel(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    from analysis.web import serve
+
+    flights = Path(args.flights_dir)
+    if not flights.is_dir():
+        print(f"flights dir not found: {flights}", file=sys.stderr)
+        return 1
+    serve(
+        flights_dir=flights,
+        catalog_path=Path(args.catalog),
+        host=args.host,
+        port=args.port,
+    )
+    return 0
+
+
 def cmd_all(args: argparse.Namespace) -> int:
     rc = cmd_catalog(args)
     if rc:
@@ -339,6 +356,9 @@ def main() -> int:
         default=False,
         help="write before/after ‖a‖ PNG (default: <cache>/cal_accel_norms.png)",
     )
+    sv = sub.add_parser("serve", help="web UI to browse/plot flight DBs")
+    sv.add_argument("--host", default="0.0.0.0")
+    sv.add_argument("--port", type=int, default=8765)
     sub.add_parser("all", help="catalog + health(flights) + report")
     pf = sub.add_parser(
         "perf",
@@ -366,6 +386,8 @@ def main() -> int:
         return cmd_report(args)
     if args.cmd == "cal-accel":
         return cmd_cal_accel(args)
+    if args.cmd == "serve":
+        return cmd_serve(args)
     if args.cmd == "all":
         return cmd_all(args)
     if args.cmd == "perf":
