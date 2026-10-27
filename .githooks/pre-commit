@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Repo-tracked pre-commit hook. Activate it with scripts/install-git-hooks.sh
+# (sets core.hooksPath to .githooks for this clone).
+
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+exec "${repo_root}/scripts/lint.sh"

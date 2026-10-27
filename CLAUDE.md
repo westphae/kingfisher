@@ -61,7 +61,7 @@ uv run --project analysis python scripts/analyze_flights.py all
 cd enclosures/case && uv run --project .. python pi5_aviation_case.py
 ```
 
-After any change to types in `pod_wire/src/lib.rs`, regenerate `fixtures.txt` and re-run `go test ./internal/pod/wire/`. The Go test loads those fixtures and decodes them — if they diverge, the wire contract is broken. `scripts/check-wire.sh` enforces this: it regenerates to a temp file and diffs against the committed fixtures (exit 1 on drift), and `scripts/check-wire.sh --write` regenerates in place. Wire it into CI / a pre-commit hook so the honour-system regen can't be forgotten.
+After any change to types in `pod_wire/src/lib.rs`, regenerate `fixtures.txt` and re-run `go test ./internal/pod/wire/`. The Go test loads those fixtures and decodes them — if they diverge, the wire contract is broken. `scripts/check-wire.sh` enforces this: it regenerates to a temp file and diffs against the committed fixtures (exit 1 on drift), and `scripts/check-wire.sh --write` regenerates in place. `scripts/install-git-hooks.sh` points this clone at `.githooks`; the pre-commit hook runs `scripts/lint.sh`, which gofmts staged Go files and runs that wire check when `pod_wire/` or `internal/pod/wire/` is staged or those trees have unstaged drift. `golangci-lint` is optional (see `.golangci.yml`).
 
 ## Data flow contract
 

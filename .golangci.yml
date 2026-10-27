@@ -1,0 +1,25 @@
+# Narrow golangci-lint v2 config. scripts/lint.sh runs it only when the
+# binary is already on PATH; gofmt and scripts/check-wire.sh are the gates
+# that always run.
+version: "2"
+
+run:
+  timeout: 3m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+  exclusions:
+    generated: lax
+    rules:
+      # errcheck keys off the concrete receiver, so a signature list misses
+      # defer f.Close(), defer tx.Rollback(), and UDP/websocket deadlines.
+      # Ignore those unchecked calls instead of rewriting them to "_ =".
+      - linters:
+          - errcheck
+        text: 'Error return value of `(.+\.)?(Close|Rollback|SetDeadline|SetReadDeadline|SetWriteDeadline)` is not checked'

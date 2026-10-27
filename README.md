@@ -139,6 +139,21 @@ Pod firmware lives under `firmware/pod/`; see
 [`firmware/pod/README.md`](firmware/pod/README.md) for the wiring,
 toolchain, and flashing steps.
 
+## Lint hook
+
+Once per clone:
+
+```bash
+scripts/install-git-hooks.sh
+```
+
+That sets `git config core.hooksPath .githooks`. The pre-commit hook runs
+`scripts/lint.sh`: `gofmt` on staged Go files, `scripts/check-wire.sh` when
+`pod_wire/` or `internal/pod/wire/` is staged or those trees have unstaged
+drift, and `golangci-lint` only if it is already on `PATH`. `gofmt` and the
+wire check fail the commit. Unchecked `Close`, `Rollback`, and deadline
+setters are ignored in `.golangci.yml`.
+
 ## Running
 
 ```

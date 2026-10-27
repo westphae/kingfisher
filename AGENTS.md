@@ -88,6 +88,9 @@ Optional extra coverage: `JPI_SAMPLE=/path/to/file.jpi`.
 
 ## Constraints
 
+Pre-commit lint: `scripts/install-git-hooks.sh` sets `core.hooksPath` to `.githooks`, which runs `scripts/lint.sh` (staged `gofmt`, `scripts/check-wire.sh` when the wire trees change, optional `golangci-lint`).
+Do not add a GitHub Actions workflow for lint; the sibling replaces and PAM headers are not available there.
+
 Sibling Go replaces in `go.mod` (`../go-iio`, `../goflying`, `../geomag`,
 `../magkal`) must not be dropped. If imports fail, fix the sibling
 checkout.
