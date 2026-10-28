@@ -140,11 +140,11 @@ skin looks fuzzy or stringy.
    wires off both long edges, so the whole component side stays open.
 4. **Populate `tail_panel.stl` on the bench, before it goes on the pod** — this
    is the whole point of it being a separate plate. Snap in the COM-08837
-   rocker (SYSOFF → JP12 / GND; leave onboard S1 OFF). RTV the CAB-15464 flange
-   and fasten with M3 + nuts (trim the included 14 mm screws or use M3×8). Press
-   the 5 mm LEDs into their chrome holders and fit the jam nuts: red = VOUT (pod
-   powered), blue = `!CHG!`. Leave a service loop on the harness — the plate has
-   to come away from the base to be worked on.
+   rocker, RTV the CAB-15464 flange and fasten with M3 + nuts (trim the included
+   14 mm screws or use M3×8), and press the 5 mm LEDs into their chrome holders
+   and fit the jam nuts. Solder them to the Babysitter as in
+   [`TAIL_PANEL_WIRING.md`](TAIL_PANEL_WIRING.md). Leave a service loop on the
+   harness — the plate has to come away from the base to be worked on.
 5. Dry-fit L/R halves around the **SUN-B** (barbs up; **45 mm** protruding; the
    Ø10.65→Ø11.76 step seated on the nose bulkhead; aft recess on the locating
    boss) before final assembly. Plumb 6 mm hose → COTS reducer
