@@ -5,6 +5,16 @@
 #  Printer: AnkerMake M5C / PETG.  Fasteners: M2.5 heat-set inserts + screws
 #  (bay/lid); the Pi stack mounts on its own metal standoffs (see below).
 #
+#  v4 (tray + hood):
+#   - base is a plate: stack pads, bay pedestals, and a short right bulkhead
+#     under the Ethernet/USB shells (SMA bulkhead in that same wall)
+#   - bulkhead runs from the Ethernet front face to the same inset at the rear
+#   - hood carries the lid, the front/back/left walls, right corner legs, and
+#     the band above the ports. Pi USB-C is closed over (charge the X1200 only)
+#   - hood screws: four M2.5x10 countersunk from the bottom into short corner
+#     bosses (inserts) on the hood. All four bosses are backed by full-height walls
+#   - right-wall lip is a half-lap on the three free edges of the bulkhead
+#
 #  v3 changes from v2 (measured hardware: ../x1200_m2hat_stack.md):
 #   - Geekworm X1200 UPS added UNDER the Pi (18650s facing down), official
 #     M.2 HAT+ ABOVE it (16 mm standoffs, over the active cooler), IDC ribbon
@@ -36,22 +46,26 @@ import cadquery as cq
 
 # ----------------------------------------------------------------------------- PARAMETERS (mm)
 WALL        = 3.0
-LID_T       = 4.0       # 2.30 mm socket-cap head fully recesses with solid plastic beneath
-LID_LIP_H   = 3.0       # how far the lid lip drops into the case
-LID_LIP_GAP = 0.4       # lip-to-wall clearance (tune per printer)
-LIP_T       = 1.6       # lip rib thickness
-LIP_CORNER_GAP = 7.0    # lip stops this far from each corner (clears the posts)
-SCREW_HEAD_H = 2.30     # lid bolts: M2.5 socket cap head thickness
-SCREW_HEAD_D = 4.5      # M2.5 socket cap head OD (counterbore is cut a touch wider)
+LID_T       = 4.0
+# tray/hood joint. Groove is in the plate; skirts on the hood drop into it.
+GROOVE_D    = 1.2       # depth into the 3 mm plate
+GROOVE_SIDE = 0.2       # skirt steps in from the outer face
+GROOVE_IN   = 0.4       # groove continues this far past the inner face
+CORNER_SKIP = 8.0       # groove stays clear of the corner countersinks
+HOOD_BOSS_H = 10.0      # corner-boss height above the plate (insert from below)
+LAP_T       = 1.5       # half-wall lip thickness
+LAP_Z       = 2.0       # top-lip engagement, aft of the USB sockets
+LAP_CLEAR   = 0.3       # fit gap on the bulkhead lip
+LAP_X_GAP   = 0.15      # thickness-direction gap so the two tongues don't bind
+CSK_D       = 5.2       # M2.5 90° countersunk head, slightly oversize
 
 # clearances around the Pi/X1200/HAT footprint (they share the 85x56 outline)
 CLR_L       = 6.0       # left (-X): PCIe FPC ribbon bulges FPC_BULGE past the HAT
                         # edge; also covers the Pi power button (~3 mm) and the
                         # X1200 button (2.7 mm, gets a wall recess below)
-CLR_F       = 4.3       # front (-Y, USB-C edge) gap. v3: set by DROP-IN clearance —
-                        # the assembled stack lowers past the floating front posts,
-                        # so the board edge must clear the post OD: POST_OFF +
-                        # BOSS_D/2 + 0.3 margin (the old Ethernet limit was 3.5)
+CLR_F       = 4.3       # front (-Y) gap. Set so the hood's front corner bosses clear
+                        # the board edge: POST_OFF + BOSS_D/2 + 0.3 (the bosses
+                        # slide down those corners when the hood goes on)
 IO_CLR      = 0.0       # right (+X): board edge at the inner wall plane, connectors
                         # ride in the open I/O window and end flush with the wall face
 BAY_GAP     = 4.0       # gap between the stack and the GPS/IMU bay
@@ -85,10 +99,12 @@ RIBBON_ON_TOP   = True  # option A: IDC lives on the pins above the HAT.
 STACK_HEADROOM  = 2.5   # stack top -> lid underside (also absorbs the ~1 mm
                         # bench-vs-sum measurement disagreement)
 
-# base screws: M2.5x8 pan head, up through the floor into the standoffs
+# base screws: M2.5x8 pan head, up through the floor into the standoffs.
+# Hood screws are M2.5x10 countersunk through the same clearance diameter.
 BASE_HOLE_D   = 2.8
-BASE_CB_D     = 5.6     # counterbore for the pan head (flush bottom, Dual-Lock)
+BASE_CB_D     = 5.6     # counterbore for the stack pan head (flush bottom, Dual-Lock)
 BASE_CB_DEPTH = 2.7
+CSK_H         = (CSK_D - BASE_HOLE_D) / 2   # 90° cone for the hood screws
 
 # --- M2.5 brass heat-set inserts (bay pedestals + lid posts only) -----------
 INSERT_OD   = 3.47      # insert outside diameter (knurled body), mm
@@ -102,8 +118,7 @@ SCREW_RELIEF_EXTRA = 4.0   # how far the relief reaches past the insert
 SCREW_RELIEF_FLOOR = 1.0   # min plastic left at the far end
 
 BOSS_D      = 6.0       # boss OD around an insert; lean but wall-fused (see v2)
-POST_OFF    = 1.0       # lid-post centre, in from the corner
-POST_LEN    = 13.0      # lid posts hang from the top this far; 45 deg taper beneath
+POST_OFF    = 1.0       # hood corner-boss centre, in from the corner
 
 # Raspberry Pi 5 (the X1200 and the mount-hole pattern share this outline)
 PI_L, PI_W  = 85.0, 56.0
@@ -112,8 +127,8 @@ USBC_X      = 11.2      # Pi USB-C centre from the left board edge
 
 # I/O (+X short) edge connector layout, from the RPi5 mechanical drawing:
 #   Ethernet ~1.0..19.4, USB3 ~22.4..35.8, USB2 ~40.3..53.7 (from front corner)
-IO_WIN_FRONT_INSET = 2.0
-IO_WIN_BACK_INSET  = 1.0
+ETH_FROM_PI        = 1.0
+USB2_BACK_FROM_PI  = 53.7
 IO_WIN_H           = 18.0  # covers the ~16 mm connector stack above the PCB bottom
 
 # X1200 front USB-C charge input (5 V / 5 A; on the PCB TOP side)
@@ -160,20 +175,34 @@ INTAKE_R, INTAKE_HOLE_D, INTAKE_PITCH = 21.0, 4.0, 6.5
 SLOT_W      = 3.0        # left-wall exhaust slot width
 
 # SparkFun Qwiic OLED 1.3" LCD-23453 (SSD1306), lid-rear over the GPS bay.
-# Panel / active area from SparkFun. PCB envelope is conservative (horizontal
-# Qwiic on ±X); caliper-tune OLED_PCB_* before the first print if the board
-# differs — see enclosures/pi5_aviation_case.md OLED IDs.
-OLED_PANEL_X, OLED_PANEL_Y = 34.5, 23.0
+# Drawing (inches): 1.40 body width, 1.00 between the route-outs, ears on the
+# short edges, hole centres 1.20 × 1.25. Eagle layer 20: X 0..35.56, ear tips
+# Y −5.715..31.115. Glass is the bottom of the PCB (package faces bottom);
+# the Qwiic jacks are on the other face. Glass-up puts the jacks down in the
+# GPS bay, so the cable is plugged from inside before the hood goes on.
+# Measured PCB+glass is 4.52 mm. FR4 thickness is assumed 1.6 mm (the board
+# file has none). The pocket seats that FR4 so the glass is flush with the
+# lid top. The outer face is flat (no visor): that face is the bed contact.
+# See OLED IDs in enclosures/pi5_aviation_case.md.
+OLED_PANEL_X, OLED_PANEL_Y = 34.5, 23.0       # datasheet panel
 OLED_ACTIVE_X, OLED_ACTIVE_Y = 29.42, 14.7
-OLED_PCB_X, OLED_PCB_Y = 41.0, 27.5
-OLED_CLR = 0.4           # pocket vs PCB
-OLED_WIN_CLR = 1.0       # aperture vs active area
-OLED_VISOR_H = 1.5       # raised hood above the lid top
-OLED_POCKET_D = 2.8      # recess from lid underside (LID_T=4 → 1.2 mm lip)
-OLED_BTN_D = 7.2         # tactile cap clearance
-OLED_BTN_OFF_X = 8.0     # PCB +X edge → button centre
-OLED_CABLE_W, OLED_CABLE_L = 8.0, 10.0  # Qwiic drop into the bay (-Y of pocket)
-OLED_FLANK_GAP = 18.0    # PCB half-width → flanking exhaust slot centre (clears +X button)
+OLED_GLASS_X, OLED_GLASS_Y = 34.54, 24.13      # measured glass + bezel
+OLED_WIN_FIT = 1.0                            # printed opening over the glass (O1)
+OLED_WIN_X, OLED_WIN_Y = OLED_GLASS_X + OLED_WIN_FIT, OLED_GLASS_Y + OLED_WIN_FIT
+OLED_PCB_X, OLED_PCB_Y = 35.56, 36.83         # body width × ear-tip span (O2)
+OLED_BODY_Y = 25.40                           # 1.00 in between the route-outs
+OLED_CLR = 0.4                               # pocket vs ear outline
+OLED_STACK = 4.52                            # measured PCB + glass
+OLED_PCB_T = 1.6                             # assumed FR4; the ears are this thick
+OLED_POCKET_D = OLED_PCB_T - (OLED_STACK - LID_T)  # seats the ears; glass flush
+OLED_BTN_D = 7.2                             # tactile cap clearance
+OLED_BTN_OFF_X = 8.0                         # PCB +X edge → button centre
+OLED_FLANK_GAP = 18.0                        # PCB half-width → flanking exhaust centre
+# Ears are drilled for a #4 screw (3.30 mm). M2.5 matches the rest of the
+# case; Ø3.4 is clearance and the ear hole is the fit. Nut under the ear.
+OLED_BOLT_DX, OLED_BOLT_DY = 15.24, 15.875   # hole centres from the board centre
+OLED_BOLT_D = 3.4
+OLED_CSK_H = (CSK_D - OLED_BOLT_D) / 2.0     # 90° head, same CSK_D as the hood
 
 # ----------------------------------------------------------------------------- DERIVED
 # The Z-stack, floor -> lid. PI_DECK_Z (Pi PCB top) is the master deck height.
@@ -210,15 +239,14 @@ assert WALL + PAD_H - BASE_CB_DEPTH >= 2.0, "counterbore leaves too little floor
 assert STACK_HEADROOM >= 2.0, "stack too close to the lid"
 assert CLR_L >= FPC_BULGE + 1.0, "FPC ribbon touches the left wall"
 assert CLR_L >= BTN_OVERHANG + 1.0, "X1200 button overhang fouls the left wall"
-# The right board edge is flush to the wall (IO_CLR=0), so the front-right
-# post can only be cleared in Y: the stack drops in only if the board front
-# edge clears the post cylinders.
+# Hood-on: the front corner bosses slide down in front of the board. The
+# board edge has to clear the boss OD (this is what pins CLR_F).
 assert PIy0 >= WALL + POST_OFF + BOSS_D/2 + 0.25, \
-    "stack can't drop past the front lid posts (raise CLR_F)"
-# front-right post vs the tall I/O connector nearest the front corner:
-IO_FRONT_CONN_S = 1.0                              # near edge of that connector
-FR_CONN_GAP = (PIy0 + IO_FRONT_CONN_S) - io(0, POST_OFF)[1] - BOSS_D/2
-assert FR_CONN_GAP >= 0, f"front-right post fouls the I/O connector by {-FR_CONN_GAP:.2f} mm"
+    "hood corner bosses foul the board front (raise CLR_F)"
+# front-right boss vs the Ethernet face. The corner leg ends at that face,
+# so this gap is also the plastic left for the vertical lip.
+FR_CONN_GAP = (PIy0 + ETH_FROM_PI) - io(0, POST_OFF)[1] - BOSS_D/2
+assert FR_CONN_GAP >= 1.0, f"front-right boss leaves {FR_CONN_GAP:.2f} mm before the Ethernet"
 
 # X1200 wall features (left wall unless noted)
 BTN_Y = PIy0 + PI_W - BTN_FROM_BACK
@@ -246,34 +274,48 @@ gps_holes = [(GPSx0 + hx, GPSy0 + hy)
              for hx in (GPS_HOLE_INSET, GPS_L - GPS_HOLE_INSET)
              for hy in (GPS_HOLE_INSET, GPS_W - GPS_HOLE_INSET)]
 
-# OLED on the lid, facing up, centred over the GPS/IMU bay (not the cooler).
+# OLED on the lid, glass up, centred over the GPS bay (not the cooler).
+# The opening is the measured glass plus OLED_WIN_FIT, split equally each side.
 oled_cx, oled_cy = OX / 2.0, GPSy0 + GPS_W / 2.0
-oled_win_x, oled_win_y = OLED_ACTIVE_X + 2 * OLED_WIN_CLR, OLED_ACTIVE_Y + 2 * OLED_WIN_CLR
+oled_win_x, oled_win_y = OLED_WIN_X, OLED_WIN_Y
 oled_pocket_x = OLED_PCB_X + 2 * OLED_CLR
 oled_pocket_y = OLED_PCB_Y + 2 * OLED_CLR
 oled_btn_x = oled_cx + OLED_PCB_X / 2.0 + OLED_BTN_OFF_X
 oled_btn_y = oled_cy
-oled_cable_y = oled_cy - oled_pocket_y / 2.0 - OLED_CABLE_L / 2.0 + 1.0
+oled_bolts = [(oled_cx + sx * OLED_BOLT_DX, oled_cy + sy * OLED_BOLT_DY)
+              for sx in (1.0, -1.0) for sy in (1.0, -1.0)]
 _dx, _dy = oled_cx - cooler_cx, oled_cy - cooler_cy
 assert (_dx * _dx + _dy * _dy) ** 0.5 > INTAKE_R + oled_win_y / 2.0 + 3.0, \
-    "OLED window overlaps cooler intake grille"
-assert oled_cx - oled_pocket_x / 2.0 > WALL + 2.0, "OLED pocket hits left wall"
-assert oled_cx + oled_pocket_x / 2.0 < OX - WALL - 2.0, "OLED pocket hits right wall"
-assert oled_cy - oled_pocket_y / 2.0 > PIy0 + PI_W + 1.0, "OLED pocket overlaps stack"
-assert oled_cy + oled_pocket_y / 2.0 < OY - WALL - 2.0, "OLED pocket hits back wall"
-assert LID_T - OLED_POCKET_D >= 1.0, "OLED pocket leaves <1 mm lid lip"
-assert oled_btn_x + OLED_BTN_D / 2.0 < OX - WALL - 1.0, "OLED button overruns right wall"
+    "O5 OLED window overlaps cooler intake grille"
+assert OLED_PCB_X - OLED_WIN_X >= 0.0, "O1 opening cuts past the PCB width"
+assert OLED_BODY_Y - OLED_WIN_Y >= 0.0, "O1 opening cuts past the PCB body in Y"
+assert OLED_WIN_X >= OLED_PANEL_X and OLED_WIN_Y >= OLED_PANEL_Y, \
+    "O1 opening is smaller than the datasheet panel"
+_ear_gap = OLED_BOLT_DY - OLED_WIN_Y / 2.0 - CSK_D / 2.0
+assert _ear_gap >= 0.5, f"O1 countersink breaks into the window ({_ear_gap:.2f} mm left)"
+assert OLED_BOLT_DX + OLED_BOLT_D / 2.0 + 0.4 < oled_pocket_x / 2.0, \
+    "O8 bolt leaves the pocket in X"
+assert OLED_BOLT_DY + OLED_BOLT_D / 2.0 + 0.4 < oled_pocket_y / 2.0, \
+    "O8 bolt leaves the pocket in Y"
+assert abs((OLED_STACK - OLED_PCB_T) - (LID_T - OLED_POCKET_D)) < 1e-6, \
+    "O2 glass is not flush with the lid top"
+assert oled_cx - oled_pocket_x / 2.0 > WALL + 2.0, "O2 OLED pocket hits left wall"
+assert oled_cx + oled_pocket_x / 2.0 < OX - WALL - 2.0, "O2 OLED pocket hits right wall"
+assert oled_cy - oled_pocket_y / 2.0 > PIy0 + PI_W + 1.0, "O2 OLED pocket overlaps stack"
+assert oled_cy + oled_pocket_y / 2.0 < OY - WALL - 2.0, "O2 OLED pocket hits back wall"
+assert LID_T - OLED_POCKET_D >= 1.0, "O2 OLED pocket leaves <1 mm lid lip"
+assert oled_btn_x + OLED_BTN_D / 2.0 < OX - WALL - 1.0, "O4 OLED button overruns right wall"
 for sx in (oled_cx - OLED_PCB_X / 2.0 - OLED_FLANK_GAP,
            oled_cx + OLED_PCB_X / 2.0 + OLED_FLANK_GAP):
     assert abs(sx - oled_btn_x) > OLED_BTN_D / 2.0 + SLOT_W / 2.0 + 2.0, \
-        "OLED flanking vent overlaps the button"
+        "O6 OLED flanking vent overlaps the button"
 for _px, _py in lid_posts:
     _d = ((_px - oled_btn_x) ** 2 + (_py - oled_btn_y) ** 2) ** 0.5
     assert _d > BOSS_D / 2.0 + OLED_BTN_D / 2.0 + 2.0, \
-        f"OLED button fouls lid post at ({_px:.1f},{_py:.1f})"
+        f"O4 OLED button fouls lid post at ({_px:.1f},{_py:.1f})"
     _d = ((_px - oled_cx) ** 2 + (_py - oled_cy) ** 2) ** 0.5
     assert _d > BOSS_D / 2.0 + max(oled_pocket_x, oled_pocket_y) / 2.0, \
-        f"OLED pocket fouls lid post at ({_px:.1f},{_py:.1f})"
+        f"O2 OLED pocket fouls lid post at ({_px:.1f},{_py:.1f})"
 
 
 # IMU centred laterally between the GPS right edge and the right (bulkhead) wall.
@@ -294,6 +336,25 @@ SMA_Z = WALL + 5.0
 assert SMA_Z - SMA_D/2 >= WALL + 1.4, "SMA hole too low: <1.4 mm wall below it"
 assert SMA_Y - WALL > (IMUy0 - WALL) + IMU_W + 3, "SMA bulkhead not clear behind the IMU"
 
+# Right bulkhead on the plate: Ethernet front face, same inset at the rear,
+# top at the Pi underside (the sill under the port shells).
+BULK_FRONT = PIy0 + ETH_FROM_PI
+BULK_BACK  = OY - BULK_FRONT
+BOSS_REACH = WALL + POST_OFF + BOSS_D/2          # boss OD, measured from the outer face
+USB_BACK   = PIy0 + USB2_BACK_FROM_PI
+PORT_TOP   = PI_BOT_Z + IO_WIN_H
+AFT_WALL_Y = USB_BACK + LAP_CLEAR                # hood wall comes down to the sill here
+assert BULK_FRONT - BOSS_REACH >= 1.0, "no room for the corner leg behind the boss"
+# tongues: base inner tongue starts just past the boss; hood outer tongue
+# stops just short of the Ethernet face. They overlap in Y, split in X.
+LAP_BASE_Y0 = BOSS_REACH + LAP_CLEAR
+HOOD_TONGUE_Y = BULK_FRONT - LAP_CLEAR
+assert HOOD_TONGUE_Y - LAP_BASE_Y0 >= 0.5, \
+    f"vertical lip engagement {HOOD_TONGUE_Y - LAP_BASE_Y0:.2f} mm < 0.5"
+assert BULK_BACK - (SMA_Y + SMA_D/2) >= 6.0, "SMA nut runs off the rear of the bulkhead"
+assert AFT_WALL_Y + 10 < BULK_BACK, "top lip aft of the USB sockets is too short"
+assert BULK_FRONT < USB_BACK - 20, "bulkhead does not carry the port stack"
+
 # cable hold-down clips (see v2 notes; positions still being found empirically)
 INSTALL_CLIPS = False
 cable_clips = [(GPSx0 + GPS_L + 11.0, SMA_Y,                'x'),
@@ -313,22 +374,21 @@ def boss(points, top_z, with_insert=True, d=BOSS_D):
             s = s.faces(">Z").workplane().pushPoints(points).hole(SCREW_RELIEF_D, relief)
     return s
 
-def lid_boss(points, post_len, d=BOSS_D):
-    # Lid-screw posts hanging from the top; 45-deg cone tips print support-free.
-    z_cyl = OZ - post_len
-    z_tip = z_cyl - d/2
-    s = None
-    for (px, py) in points:
-        col = (cq.Workplane("XY").workplane(offset=z_tip)
-               .circle(0.4).workplane(offset=d/2).circle(d/2).loft()
-               .faces(">Z").workplane().circle(d/2).extrude(post_len)
-               .translate((px, py, 0)))
-        s = col if s is None else s.union(col)
-    s = s.faces(">Z").workplane().pushPoints(points).hole(INS_HOLE_D, INS_DEPTH)
-    relief = min(INS_DEPTH + SCREW_RELIEF_EXTRA, post_len - SCREW_RELIEF_FLOOR)
-    if relief > INS_DEPTH:
-        s = s.faces(">Z").workplane().pushPoints(points).hole(SCREW_RELIEF_D, relief)
-    return s
+def slab(x0, y0, z0, x1, y1, z1):
+    """Axis-aligned box. Callers overlap neighbours by ~0.2 mm so the fuse is a volume."""
+    return (cq.Workplane("XY")
+            .box(x1 - x0, y1 - y0, z1 - z0, centered=False)
+            .translate((x0, y0, z0)))
+
+def _u(a, b):
+    return b if a is None else a.union(b)
+
+# Right-wall lip, split through the thickness. Inner tongue stays on the
+# plate; outer tongue is on the hood and hides the seam.
+X_IN, X_OUT = OX - WALL, OX
+X_SPLIT = OX - LAP_T
+X_BASE_T = X_SPLIT - LAP_X_GAP
+X_HOOD_T = X_SPLIT + LAP_X_GAP
 
 def cable_clip(cx, cy, axis='x', slot_w=2.60, wall_t=1.5, h=3.4, length=5.0,
                nib=0.26, roof_t=0.9):
@@ -357,88 +417,145 @@ def cable_clip(cx, cy, axis='x', slot_w=2.60, wall_t=1.5, h=3.4, length=5.0,
     return g
 
 def build_base():
-    b = cq.Workplane("XY").box(OX, OY, OZ, centered=False).faces(">Z").shell(-WALL)
+    # Plate. The other three walls live on the hood.
+    b = slab(0, 0, 0, OX, OY, WALL)
 
-    # stack mount pads: the M-F standoffs sit on these; screws come up from
-    # below through counterbored holes into the standoffs' female threads
-    b = b.union(boss(pi_holes, WALL + PAD_H, with_insert=False, d=PAD_D))
-    b = b.union(lid_boss(lid_posts, POST_LEN))
-    b = b.union(boss(gps_holes, WALL + GPS_PED_H))
-    b = b.union(boss(imu_holes, WALL + IMU_PED_H))
-    b = b.union(boss(imu_nubs,  WALL + IMU_PED_H, with_insert=False, d=4.0))
+    # Perimeter groove the hood skirts drop into. Stopped short of the
+    # corners so it doesn't break into the countersinks.
+    b = b.cut(slab(0, CORNER_SKIP, WALL - GROOVE_D,
+                   WALL + GROOVE_IN, OY - CORNER_SKIP, WALL + 0.2))
+    b = b.cut(slab(CORNER_SKIP, 0, WALL - GROOVE_D,
+                   OX - CORNER_SKIP, WALL + GROOVE_IN, WALL + 0.2))
+    b = b.cut(slab(CORNER_SKIP, OY - (WALL + GROOVE_IN), WALL - GROOVE_D,
+                   OX - CORNER_SKIP, OY, WALL + 0.2))
 
-    # interior pilaster behind the X1200 USB-C: brings the wall to ~0.3 mm off
-    # the board edge so the plug overmold passes and the plug seats fully
-    b = b.union(cq.Workplane("XY")
-                .box(UPSC_WIN_W + 4, CLR_F - 0.3, UPSC_CZ + 6.0 - WALL,
-                     centered=(True,True,False))
-                .translate((UPSC_X, WALL + (CLR_F - 0.3)/2, WALL)))
+    # Right bulkhead: sill under the Ethernet/USB shells, SMA further aft.
+    b = _u(b, slab(X_IN, BULK_FRONT, 0, X_OUT, BULK_BACK, PI_BOT_Z))
+    # Inner tongues reach toward the corner bosses. The hood's outer tongue
+    # slides down beside them.
+    b = _u(b, slab(X_IN, LAP_BASE_Y0, 0, X_BASE_T, BULK_FRONT + 0.2, PI_BOT_Z))
+    b = _u(b, slab(X_IN, BULK_BACK - 0.2, 0, X_BASE_T, OY - LAP_BASE_Y0, PI_BOT_Z))
+    # Top lip aft of the USB sockets: outer half steps down, hood tongue fills it.
+    b = b.cut(slab(X_SPLIT, AFT_WALL_Y, PI_BOT_Z - LAP_Z,
+                   X_OUT, BULK_BACK, PI_BOT_Z + 0.5))
+
+    b = _u(b, boss(pi_holes, WALL + PAD_H, with_insert=False, d=PAD_D))
+    b = _u(b, boss(gps_holes, WALL + GPS_PED_H))
+    b = _u(b, boss(imu_holes, WALL + IMU_PED_H))
+    b = _u(b, boss(imu_nubs,  WALL + IMU_PED_H, with_insert=False, d=4.0))
 
     if INSTALL_CLIPS:
         for (cx, cy, ax) in cable_clips:
-            b = b.union(cable_clip(cx, cy, ax))
+            b = _u(b, cable_clip(cx, cy, ax))
 
-    # base screw holes + counterbores (from below; bottom face stays flat)
+    # Stack screws, pan heads, counterbored flush for Dual-Lock.
     b = b.cut(cq.Workplane("XY").workplane(offset=-1).pushPoints(pi_holes)
               .circle(BASE_HOLE_D/2).extrude(WALL + PAD_H + 2))
     b = b.cut(cq.Workplane("XY").workplane(offset=-1).pushPoints(pi_holes)
               .circle(BASE_CB_D/2).extrude(1 + BASE_CB_DEPTH))
 
-    # Pi USB-C cutout (front wall, at the Pi deck; kept for bench/debug use)
-    b = b.cut(cq.Workplane("XY").box(13, WALL*3, 9, centered=(True,True,False))
-              .translate((PIx0 + USBC_X, WALL, PI_BOT_Z - 0.5)))
+    # Hood screws: M2.5x10 countersunk, up into the corner bosses.
+    b = b.cut(cq.Workplane("XY").workplane(offset=-0.1).pushPoints(lid_posts)
+              .circle(BASE_HOLE_D/2).extrude(WALL + 0.2))
+    for px, py in lid_posts:
+        cone = cq.Solid.makeCone(CSK_D/2, BASE_HOLE_D/2, CSK_H + 0.05,
+                                 cq.Vector(px, py, -0.05), cq.Vector(0, 0, 1))
+        b = b.cut(cq.Workplane("XY").newObject([cone]))
 
-    # X1200 USB-C charge window (front wall + pilaster) + lead-in mouth
-    b = b.cut(cq.Workplane("XY")
-              .box(UPSC_WIN_W, 2*(WALL + CLR_F), UPSC_WIN_H, centered=(True,True,False))
-              .translate((UPSC_X, WALL, UPSC_CZ - UPSC_WIN_H/2)))
-    b = b.cut(cq.Workplane("XY")
-              .box(UPSC_WIN_W + 3, 2.4, UPSC_WIN_H + 3, centered=(True,True,False))
-              .translate((UPSC_X, 0.0, UPSC_CZ - (UPSC_WIN_H + 3)/2)))
-
-    # I/O window (right wall): Ethernet + USB stack, follows the Pi deck
-    io_w  = PI_W - IO_WIN_FRONT_INSET - IO_WIN_BACK_INSET
-    io_cy = PIy0 + IO_WIN_FRONT_INSET + io_w/2
-    b = b.cut(cq.Workplane("XY").box(WALL*3, io_w, IO_WIN_H, centered=(True,True,False))
-              .translate((OX-WALL, io_cy, PI_BOT_Z)))
-
-    # SMA bulkhead (RIGHT wall, in line with the GPS jack)
-    b = b.cut(cq.Workplane("YZ").workplane(offset=OX-WALL*1.5).center(SMA_Y, SMA_Z)
+    # SMA bulkhead, in line with the GPS jack.
+    b = b.cut(cq.Workplane("YZ").workplane(offset=OX - WALL*1.5).center(SMA_Y, SMA_Z)
               .circle(SMA_D/2).extrude(WALL*3))
-
-    # X1200 power button finger recess (left wall). The button tip ends up
-    # ~6 mm inside the outer face: reachable, not bumpable.
-    b = b.cut(cq.Workplane("YZ").workplane(offset=-1).center(BTN_Y, BTN_Z)
-              .circle(BTN_HOLE_D/2).extrude(WALL + 2))
-
-    # X1200 status LEDs (left wall): slot over the bank + charge-LED pipe hole
-    b = b.cut(cq.Workplane("XY").box(WALL*3, LED_SLOT_W, LED_SLOT_H, centered=(True,True,False))
-              .translate((0, LED_CY, LED_Z0)))
-    b = b.cut(cq.Workplane("YZ").workplane(offset=-1).center(CHG_Y, CHG_CZ)
-              .circle(LED_HOLE_D/2).extrude(WALL + 2))
-
-    # exhaust slots (left wall) at cooler level, flanking the FPC keep-out
-    slot = cq.Workplane("XY").box(WALL*3, SLOT_W, VENT_H, centered=(True,True,False))
-    for y in vent_ys:
-        b = b.cut(slot.translate((0, y, VENT_Z0)))
     return b
 
-# ----------------------------------------------------------------------------- LID
-def lipbar(x0, y0, dx, dy):
-    return cq.Workplane("XY").box(dx, dy, LID_LIP_H, centered=False)\
-             .translate((x0, y0, OZ - LID_LIP_H))
+# ----------------------------------------------------------------------------- HOOD (exported as the lid)
+def _corner_bosses():
+    """Short insert bosses, open at the bottom. The screw comes up from the plate."""
+    s = None
+    for px, py in lid_posts:
+        s = _u(s, cq.Workplane("XY").workplane(offset=WALL).center(px, py)
+                 .circle(BOSS_D/2).extrude(HOOD_BOSS_H))
+    s = s.cut(cq.Workplane("XY").workplane(offset=WALL - 0.1).pushPoints(lid_posts)
+              .circle(INS_HOLE_D/2).extrude(INS_DEPTH + 0.1))
+    relief = min(INS_DEPTH + SCREW_RELIEF_EXTRA, HOOD_BOSS_H - SCREW_RELIEF_FLOOR)
+    if relief > INS_DEPTH:
+        s = s.cut(cq.Workplane("XY").workplane(offset=WALL - 0.1).pushPoints(lid_posts)
+                  .circle(SCREW_RELIEF_D/2).extrude(relief + 0.1))
+    return s
+
+def _wall_skirts():
+    """Necks that drop into the plate groove. Corners are skipped with the groove."""
+    z0, z1 = WALL - GROOVE_D + 0.2, WALL + 0.2
+    s = slab(GROOVE_SIDE, CORNER_SKIP + 0.2, z0, WALL, OY - CORNER_SKIP - 0.2, z1)
+    s = _u(s, slab(CORNER_SKIP + 0.2, GROOVE_SIDE, z0,
+                   OX - CORNER_SKIP - 0.2, WALL, z1))
+    s = _u(s, slab(CORNER_SKIP + 0.2, OY - WALL, z0,
+                   OX - CORNER_SKIP - 0.2, OY - GROOVE_SIDE, z1))
+    return s
+
+def _right_side():
+    """Corner legs full height, a band over the ports, and the sill lip aft of USB2."""
+    z_top = OZ + 0.2
+    y_rear_tongue = OY - HOOD_TONGUE_Y
+    y_rear_boss = OY - BOSS_REACH
+    s = slab(X_IN, 0, WALL, X_OUT, BOSS_REACH, z_top)                  # front leg
+    s = _u(s, slab(X_HOOD_T, BOSS_REACH - 0.2, WALL, X_OUT, HOOD_TONGUE_Y, z_top))
+    s = _u(s, slab(X_IN, y_rear_boss, WALL, X_OUT, OY, z_top))          # rear leg
+    s = _u(s, slab(X_HOOD_T, y_rear_tongue, WALL, X_OUT, y_rear_boss + 0.2, z_top))
+    # Band above the shells, tying the two legs together.
+    s = _u(s, slab(X_IN, HOOD_TONGUE_Y - 0.2, PORT_TOP, X_OUT, y_rear_tongue + 0.2, z_top))
+    # Aft of USB2 the wall comes down onto the bulkhead lip.
+    z_outer = PI_BOT_Z - LAP_Z + LAP_CLEAR
+    z_inner = PI_BOT_Z + LAP_CLEAR
+    s = _u(s, slab(X_IN, AFT_WALL_Y, z_inner, X_BASE_T, y_rear_tongue + 0.2, PORT_TOP + 0.2))
+    s = _u(s, slab(X_HOOD_T, AFT_WALL_Y, z_outer, X_OUT, y_rear_tongue + 0.2, PORT_TOP + 0.2))
+    return s
+
+def _charge_port(hood):
+    """X1200 USB-C only. The Pi USB-C stays closed: that port back-powers the Pi."""
+    y_face = WALL + CLR_F - 0.3
+    pil_y0 = WALL - 0.4
+    # v3 grew this block from the floor because it was part of the base and
+    # fused with the standoff pads. On the hood it has to clear those pads
+    # (front-right pad reaches x≈65, y≈5.3, z=5).
+    pil_z0 = WALL + PAD_H + 0.4
+    hood = _u(hood, slab(UPSC_X - (UPSC_WIN_W + 4)/2, pil_y0, pil_z0,
+                         UPSC_X + (UPSC_WIN_W + 4)/2, y_face, UPSC_CZ + 6.0))
+    z0 = UPSC_CZ - UPSC_WIN_H/2
+    hood = hood.cut(cq.Workplane("XY")
+                    .box(UPSC_WIN_W, 2*(WALL + CLR_F), UPSC_WIN_H, centered=(True, True, False))
+                    .translate((UPSC_X, WALL, z0)))
+    # Outer lead-in, same as the v3 mouth.
+    hood = hood.cut(cq.Workplane("XY")
+                    .box(UPSC_WIN_W + 3, 2.4, UPSC_WIN_H + 3, centered=(True, True, False))
+                    .translate((UPSC_X, 0.0, UPSC_CZ - (UPSC_WIN_H + 3)/2)))
+    # Sill chamfer so the frame can slide down past the jack.
+    x0 = UPSC_X - (UPSC_WIN_W + 6)/2
+    cham = (cq.Workplane("YZ").workplane(offset=x0)
+            .moveTo(y_face, z0).lineTo(y_face - 1.6, z0).lineTo(y_face, z0 - 1.6)
+            .close().extrude(UPSC_WIN_W + 6))
+    return hood.cut(cham)
 
 def build_lid():
-    lid = cq.Workplane("XY").box(OX, OY, LID_T, centered=False).translate((0,0,OZ))
+    z_top = OZ + 0.2
+    lid = slab(0, 0, OZ, OX, OY, OZ + LID_T)
+    lid = _u(lid, slab(0, 0, WALL, WALL, OY, z_top))            # left
+    lid = _u(lid, slab(0, 0, WALL, OX, WALL, z_top))            # front
+    lid = _u(lid, slab(0, OY - WALL, WALL, OX, OY, z_top))      # back
+    lid = _u(lid, _right_side())
+    lid = _u(lid, _wall_skirts())
+    lid = _u(lid, _corner_bosses())
+    lid = _charge_port(lid)
 
-    # segmented alignment lip on all four sides, with corner breaks for the posts
-    g, t = LID_LIP_GAP, LIP_T
-    span_x = (WALL+LIP_CORNER_GAP, INT_X-2*LIP_CORNER_GAP)
-    span_y = (WALL+LIP_CORNER_GAP, INT_Y-2*LIP_CORNER_GAP)
-    lid = lid.union(lipbar(span_x[0], WALL+g,            span_x[1], t))            # front
-    lid = lid.union(lipbar(span_x[0], WALL+INT_Y-g-t,    span_x[1], t))            # back
-    lid = lid.union(lipbar(WALL+g,    span_y[0],         t,         span_y[1]))    # left
-    lid = lid.union(lipbar(WALL+INT_X-g-t, span_y[0],    t,         span_y[1]))    # right (I/O)
+    # Power button, LEDs, cooler exhaust — left wall, same places as v3.
+    lid = lid.cut(cq.Workplane("YZ").workplane(offset=-1).center(BTN_Y, BTN_Z)
+                  .circle(BTN_HOLE_D/2).extrude(WALL + 2))
+    lid = lid.cut(cq.Workplane("XY").box(WALL*3, LED_SLOT_W, LED_SLOT_H, centered=(True, True, False))
+                  .translate((0, LED_CY, LED_Z0)))
+    lid = lid.cut(cq.Workplane("YZ").workplane(offset=-1).center(CHG_Y, CHG_CZ)
+                  .circle(LED_HOLE_D/2).extrude(WALL + 2))
+    slot = cq.Workplane("XY").box(WALL*3, SLOT_W, VENT_H, centered=(True, True, False))
+    for y in vent_ys:
+        lid = lid.cut(slot.translate((0, y, VENT_Z0)))
 
     # intake grille over the cooler (air path: lid -> around the HAT -> fan)
     pts, n = [], int(INTAKE_R/INTAKE_PITCH)+1
@@ -450,36 +567,31 @@ def build_lid():
     lid = lid.cut(cq.Workplane("XY").pushPoints(pts).circle(INTAKE_HOLE_D/2)
                   .extrude(LID_T+1).translate((0,0,OZ-0.5)))
 
-    # lid screw holes: 2.8 clearance through, + counterbore for the socket cap
-    cb_depth = SCREW_HEAD_H + 0.3
-    cb_r     = (SCREW_HEAD_D + 0.5) / 2
-    lid = lid.cut(cq.Workplane("XY").pushPoints(lid_posts).circle(1.4)
-                  .extrude(LID_T+1).translate((0,0,OZ-0.5)))
-    lid = lid.cut(cq.Workplane("XY").pushPoints(lid_posts).circle(cb_r)
-                  .extrude(cb_depth+0.1).translate((0,0,OZ+LID_T-cb_depth)))
-
-    # visor around the OLED window (cabin glare)
-    visor_out_x, visor_out_y = oled_win_x + 6.0, oled_win_y + 6.0
-    visor = cq.Workplane("XY").box(visor_out_x, visor_out_y, OLED_VISOR_H, centered=True)
-    visor = visor.cut(cq.Workplane("XY").box(oled_win_x, oled_win_y, OLED_VISOR_H + 1, centered=True))
-    lid = lid.union(visor.translate((oled_cx, oled_cy, OZ + LID_T + OLED_VISOR_H / 2.0 - 0.2)))
-
-    # viewing aperture through visor + lid
-    lid = lid.cut(cq.Workplane("XY").box(oled_win_x, oled_win_y, LID_T + OLED_VISOR_H + 2, centered=True)
+    # Viewing aperture through the lid (measured glass + 1 mm). The outer
+    # face stays flat so it can sit on the bed.
+    lid = lid.cut(cq.Workplane("XY").box(oled_win_x, oled_win_y, LID_T + 2, centered=True)
                   .translate((oled_cx, oled_cy, OZ + LID_T / 2.0)))
 
-    # PCB pocket from the underside (lip around the panel bezel)
+    # Ear pocket from the underside. Depth seats a 1.6 mm FR4 so the glass
+    # is flush with the lid top. Rectangular: the route-outs have no FR4,
+    # and this cut does not pierce the lid.
     lid = lid.cut(cq.Workplane("XY").box(oled_pocket_x, oled_pocket_y, OLED_POCKET_D + 0.2, centered=True)
                   .translate((oled_cx, oled_cy, OZ + OLED_POCKET_D / 2.0 - 0.1)))
 
-    # Qwiic cable drop into the GPS bay (toward the stack / -Y)
-    lid = lid.cut(cq.Workplane("XY").box(OLED_CABLE_W, OLED_CABLE_L, LID_T + 2, centered=True)
-                  .translate((oled_cx, oled_cable_y, OZ + LID_T / 2.0)))
+    # M2.5 countersunk through-bolts, head on the lid top, nut under the ear.
+    lid = lid.cut(cq.Workplane("XY").pushPoints(oled_bolts)
+                  .circle(OLED_BOLT_D / 2.0)
+                  .extrude(LID_T + 2).translate((0, 0, OZ - 0.5)))
+    for bx, by in oled_bolts:
+        cone = cq.Solid.makeCone(CSK_D / 2.0, OLED_BOLT_D / 2.0, OLED_CSK_H + 0.05,
+                                 cq.Vector(bx, by, OZ + LID_T + 0.05),
+                                 cq.Vector(0, 0, -1))
+        lid = lid.cut(cq.Workplane("XY").newObject([cone]))
 
-    # tactile button in the same bezel, +X of the PCB
+    # Tactile button, +X of the PCB (toward the IMU).
     lid = lid.cut(cq.Workplane("XY").pushPoints([(oled_btn_x, oled_btn_y)])
                   .circle(OLED_BTN_D / 2.0)
-                  .extrude(LID_T + OLED_VISOR_H + 2).translate((0, 0, OZ - 0.5)))
+                  .extrude(LID_T + 2).translate((0, 0, OZ - 0.5)))
 
     # flanking exhaust slots left/right of the OLED (bay still vents)
     for sx in (oled_cx - OLED_PCB_X / 2.0 - OLED_FLANK_GAP,
@@ -502,10 +614,12 @@ def _png_rgb(path, rows):
                 + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
 
 def write_lid_qc_png(path):
-    """Raster lid XY features so a stale PNG cannot be mistaken for current."""
+    """Top view of the v4 tray/hood split. A new filename per shape revision."""
     scale = 4  # px / mm
     w, h = int(OX * scale) + 1, int(OY * scale) + 1
     bg, wall, cut, win, btn = (40, 44, 52), (180, 186, 196), (20, 22, 26), (220, 230, 255), (240, 180, 80)
+    recess, bolt = (96, 104, 116), (200, 90, 70)
+    bulk = (70, 120, 150)
     rows = [[bg] * w for _ in range(h)]
 
     def fill_rect(x0, y0, x1, y1, color):
@@ -527,6 +641,9 @@ def write_lid_qc_png(path):
                     row[x] = color
 
     fill_rect(0, 0, OX, OY, wall)
+    fill_rect(X_IN, BULK_FRONT, X_OUT, BULK_BACK, bulk)
+    fill_rect(X_IN, HOOD_TONGUE_Y, X_OUT, AFT_WALL_Y, cut)   # port mouth
+    fill_rect(UPSC_X - UPSC_WIN_W/2, 0, UPSC_X + UPSC_WIN_W/2, WALL, cut)
     n = int(INTAKE_R / INTAKE_PITCH) + 1
     for i in range(-n, n + 1):
         for j in range(-n, n + 1):
@@ -534,28 +651,127 @@ def write_lid_qc_png(path):
             if px * px + py * py <= (INTAKE_R - INTAKE_HOLE_D / 2) ** 2:
                 fill_circle(cooler_cx + px, cooler_cy + py, INTAKE_HOLE_D / 2, cut)
     fill_rect(oled_cx - oled_pocket_x / 2, oled_cy - oled_pocket_y / 2,
-              oled_cx + oled_pocket_x / 2, oled_cy + oled_pocket_y / 2, cut)
+              oled_cx + oled_pocket_x / 2, oled_cy + oled_pocket_y / 2, recess)
     fill_rect(oled_cx - oled_win_x / 2, oled_cy - oled_win_y / 2,
               oled_cx + oled_win_x / 2, oled_cy + oled_win_y / 2, win)
-    fill_rect(oled_cx - OLED_CABLE_W / 2, oled_cable_y - OLED_CABLE_L / 2,
-              oled_cx + OLED_CABLE_W / 2, oled_cable_y + OLED_CABLE_L / 2, cut)
+    for bx, by in oled_bolts:
+        fill_circle(bx, by, CSK_D / 2, bolt)
+        fill_circle(bx, by, OLED_BOLT_D / 2, cut)
     fill_circle(oled_btn_x, oled_btn_y, OLED_BTN_D / 2, btn)
     for sx in (oled_cx - OLED_PCB_X / 2.0 - OLED_FLANK_GAP,
                oled_cx + OLED_PCB_X / 2.0 + OLED_FLANK_GAP):
         fill_rect(sx - SLOT_W / 2, oled_cy - 11, sx + SLOT_W / 2, oled_cy + 11, cut)
     for px, py in lid_posts:
-        fill_circle(px, py, 1.4, cut)
+        fill_circle(px, py, BOSS_D/2, btn)
+        fill_circle(px, py, BASE_HOLE_D/2, cut)
+    fill_circle(OX - WALL/2, SMA_Y, SMA_D/2, cut)
     _png_rgb(path, rows)
+
+def _inside(shape, x, y, z):
+    return bool(shape.isInside((x, y, z)))
+
+def audit(base, hood):
+    """H1–H8. Fail with the requirement id before any export."""
+    assert len(base.solids().vals()) == 1, "base is not a single solid"
+    assert len(hood.solids().vals()) == 1, "hood is not a single solid"
+    bs, hs = base.val(), hood.val()
+
+    def need(shape, p, want, msg):
+        got = _inside(shape, *p)
+        assert got is want, f"{msg}: inside={got} at {p}"
+
+    # OLED lid. Glass opening, ear pocket, no cable slot, bolts, flat face.
+    z_mid = OZ + LID_T / 2.0
+    z_lip = OZ + LID_T - 0.25
+    z_pocket = OZ + OLED_POCKET_D / 2.0
+    z_above = OZ + LID_T + 0.4
+    need(hs, (oled_cx, oled_cy, z_mid), False, "O1 window is closed")
+    need(hs, (oled_cx, oled_cy, z_above), False, "O1 window is covered above the lid")
+    y_land = oled_cy + OLED_BOLT_DY - (CSK_D / 2.0 + 0.55)
+    need(hs, (oled_cx + OLED_BOLT_DX, y_land, z_lip), True,
+         "O1 countersink breaks the window land")
+    bx, by = oled_bolts[0]
+    need(hs, (bx, by, z_mid), False, "O8 ear bolt hole is closed")
+    need(hs, (bx, by, z_lip), False, "O8 ear countersink is closed")
+    need(hs, (oled_cx, oled_cy + OLED_PCB_Y / 2.0 - 0.4, z_pocket), False,
+         "O2 ear pocket is missing")
+    need(hs, (oled_cx, oled_cy + OLED_BOLT_DY, z_lip), True,
+         "O3 route-out is a through slot")
+    need(hs, (oled_cx, oled_cy - oled_pocket_y / 2.0 - 1.5, z_mid), True,
+         "O3 cable slot is still open")
+    need(hs, (oled_btn_x, oled_btn_y, z_mid), False, "O4 button hole is closed")
+    for sx in (oled_cx - OLED_PCB_X / 2.0 - OLED_FLANK_GAP,
+               oled_cx + OLED_PCB_X / 2.0 + OLED_FLANK_GAP):
+        need(hs, (sx, oled_cy, z_mid), False, "O6 flanking vent is closed")
+    deck_xy = (oled_cx, oled_cy + oled_win_y / 2.0 + 1.2)
+    need(hs, (*deck_xy, z_above), False, "O7 screen frame still stands above the lid")
+    need(hs, (*deck_xy, OZ + LID_T - 0.3), True, "O7 lid deck is missing beside the window")
+    need(hs, (OX / 2.0, WALL + 8.0, z_above), False, "O7 something stands above the lid face")
+
+    # y=35 sits between the exhaust slots and clear of the button hole.
+    need(bs, (WALL/2, 35, 20), False, "H1 plate grew a left wall")
+    need(hs, (WALL/2, 35, 20), True, "H1 hood is missing the left wall")
+    need(hs, (PIx0 + USBC_X, WALL/2, PI_BOT_Z + 4), True, "H2 Pi USB-C is open")
+    need(hs, (UPSC_X, WALL/2, UPSC_CZ), False, "H3 X1200 charge port is closed")
+    # Front-right standoff pad occupies this point. The charge-port frame must not.
+    need(hs, (68.0, 6.2, 4.0), False, "H8 charge-port frame hits a standoff pad")
+    y_port = (BULK_FRONT + USB_BACK) / 2
+    need(bs, (OX - WALL/2, y_port, PI_BOT_Z - 2), True, "H4 no sill under the ports")
+    need(bs, (OX - WALL/2, y_port, PI_BOT_Z + 4), False, "H4 sill rises into the ports")
+    need(bs, (OX - WALL/2, SMA_Y, SMA_Z), False, "H5 SMA hole is closed")
+    need(bs, (OX - WALL/2, SMA_Y, SMA_Z + 6), True, "H5 no bulkhead above the SMA")
+    need(hs, (OX - WALL/2, PIy0 + 10, PI_BOT_Z + 8), False, "H6 hood fills the port mouth")
+    need(bs, (OX - WALL/2, PIy0 + 10, PI_BOT_Z + 8), False, "H6 plate fills the port mouth")
+    px, py = lid_posts[0]
+    need(bs, (px, py, WALL/2), False, "H7 corner screw hole missing")
+    need(hs, (px + 2.2, py, WALL + 3), True, "H7 corner boss missing")
+    need(hs, (px, py, WALL + 1.0), False, "H7 insert is not open from below")
+    # Vertical lip: inner tongue on the plate, outer tongue on the hood.
+    y_lap = (LAP_BASE_Y0 + HOOD_TONGUE_Y) / 2
+    need(bs, ((X_IN + X_BASE_T)/2, y_lap, 12), True, "H4 base lip tongue missing")
+    need(hs, ((X_HOOD_T + X_OUT)/2, y_lap, 12), True, "H4 hood lip tongue missing")
+    gap_x = (X_BASE_T + X_HOOD_T) / 2
+    need(bs, (gap_x, y_lap, 12), False, "H8 base fills the lip gap")
+    need(hs, (gap_x, y_lap, 12), False, "H8 hood fills the lip gap")
+    # The walls sit on the plate, so the two solids share a face. A 0.05 mm
+    # lift is smaller than every designed gap; anything still overlapping is a
+    # real collision.
+    lifted = hood.translate((0, 0, 0.05))
+    both = base.intersect(lifted)
+    solids = both.solids().vals()
+    vol = sum(s.Volume() for s in solids)
+    if vol >= 1.0:
+        for s in solids:
+            bb = s.BoundingBox()
+            print(f"H8 overlap {s.Volume():.2f} mm^3  "
+                  f"X {bb.xmin:.2f}..{bb.xmax:.2f}  "
+                  f"Y {bb.ymin:.2f}..{bb.ymax:.2f}  "
+                  f"Z {bb.zmin:.2f}..{bb.zmax:.2f}")
+    assert vol < 1.0, f"H8 hood intersects the plate by {vol:.2f} mm^3"
 
 # ----------------------------------------------------------------------------- BUILD + EXPORT
 if __name__ == "__main__":
     base = build_base()
     lid  = build_lid()
+    audit(base, lid)
 
-    # lid for printing: flip 180 deg about X so the flat top is on the bed
+    # Hood prints lid-down, walls up. The outer face is flat on the bed.
+    asm_bb = lid.val().BoundingBox()
+    assert abs(asm_bb.zmax - (OZ + LID_T)) < 0.05, \
+        f"O7 hood top is {asm_bb.zmax:.2f}, lid face is {OZ + LID_T:.2f}"
     lid_print = lid.rotate((0,0,0),(1,0,0),180)
-    bb = lid_print.val().BoundingBox()
-    lid_print = lid_print.translate((-bb.xmin, -bb.ymin, -bb.zmin))
+    pre = lid_print.val().BoundingBox()
+    lid_print = lid_print.translate((-pre.xmin, -pre.ymin, -pre.zmin))
+
+    def on_bed(x, y):
+        """A point 0.3 mm under the outer face must land on the bed and be plastic."""
+        z = OZ + LID_T - 0.3
+        p = (x - pre.xmin, -y - pre.ymin, -z - pre.zmin)
+        assert lid_print.val().isInside(p), f"O7 deck is not on the bed at {p}"
+        assert p[2] < 0.5, f"O7 bed face is {p[2]:.2f} mm up at {p}"
+
+    on_bed(oled_cx, oled_cy + oled_win_y / 2.0 + 1.2)
+    on_bed(OX / 2.0, WALL + 15.0)
 
     cq.exporters.export(base, "case_base.step")
     cq.exporters.export(base, "case_base.stl", tolerance=0.05)
@@ -568,13 +784,19 @@ if __name__ == "__main__":
     asm.add(lid,  name="lid",  color=cq.Color(0.75,0.78,0.82))
     asm.save("case_assembly.step")
 
-    write_lid_qc_png("case_lid_oled_qc_20260821.png")
+    write_lid_qc_png("case_v4_oled_win_20261023.png")
 
-    print(f"Outer footprint : {OX:.1f} x {OY:.1f} x {OZ+LID_T+OLED_VISOR_H:.1f} mm (incl. OLED visor)")
+    print(f"Outer footprint : {OX:.1f} x {OY:.1f} x {OZ+LID_T:.1f} mm (flat lid, no visor)")
+    print(f"Bulkhead Y {BULK_FRONT:.1f}..{BULK_BACK:.1f}, sill Z {PI_BOT_Z:.1f}; "
+          f"vertical lip {HOOD_TONGUE_Y - LAP_BASE_Y0:.2f} mm")
     print(f"Z-stack: X1200 bottom {UPS_BOT_Z:.1f} | Pi deck {PI_DECK_Z:.1f} | "
           f"cooler top {COOLER_TOP_Z:.1f} | HAT top {HAT_TOP_Z:.1f} | "
           f"stack top {STACK_TOP_Z:.1f} | lid underside {OZ:.1f}")
-    print(f"OLED window {oled_win_x:.1f}x{oled_win_y:.1f} @ ({oled_cx:.1f},{oled_cy:.1f}); "
+    print(f"OLED window {oled_win_x:.2f}x{oled_win_y:.2f} @ ({oled_cx:.1f},{oled_cy:.1f}); "
+          f"pocket {oled_pocket_x:.2f}x{oled_pocket_y:.2f} deep {OLED_POCKET_D:.2f}; "
           f"button Ø{OLED_BTN_D:.1f} @ ({oled_btn_x:.1f},{oled_btn_y:.1f})")
+    print(f"OLED ear bolts: 4× M2.5×8 countersunk, Ø{OLED_BOLT_D:.1f}, "
+          f"nut under the ear (FR4 assumed {OLED_PCB_T:.1f} mm)")
     print(f"Cell-to-floor clearance: {PAD_H + UPS_STANDOFF_H - UPS_UNDERSIDE:.1f} mm")
-    print("Exported base/lid .step/.stl (+ assembly, QC PNG). Lid STL is print-oriented (flipped).")
+    print("Exported base/lid .step/.stl (+ assembly, QC PNG). "
+          "Lid STL is the hood, print-oriented (lid on the bed, walls up).")
