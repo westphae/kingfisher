@@ -59,11 +59,13 @@ def absent(nets: dict[str, set[tuple[str, str]]], ref: str, pin: str, forbidden:
 def main() -> None:
     path = Path(sys.argv[1] if len(sys.argv) > 1 else "kingfisher-hat.net")
     nets = parse_nets(path.read_text())
-    gnd = same(nets, [("J1", "6"), ("U1", "6"), ("U1", "1"), ("U2", "3"), ("U4", "10"), ("U4", "12"), ("U4", "13"), ("U4", "24"), ("U5", "5"), ("BT1", "2"), ("BT2", "2")])
-    v3 = same(nets, [("J1", "1"), ("J1", "17"), ("U1", "5"), ("U1", "8"), ("U1", "12"), ("U2", "1"), ("U2", "5"), ("U2", "6"), ("U2", "10"), ("U5", "7"), ("J3", "1"), ("R7", "1")])
+    gnd = same(nets, [("J1", "6"), ("U1", "6"), ("U1", "1"), ("U2", "3"), ("U4", "7"), ("U4", "10"), ("U4", "12"), ("U4", "13"), ("U4", "24"), ("U5", "5"), ("U6", "1"), ("D3", "2"), ("BT1", "2"), ("BT2", "2")])
+    v3 = same(nets, [("J1", "1"), ("J1", "17"), ("U1", "5"), ("U1", "8"), ("U1", "12"), ("U5", "7"), ("J3", "1"), ("R7", "1"), ("R9", "1")])
     v5 = same(nets, [("J1", "2"), ("J1", "4"), ("U3", "1"), ("U3", "3"), ("C5", "1")])
-    gps = same(nets, [("U3", "5"), ("U4", "23"), ("U4", "7"), ("C6", "1"), ("C8", "1"), ("D1", "2"), ("R3", "1")])
-    vbckp = same(nets, [("U4", "22"), ("BT2", "1"), ("C9", "1"), ("R4", "2")])
+    gps = same(nets, [("U3", "5"), ("U4", "23"), ("C6", "1"), ("C8", "1"), ("R3", "1"), ("R10", "1")])
+    bmp = same(nets, [("U2", "1"), ("U2", "5"), ("U2", "6"), ("U2", "10"), ("C3", "1"), ("C4", "1"), ("R9", "2")])
+    vbckp = same(nets, [("U4", "22"), ("BT2", "1"), ("C9", "1"), ("D1", "1")])
+    vchg = same(nets, [("U6", "3"), ("R10", "2"), ("R4", "1")])
     vbat = same(nets, [("BT1", "1"), ("U5", "6")])
     sda = same(nets, [("J1", "3"), ("U1", "14"), ("U2", "4"), ("U5", "4"), ("J3", "3"), ("R7", "2")])
     scl = same(nets, [("J1", "5"), ("U1", "13"), ("U2", "2"), ("U5", "3"), ("J3", "4"), ("R8", "2")])
@@ -75,9 +77,9 @@ def main() -> None:
     same(nets, [("U4", "20"), ("R2", "1")])
     same(nets, [("R2", "2"), ("J1", "10")])
     same(nets, [("U4", "2"), ("R3", "2")])
-    same(nets, [("D1", "1"), ("R4", "1")])
-    rf = same(nets, [("U4", "11"), ("FB1", "1"), ("J2", "1")])
-    bias = same(nets, [("FB1", "2"), ("R5", "2"), ("C10", "1")])
+    same(nets, [("D1", "2"), ("R4", "2")])
+    rf = same(nets, [("U4", "11"), ("L1", "1"), ("J2", "1"), ("D3", "1")])
+    bias = same(nets, [("L1", "2"), ("R5", "2"), ("C10", "1")])
     vcc_rf = same(nets, [("U4", "9"), ("R5", "1")])
     same(nets, [("J2", "2"), ("J1", "6")])
     same(nets, [("J3", "2"), ("J1", "6")])
@@ -90,12 +92,19 @@ def main() -> None:
     different(nets, ("U4", "18"), ("J1", "3"))
     different(nets, ("U2", "7"), ("J1", "6"))
     different(nets, ("U4", "14"), ("U4", "23"))
-    for name in (gnd, v3, v5, gps, vbckp, vbat, sda, scl, rf, bias, vcc_rf):
+    different(nets, ("U4", "7"), ("U4", "23"))
+    different(nets, ("U2", "1"), ("J1", "1"))
+    different(nets, ("U4", "1"), ("J1", "6"))
+    same(nets, [("U4", "1"), ("TP13", "1")])
+    for ref, pin in (("U1", "9"), ("U4", "5"), ("U4", "6")):
+        if not net_of(nets, ref, pin).startswith("unconnected"):
+            raise SystemExit(f"{ref} pin {pin} should stay open")
+    for name in (gnd, v3, v5, gps, bmp, vbckp, vchg, vbat, sda, scl, rf, bias, vcc_rf):
         if name.startswith("unconnected"):
             raise SystemExit(name)
     # Primary cell has no charge path.
     for node in nets[vbat]:
-        if node[0] in {"D1", "U3", "U4", "BT2"}:
+        if node[0] in {"D1", "U3", "U4", "U6", "BT2", "R4", "R10"}:
             raise SystemExit(f"CR2032 net reaches {node}")
     print(f"rev 0.3 netlist OK ({len(nets)} nets)")
 

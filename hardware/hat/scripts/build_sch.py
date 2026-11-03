@@ -41,6 +41,44 @@ def fmt(mils: int) -> str:
     return text
 
 
+def extract_resolved(path: Path | str, name: str) -> str:
+    """Load a symbol, inlining the parent when the entry only has (extends)."""
+    sym = extract_symbol(path, name)
+    match = re.search(r'\(extends "([^"]+)"\)', sym)
+    if not match:
+        return sym
+    parent_name = match.group(1)
+    parent = extract_symbol(path, parent_name)
+    units: list[str] = []
+    token = f'(symbol "{parent_name}_'
+    idx = 0
+    while True:
+        start = parent.find(token, idx)
+        if start < 0:
+            break
+        depth = 0
+        end = None
+        for k in range(start, len(parent)):
+            if parent[k] == "(":
+                depth += 1
+            elif parent[k] == ")":
+                depth -= 1
+                if depth == 0:
+                    end = k + 1
+                    break
+        if end is None:
+            raise SystemExit(f"unbalanced unit in {parent_name}")
+        units.append(parent[start:end].replace(f'(symbol "{parent_name}_', f'(symbol "{name}_', 1))
+        idx = end
+    if not units:
+        raise SystemExit(f"{name} extends {parent_name} but that parent has no units")
+    sym = re.sub(r'\n[ \t]*\(extends "[^"]+"\)', "", sym, count=1)
+    sym = sym.rstrip()
+    if not sym.endswith(")"):
+        raise SystemExit(f"{name} symbol does not end with a close")
+    return sym[:-1].rstrip() + "\n" + "\n".join(units) + "\n)"
+
+
 def extract_symbol(path: Path | str, name: str) -> str:
     text = Path(path).read_text()
     key = f'(symbol "{name}"'
@@ -295,8 +333,10 @@ def main() -> None:
         ("Device:C", extract_symbol("/usr/share/kicad/symbols/Device.kicad_sym", "C")),
         ("Device:R", extract_symbol("/usr/share/kicad/symbols/Device.kicad_sym", "R")),
         ("Device:D_Schottky", extract_symbol("/usr/share/kicad/symbols/Device.kicad_sym", "D_Schottky")),
+        ("Device:D", extract_symbol("/usr/share/kicad/symbols/Device.kicad_sym", "D")),
+        ("Device:L", extract_symbol("/usr/share/kicad/symbols/Device.kicad_sym", "L")),
         ("Device:LED", extract_symbol("/usr/share/kicad/symbols/Device.kicad_sym", "LED")),
-        ("Device:FerriteBead", extract_symbol("/usr/share/kicad/symbols/Device.kicad_sym", "FerriteBead")),
+        ("Reference_Voltage:LM4040DCK-3", extract_resolved("/usr/share/kicad/symbols/Reference_Voltage.kicad_sym", "LM4040DCK-3")),
         ("Device:Battery_Cell", extract_symbol("/usr/share/kicad/symbols/Device.kicad_sym", "Battery_Cell")),
         ("Connector:Conn_Coaxial", extract_symbol("/usr/share/kicad/symbols/Connector.kicad_sym", "Conn_Coaxial")),
         ("Connector:TestPoint", extract_symbol("/usr/share/kicad/symbols/Connector.kicad_sym", "TestPoint")),
@@ -322,9 +362,10 @@ def main() -> None:
     add("U2", "Kingfisher:BMP581", "BMP581", "Kingfisher:BMP581", 6000, 10000)
     add("C3", "Device:C", "100nF", "Capacitor_SMD:C_0402_1005Metric", 8400, 10800)
     add("C4", "Device:C", "100nF", "Capacitor_SMD:C_0402_1005Metric", 8400, 10000)
-    add("U5", "Timer_RTC:RV-3028-C7", "RV-3028-C7", "Package_SON:MicroCrystal_C7_SON-8_1.5x3.2mm_P0.9mm", 6000, 6400)
+    add("R9", "Device:R", "10", "Resistor_SMD:R_0402_1005Metric", 4800, 11200)
+    add("U5", "Timer_RTC:RV-3028-C7", "RV-3028-C7", "Kingfisher:RV3028-C7_JLC", 6000, 6400)
     add("C11", "Device:C", "100nF", "Capacitor_SMD:C_0402_1005Metric", 8400, 6400)
-    add("U3", "Regulator_Linear:AP2112K-3.3", "AP2112K-3.3", "Package_TO_SOT_SMD:SOT-23-5", 12000, 13600)
+    add("U3", "Regulator_Linear:AP2112K-3.3", "AP2112K-3.3", "Kingfisher:SOT-23-5_JLC", 12000, 13600)
     add("C5", "Device:C", "1uF", "Capacitor_SMD:C_0603_1608Metric", 10000, 12000)
     add("C6", "Device:C", "1uF", "Capacitor_SMD:C_0603_1608Metric", 14000, 12000)
     add("C7", "Device:C", "100nF", "Capacitor_SMD:C_0402_1005Metric", 14000, 11200)
@@ -334,11 +375,14 @@ def main() -> None:
     add("R1", "Device:R", "33", "Resistor_SMD:R_0603_1608Metric", 9200, 5600)
     add("R2", "Device:R", "33", "Resistor_SMD:R_0603_1608Metric", 9200, 4400)
     add("R3", "Device:R", "10k", "Resistor_SMD:R_0402_1005Metric", 16800, 8400)
-    add("R4", "Device:R", "1k", "Resistor_SMD:R_0603_1608Metric", 16800, 5600)
+    add("R4", "Device:R", "34k", "Resistor_SMD:R_0603_1608Metric", 16800, 5600)
     add("R5", "Device:R", "33", "Resistor_SMD:R_0402_1005Metric", 19200, 6800)
-    add("FB1", "Device:FerriteBead", "120R", "Inductor_SMD:L_0402_1005Metric", 19200, 8000)
-    add("C10", "Device:C", "47pF", "Capacitor_SMD:C_0402_1005Metric", 19200, 5600)
+    add("R10", "Device:R", "2.2k", "Resistor_SMD:R_0402_1005Metric", 15600, 2000)
+    add("L1", "Device:L", "LQG15HS27NJ02", "Inductor_SMD:L_0402_1005Metric", 19200, 8000)
+    add("C10", "Device:C", "100nF", "Capacitor_SMD:C_0402_1005Metric", 19200, 5600)
     add("D1", "Device:D_Schottky", "PMEG4005EJ", "Diode_SMD:D_SOD-323F", 14400, 4400)
+    add("D3", "Device:D", "ESD0P2RF", "Diode_SMD:D_SOD-882", 20400, 8800)
+    add("U6", "Reference_Voltage:LM4040DCK-3", "LM4040-3.0", "Kingfisher:SOT-353_SC-70-5_JLC", 15200, 3200)
     add("BT2", "Device:Battery_Cell", "ML414H", "Kingfisher:ML414H", 12000, 3200)
     add("BT1", "Device:Battery_Cell", "CR2032", "Battery:BatteryHolder_Keystone_3002_1x2032", 8000, 3200)
     add("J2", "Connector:Conn_Coaxial", "U.FL", "Connector_Coaxial:U.FL_Hirose_U.FL-R-SMT-1_Vertical", 21600, 7600)
@@ -381,6 +425,7 @@ def main() -> None:
             1600 + (n - 1) * 1000,
             800,
         )
+    add("TP13", "Connector:TestPoint", "SAFEBOOT", "TestPoint:TestPoint_Pad_D1.5mm", 14000, 800)
 
     # Datasheet pin locks. A renamed symbol pin fails the build instead of wiring the wrong pad.
     require(parts["U1"], "1", "AP_AD0")
@@ -416,6 +461,10 @@ def main() -> None:
     require(parts["U5"], "7", "VDD")
     require(parts["D1"], "1", "K")
     require(parts["D1"], "2", "A")
+    require(parts["D3"], "1", "K")
+    require(parts["D3"], "2", "A")
+    require(parts["U6"], "1", "A")
+    require(parts["U6"], "3", "K")
     require(parts["D2"], "1", "K")
     require(parts["D2"], "2", "A")
     require(parts["BT1"], "1", "+")
@@ -453,18 +502,20 @@ def main() -> None:
         ("C1", "2", "GND"),
         ("C2", "1", "+3V3"),
         ("C2", "2", "GND"),
-        ("U2", "1", "+3V3"),
+        ("U2", "1", "BMP_VDD"),
         ("U2", "2", "SCL"),
         ("U2", "3", "GND"),
         ("U2", "4", "SDA"),
-        ("U2", "5", "+3V3"),
-        ("U2", "6", "+3V3"),
+        ("U2", "5", "BMP_VDD"),
+        ("U2", "6", "BMP_VDD"),
         ("U2", "8", "GND"),
         ("U2", "9", "GND"),
-        ("U2", "10", "+3V3"),
-        ("C3", "1", "+3V3"),
+        ("U2", "10", "BMP_VDD"),
+        ("R9", "1", "+3V3"),
+        ("R9", "2", "BMP_VDD"),
+        ("C3", "1", "BMP_VDD"),
         ("C3", "2", "GND"),
-        ("C4", "1", "+3V3"),
+        ("C4", "1", "BMP_VDD"),
         ("C4", "2", "GND"),
         ("U5", "3", "SCL"),
         ("U5", "4", "SDA"),
@@ -483,9 +534,11 @@ def main() -> None:
         ("C6", "2", "GND"),
         ("C7", "1", "+3V3_GPS"),
         ("C7", "2", "GND"),
+        ("U4", "1", "SAFEBOOT"),
         ("U4", "2", "D_SEL"),
         ("U4", "3", "GPS_PPS"),
-        ("U4", "7", "+3V3_GPS"),
+        ("U4", "7", "GND"),
+        ("TP13", "1", "SAFEBOOT"),
         ("U4", "9", "VCC_RF"),
         ("U4", "10", "GND"),
         ("U4", "11", "RF"),
@@ -506,22 +559,28 @@ def main() -> None:
         ("R2", "2", "UART_RX"),
         ("R3", "1", "+3V3_GPS"),
         ("R3", "2", "D_SEL"),
-        ("D1", "2", "+3V3_GPS"),
-        ("D1", "1", "CHG"),
-        ("R4", "1", "CHG"),
-        ("R4", "2", "V_BCKP"),
+        ("R10", "1", "+3V3_GPS"),
+        ("R10", "2", "VCHG"),
+        ("U6", "3", "VCHG"),
+        ("U6", "1", "GND"),
+        ("R4", "1", "VCHG"),
+        ("R4", "2", "CHG"),
+        ("D1", "2", "CHG"),
+        ("D1", "1", "V_BCKP"),
         ("BT2", "1", "V_BCKP"),
         ("BT2", "2", "GND"),
         ("BT1", "1", "VBAT"),
         ("BT1", "2", "GND"),
         ("R5", "1", "VCC_RF"),
         ("R5", "2", "BIAS"),
-        ("FB1", "1", "RF"),
-        ("FB1", "2", "BIAS"),
+        ("L1", "1", "RF"),
+        ("L1", "2", "BIAS"),
         ("C10", "1", "BIAS"),
         ("C10", "2", "GND"),
         ("J2", "1", "RF"),
         ("J2", "2", "GND"),
+        ("D3", "1", "RF"),
+        ("D3", "2", "GND"),
         ("R6", "1", "+3V3_GPS"),
         ("R6", "2", "LED_A"),
         ("D2", "2", "LED_A"),
@@ -570,7 +629,7 @@ def main() -> None:
     for ref, part in parts.items():
         for num, pin in part.pins.items():
             x, y, _ang = part.tip(num)
-            if (ref, x, y) in claimed:
+            if pin.hidden or (ref, x, y) in claimed:
                 continue
             drawings.append(no_connect(x, y))
 
@@ -589,9 +648,9 @@ def main() -> None:
     notes = [
         text("Kingfisher Sensor HAT rev 0.3", 1000, 17200, "2.54"),
         text("ICM-45686 0x68, BMP581 0x47, RV-3028-C7 0x52, NEO-M9N UART+PPS. No UPS.", 1000, 16800),
-        text("GPS backup is ML414H directly on V_BCKP, charged from +3V3_GPS through PMEG4005EJ and 1k. CR2032 feeds only RV-3028 VBACKUP.", 1000, 16500),
-        text("J3 X1200 harness, pin 1 to 5: +3V3, GND, SDA, SCL, GPIO6. R7 and R8 I2C pull-ups are DNP.", 1000, 16200),
-        text("Antenna bias: VCC_RF, 33 ohm, 47pF to GND, 120R ferrite onto RF_IN. Ferrite is the bias choke, not in series with the RF path and not on VCC.", 1000, 15900),
+        text("GPS backup: ML414H direct on V_BCKP. Charge is LM4040-3.0, 34k, PMEG4005EJ. CR2032 feeds only RV-3028 VBACKUP.", 1000, 16500),
+        text("J3 X1200 harness, pin 1 to 5: +3V3, GND, SDA, SCL, GPIO6. R7 and R8 I2C pull-ups are DNP. V_USB is grounded.", 1000, 16200),
+        text("Antenna bias: VCC_RF, 33 ohm, 100nF to GND, LQG15HS27NJ02 onto RF_IN. ESD0P2RF at the U.FL. Choke is not in series with RF.", 1000, 15900),
     ]
     body = [instance(part) for part in parts.values()]
     body.extend(drawings)
