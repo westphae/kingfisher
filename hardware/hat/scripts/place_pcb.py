@@ -2,7 +2,8 @@
 """Place rev 0.3 footprints on the HAT outline. Does not route copper.
 
 J1 stays on the bottom, at the template coordinate that mates with the
-extended Pi header. Everything else is on top. RF is intentionally unrouted.
+extended Pi header. Everything else is on top. This script deletes tracks;
+route_pcb.py puts the copper back.
 """
 from __future__ import annotations
 
@@ -34,12 +35,15 @@ PLACE = {
     "U2": (112.0, 65.5, 0),
     "C3": (116.5, 64.8, 0),
     "C4": (116.5, 66.6, 0),
+    "R9": (109.0, 70.0, 0),
     "R7": (119.6, 64.6, 90),
     "R8": (119.6, 67.0, 90),
     "BT2": (125.0, 66.0, 0),
     "C9": (130.2, 64.2, 90),
     "R4": (130.2, 68.0, 90),
     "D1": (134.5, 64.2, 0),
+    "U6": (118.5, 70.5, 0),
+    "R10": (122.6, 70.5, 90),
     "C8": (136.2, 61.8, 0),
     "D2": (133.8, 67.8, 0),
     "R6": (137.0, 67.8, 90),
@@ -47,9 +51,10 @@ PLACE = {
     "R2": (139.2, 67.6, 90),
     "U4": (148.5, 61.5, 180),
     # U.FL sits far enough right of the module for a short 50 ohm run, with the
-    # bias ferrite's RF pad beside that run rather than several millimetres off it.
+    # bias choke's RF pad beside that run rather than several millimetres off it.
     "J2": (161.2, 55.6, 0),
-    "FB1": (157.7, 57.05, -90),
+    "L1": (157.7, 57.05, -90),
+    "D3": (158.2, 53.0, 0),
     "R5": (157.4, 59.7, 0),
     "C10": (160.0, 60.5, 0),
     "R3": (158.2, 66.5, 0),
@@ -67,6 +72,7 @@ PLACE = {
     "TP10": (149.2, 81.2, 0),
     "TP11": (149.2, 84.4, 0),
     "TP12": (149.2, 87.6, 0),
+    "TP13": (154.8, 72.4, 0),
 }
 
 # Board features the courtyards must stay clear of. Coordinates are mm.
@@ -175,7 +181,8 @@ def main() -> int:
         fp.SetValue(value)
         if not ref.startswith("TP"):
             fp.Value().SetVisible(False)
-        if ref[0] in "CRT" or ref.startswith("FB"):
+        # Small parts: the silk ref lands on a pad. Fab layer still names them.
+        if ref[0] in "CRT" or ref.startswith("FB") or ref in {"U6", "BT2"}:
             fp.Reference().SetLayer(pcbnew.F_Fab)
         fp.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(x), pcbnew.FromMM(y)))
         fp.SetOrientationDegrees(rot)

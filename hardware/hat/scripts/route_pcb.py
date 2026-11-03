@@ -2,7 +2,7 @@
 """Route the rev 0.3 HAT and write the JLCPCB 4-layer stackup.
 
 The RF net is a straight microstrip on top over a solid In1 ground plane,
-with a short bias stub up to the ferrite. Its width is the Hammerstad-Jensen
+with short stubs to the bias choke and the ESD diode. Its width is the Hammerstad-Jensen
 50 ohm result for the dielectric JLCPCB specifies for an outer trace on
 JLC04161H-7628: 7.1 mil, Er 4.4, 1 oz. The laminated prepreg is still the
 0.2104 mm sheet in the stackup; 7.1 mil is the pressed height they tell you
@@ -558,23 +558,31 @@ def main() -> int:
     # 50 ohm run. Pad centers, so the track ends inside the lands.
     u4 = next(f for f in board.GetFootprints() if f.GetReference() == "U4")
     j2 = next(f for f in board.GetFootprints() if f.GetReference() == "J2")
-    fb1 = next(f for f in board.GetFootprints() if f.GetReference() == "FB1")
+    l1 = next(f for f in board.GetFootprints() if f.GetReference() == "L1")
+    d3 = next(f for f in board.GetFootprints() if f.GetReference() == "D3")
     rf_net = board.FindNet("RF")
     p_mod = u4.FindPadByNumber("11").GetPosition()
     p_ant = j2.FindPadByNumber("1").GetPosition()
-    p_fb = fb1.FindPadByNumber("1").GetPosition()
+    p_l = l1.FindPadByNumber("1").GetPosition()
+    p_esd = d3.FindPadByNumber("1").GetPosition()
     x_mod, y_rf = pcbnew.ToMM(p_mod.x), pcbnew.ToMM(p_mod.y)
     x_ant = pcbnew.ToMM(p_ant.x)
-    x_fb, y_fb = pcbnew.ToMM(p_fb.x), pcbnew.ToMM(p_fb.y)
+    x_l, y_l = pcbnew.ToMM(p_l.x), pcbnew.ToMM(p_l.y)
+    x_esd, y_esd = pcbnew.ToMM(p_esd.x), pcbnew.ToMM(p_esd.y)
     add_track(board, rf_net, pcbnew.F_Cu, x_mod, y_rf, x_ant, y_rf, RF_W_MM)
-    add_track(board, rf_net, pcbnew.F_Cu, x_fb, y_rf, x_fb, y_fb, RF_W_MM)
+    add_track(board, rf_net, pcbnew.F_Cu, x_l, y_rf, x_l, y_l, RF_W_MM)
+    add_track(board, rf_net, pcbnew.F_Cu, x_esd, y_rf, x_esd, y_esd, RF_W_MM)
     # Keep other nets and their vias off the microstrip, on both copper layers,
     # so a barrel cannot slot the ground plane under the trace.
     for layer in (0, 1):
         block_segment(grid, layer, x_mod, y_rf, x_ant, y_rf, 1.0)
-        block_segment(grid, layer, x_fb, y_rf, x_fb, y_fb, 0.8)
+        block_segment(grid, layer, x_l, y_rf, x_l, y_l, 0.8)
+        block_segment(grid, layer, x_esd, y_rf, x_esd, y_esd, 0.8)
     via_ok = build_via_ok(all_pads)
-    print(f"RF {x_mod:.2f},{y_rf:.2f} -> {x_ant:.2f},{y_rf:.2f}  stub to {x_fb:.2f},{y_fb:.2f}")
+    print(
+        f"RF {x_mod:.2f},{y_rf:.2f} -> {x_ant:.2f},{y_rf:.2f}"
+        f"  choke {x_l:.2f},{y_l:.2f}  esd {x_esd:.2f},{y_esd:.2f}"
+    )
 
     failed = []
     fanout_end: dict[tuple[str, str], tuple[float, float, float, float]] = {}
@@ -727,7 +735,10 @@ def main() -> int:
         make_zone(board, pour, layer, gnd)
     # Pour keepout tight around the microstrip, top only. In1 under it stays solid.
     make_zone(board, rect_poly(x_mod - 0.2, y_rf - 0.85, x_ant + 0.2, y_rf + 0.85), pcbnew.F_Cu, gnd, keepout=True)
-    make_zone(board, rect_poly(x_fb - 0.7, y_rf, x_fb + 0.7, y_fb + 0.3), pcbnew.F_Cu, gnd, keepout=True)
+    y_lo, y_hi = sorted((y_rf, y_l))
+    make_zone(board, rect_poly(x_l - 0.7, y_lo - 0.3, x_l + 0.7, y_hi + 0.3), pcbnew.F_Cu, gnd, keepout=True)
+    y_lo, y_hi = sorted((y_rf, y_esd))
+    make_zone(board, rect_poly(x_esd - 0.7, y_lo - 0.3, x_esd + 0.7, y_hi + 0.3), pcbnew.F_Cu, gnd, keepout=True)
 
     print("filling zones")
     filler = pcbnew.ZONE_FILLER(board)
@@ -754,8 +765,8 @@ def main() -> int:
     print("board zone blocks", zones)
     print("failed", failed)
     print("kept objects", len(removed))
-    if zones != 7:
-        print("expected 4 ground pours, 2 RF keepouts, and the PoE keepout")
+    if zones != 8:
+        print("expected 4 ground pours, 3 RF keepouts, and the PoE keepout")
         return 1
     return 1 if failed else 0
 
@@ -768,7 +779,8 @@ def stitch_orphan_islands(board, gnd):
     fragment as the ground zone unconnected to itself.
     """
     added = []
-    vias = [t for t in board.GetTracks() if t.Type() == pcbnew.PCB_VIA_T and t.GetNetname() == "GND"]
+    tracks = list(board.GetTracks())
+    vias = [t for t in tracks if t.Type() == pcbnew.PCB_VIA_T and t.GetNetname() == "GND"]
     pth = []
     pads = []
     for fp in board.GetFootprints():
@@ -797,12 +809,73 @@ def stitch_orphan_islands(board, gnd):
                 continue
             site = _island_via_site(sub, pads, vias, keepouts)
             if site is None:
+                site = _pad_via_site(sub, pads, vias, keepouts, tracks)
+            if site is None:
                 print("no stitch site on layer", layer)
                 continue
             via = add_via(board, gnd, site[0], site[1])
             vias.append(via)
             added.append(via)
     return added
+
+
+def _pad_via_site(poly, pads, vias, keepouts, tracks):
+    """Via on the ground pad when the pour island is narrower than the via.
+
+    The annular ring may leave the island. It still has to clear other pads,
+    tracks, and holes.
+    """
+    for pad in pads:
+        if pad.GetNetname() != "GND" or pad.GetAttribute() == pcbnew.PAD_ATTRIB_PTH:
+            continue
+        if not poly.Contains(pad.GetPosition()):
+            continue
+        box = pad.GetBoundingBox()
+        cx = pcbnew.ToMM(pad.GetPosition().x)
+        cy = pcbnew.ToMM(pad.GetPosition().y)
+        # The pad center can sit 0.01 mm inside a neighbor. Slide within the land.
+        for dy in (0.0, -0.15, 0.15, -0.25, 0.25):
+            for dx in (0.0, -0.1, 0.1, -0.15, 0.15):
+                x, y = cx + dx, cy + dy
+                pt = pcbnew.VECTOR2I(pcbnew.FromMM(x), pcbnew.FromMM(y))
+                if not box.Contains(pt):
+                    continue
+                if not _point_clears(pads, pad, x, y, VIA_D / 2 + CLEARANCE):
+                    continue
+                if any(math.hypot(pcbnew.ToMM(v.GetPosition().x) - x, pcbnew.ToMM(v.GetPosition().y) - y) < 0.65 for v in vias):
+                    continue
+                if any(zone.Outline().Contains(pt) for zone in keepouts):
+                    continue
+                if not _tracks_clear(tracks, x, y):
+                    continue
+                return (x, y)
+    return None
+
+
+def _tracks_clear(tracks, x: float, y: float) -> bool:
+    for track in tracks:
+        if track.GetNetname() == "GND":
+            continue
+        if track.Type() == pcbnew.PCB_VIA_T:
+            width = VIA_D
+            dist = math.hypot(pcbnew.ToMM(track.GetPosition().x) - x, pcbnew.ToMM(track.GetPosition().y) - y)
+        else:
+            width = pcbnew.ToMM(track.GetWidth())
+            x1, y1 = pcbnew.ToMM(track.GetStart().x), pcbnew.ToMM(track.GetStart().y)
+            x2, y2 = pcbnew.ToMM(track.GetEnd().x), pcbnew.ToMM(track.GetEnd().y)
+            dist = _seg_dist(x, y, x1, y1, x2, y2)
+        need = VIA_D / 2 + width / 2 + CLEARANCE
+        if dist < need:
+            return False
+    return True
+
+
+def _seg_dist(x, y, x1, y1, x2, y2) -> float:
+    dx, dy = x2 - x1, y2 - y1
+    if dx == 0 and dy == 0:
+        return math.hypot(x - x1, y - y1)
+    t = max(0.0, min(1.0, ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy)))
+    return math.hypot(x - (x1 + t * dx), y - (y1 + t * dy))
 
 
 def _island_via_site(poly, pads, vias, keepouts):
