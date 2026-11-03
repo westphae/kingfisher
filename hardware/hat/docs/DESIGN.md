@@ -40,41 +40,63 @@ Before ordering, confirm three mechanical things this repo cannot check:
 
 ## Circuits
 
-### GPS, copied from the SparkFun NEO-M9N SMA board
+### GPS
+
+The module is the same NEO-M9N as the flying SparkFun SMA board. The parts
+that the u-blox datasheet (UBX-19014285) and integration manual
+(UBX-19014286) specify are taken from those manuals.
 
 - AP2112K-3.3 from Pi 5 V. EN is tied to 5 V. 1 µF on the input, 1 µF and
   100 nF on the output. That rail is `+3V3_GPS`.
-- NEO-M9N `VCC` and `VDD_USB` are both on `+3V3_GPS`.
-- `D_SEL` pulled to `+3V3_GPS` with 10 kΩ, so the module stays on UART.
+- NEO-M9N `VCC` is on `+3V3_GPS`. USB is unused, so `V_USB` (pin 7) is tied
+  to ground and `USB_DM` / `USB_DP` stay open.
+- `D_SEL` pulled to `+3V3_GPS` with 10 kΩ, so the module stays on UART+I²C.
+  SPI is not wired.
 - 33 Ω series on TX and RX. Pi TX (header pin 8) goes to NEO RX (pin 21).
   NEO TX (pin 20) goes to Pi RX (header pin 10).
 - PPS is NEO TIMEPULSE to GPIO18.
 - GPS I²C (module address 0x42) is left open. It must not join the Pi bus.
+- `SAFEBOOT_N` goes only to TP13. Leave it open in normal use; pull it low
+  to enter safeboot.
+- `LNA_EN`, `EXTINT`, `RESET_N`, and the reserved pins stay open. `LNA_EN`
+  open keeps the antenna bias on whenever `VCC` is on.
 - Backup is a soldered ML414H directly on `V_BCKP` (no diode in the backup
-  path). Charge is `+3V3_GPS` → PMEG4005EJ anode, cathode → 1 kΩ → `V_BCKP`.
-  The diode keeps the cell from feeding the 3.3 V rail.
-- Antenna bias matches SparkFun: `VCC_RF` → 33 Ω → bias node, 120 Ω ferrite
-  from that node onto `RF_IN`, 47 pF from the bias node to ground, `RF_IN`
-  also tied to the U.FL center. The ferrite is the bias choke. It is not in
-  series with the RF path, and it is not on `VCC`.
+  path), with 1 µF on that pin. Charge is `+3V3_GPS` → 2.2 kΩ → LM4040-3.0
+  cathode (`VCHG`) → 34 kΩ → PMEG4005EJ anode, cathode → `V_BCKP`. The
+  reference holds the float at 3.00 V. The 34 kΩ keeps a cell at 2.0 V under
+  30 µA even with the diode drop at zero. The diode keeps the cell from
+  discharging into the reference when the rail is off.
+- Antenna bias is the u-blox network: `VCC_RF` → 33 Ω → bias node, 100 nF
+  from that node to ground, Murata LQG15HS27NJ02D (27 nH, 0402) from the
+  bias node onto `RF_IN`. `RF_IN` is also tied to the U.FL center. The
+  inductor is the bias choke. It is not in series with the RF path, and it
+  is not on `VCC`. An Infineon ESD0P2RF-02LS (0.2 pF, SOD-882) sits from the
+  RF node to ground at the connector.
 
-The ML414H datasheet charges the cell at 3.1 V and 30 µA max. SparkFun's 1 kΩ
-can push about 1 mA into a depleted cell. Rev 0.3 copies the flying SparkFun
-board on purpose. Do not use that charge path on the CR2032.
+The ML414H charges at 2.8–3.1 V, characterized at 3.1 V and 30 µA max. A
+resistor straight from 3.3 V does not clamp the float, so the shunt is the
+clamp. Do not use this charge path on the CR2032.
 
-The bias-T is always connected, as on the SparkFun SMA board. A passive
-antenna with a DC short would load `VCC_RF`. Confirm the aircraft antenna is
-active (or at least DC-open) before relying on this.
+The 33 Ω is the `VCC_RF` short-circuit limit (about 100 mA), not the 10 Ω
+row in the bias-T table. The LQG15HS 27 nH part is the series u-blox names;
+its self-resonant frequency is 1.7 GHz, so the impedance at L1 is above the
+ideal 27 nH reactance.
 
-At the NEO's backup current, about 15 µA, the 1.0 mAh ML414H is a few days of
-hot-start memory. That is the same job the SparkFun cell does. It is not the
-multi-year clock battery.
+The bias-T is always connected. A passive antenna with a DC short would load
+`VCC_RF`. Confirm the aircraft antenna is active (or at least DC-open)
+before relying on this.
+
+`I_BCKP` is 45 µA typical at `V_BCKP` = 3 V with `VCC` off (UBX-19014285
+Table 11). The 1.0 mAh ML414H is about a day of hot-start memory. It is not
+the multi-year clock battery.
 
 ### IMU
 
 ICM-45686 on Pi 3.3 V, I²C 0x68. `AP_AD0` is ground, `AP_CS` is 3.3 V, INT1
-is GPIO17 (active-low, `int_trigger=8`). 100 nF on VDD and on VDDIO. INT2 and
-the reserved pins are open.
+is GPIO17 (active-low, `int_trigger=8`). 100 nF on VDD and a separate 100 nF
+on VDDIO. INT2 and the reserved pins are open. INT2 can be an FSYNC input,
+but this board does not spend a wire on it; PPS already disciplines the
+clock that stamps samples.
 
 The land pattern is `Kingfisher:ICM-45686`. Pad centers are the IPC LGA-14
 centers (±1.1625 mm). Pin numbers are the TDK top view in DS-000577, not the
@@ -90,9 +112,13 @@ ribbon breakout. Measure it from this silk.
 
 ### Barometer
 
-BMP581 on Pi 3.3 V, I²C 0x47 (`CSB` and `SDO` tied to 3.3 V). This is an extra
-cabin baro, not a copy of a sensor that is installed today. INT is open. Do
-not tie it to ground; the pin can be driven. No vias under the package.
+BMP581 on a local `BMP_VDD` rail, I²C 0x47. `VDD`, `VDDIO`, `CSB`, and `SDO`
+all sit on that rail, so chip-select is high at power-up and the address is
+0x47. The on-chip CSB pull-up is off at reset, so the external tie is
+required. Pi 3.3 V reaches `BMP_VDD` through 10 Ω (R9) because a supply edge
+faster than 10 µs needs that series resistor. 100 nF on `BMP_VDD` at each
+end of the package (C3, C4). INT is open. Do not tie it to ground; the pin
+can be driven. No vias under the package.
 
 ### RTC battery
 
@@ -158,6 +184,7 @@ LED on `+3V3_GPS` through 1 kΩ.
 TP1–TP8 are the row under the GPIO header, left to right: `+3V3`, `+5V`,
 `+3V3_GPS`, `V_BCKP`, `VBAT`, `SDA`, `SCL`, `UART_TX`. TP9–TP12 are the column
 just left of J3, top to bottom: `UART_RX`, `GPS_PPS`, `IMU_INT`, `GND`.
+TP13 is `SAFEBOOT_N` on the NEO, next to the module. It is not strapped.
 
 ## Fabrication
 
@@ -182,10 +209,10 @@ pulls that down about 1–2 Ω; 50.2 Ω is the bare number. A normal order
 without paid impedance control still wants this width.
 
 The trace runs on F.Cu from the NEO `RF_IN` pad at (154.50, 55.60) to the
-U.FL center at (160.15, 55.60). A short stub at x=157.70 rises to the ferrite
-bias choke at y=56.56. Top ground is kept off that copper. In1 under the
-trace stays solid. Stitch vias sit outside the keepout, about 1.35 mm off
-the trace.
+U.FL center at (160.15, 55.60). A stub at x=157.70 rises to the 27 nH choke
+at (157.70, 56.56). A second stub goes to the ESD diode at (157.85, 53.00).
+Top ground is kept off that copper. In1 under the trace stays solid. Stitch
+vias sit outside the keepout, about 1.35 mm off the trace.
 
 Ground is poured on all four copper layers. Copper stops 0.3 mm inside the
 outline, including the notch and the slot. Pads connect solid, with no
@@ -215,7 +242,7 @@ kicad-cli pcb export drill --output hardware/hat/fab \
 ## What was checked
 
 `scripts/check_netlist.py` compares the exported netlist to the datasheet pin
-numbers. The rev 0.3 sheet passes: 64 nets. That check is the contract.
+numbers. The rev 0.3 sheet passes: 69 nets. That check is the contract.
 `kicad-cli sch erc` segfaulted on the old sheet and is not the proof.
 
 On the board, J1 pad 1 is (108.37, 48.77) and pad 40 is (156.63, 46.23), on

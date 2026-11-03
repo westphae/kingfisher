@@ -13,21 +13,24 @@ lid, and that the GNSS antenna is active before ordering.
 | U3 | AP2112K-3.3 | 5 V → 3.3 V for the GPS only |
 | U4 | NEO-M9N | GNSS, UART0 + PPS on GPIO18 |
 | U5 | RV-3028-C7 | I²C RTC at `0x52` |
+| U6 | LM4040-3.0 | 3.00 V clamp for the ML414H charge |
 | BT1 | CR2032, Keystone 3002 | Replaceable cell for the RTC `VBACKUP` only |
 | BT2 | ML414H | Soldered rechargeable cell on GPS `V_BCKP` |
-| D1 | PMEG4005EJ | GPS backup charge diode |
+| D1 | PMEG4005EJ | Blocks the ML414H from the reference |
 | D2 | Green LED | `+3V3_GPS` through 1 kΩ |
+| D3 | ESD0P2RF | 0.2 pF ESD diode, RF to ground at the U.FL |
+| L1 | LQG15HS27NJ02D | 27 nH antenna-bias choke |
 | J1 | 2×20 socket, bottom | Mates the extended Pi header. Do not move it |
 | J2 | U.FL | Antenna. 0.32 mm microstrip plus the bias-T stub |
 | J3 | 1×5 header | X1200 harness: +3V3, GND, SDA, SCL, GPIO6 |
 
 Outline is the official Pi HAT (65 × 56.5 mm, M2.5 on 58 × 49 mm).
 
-The GPS circuit follows the SparkFun NEO-M9N SMA board: LDO with EN on 5 V,
-UART pull-up on `D_SEL`, 33 Ω on TX/RX, ML414H directly on `V_BCKP`, and the
-ferrite bias-T into the antenna. The CR2032 does not back up the GPS and has
-no charge path. There is no UPS on this board. See
-[docs/DESIGN.md](docs/DESIGN.md).
+The GPS circuit follows UBX-19014285 and UBX-19014286: `V_USB` grounded,
+UART pull-up on `D_SEL`, 33 Ω on TX/RX, ML414H directly on `V_BCKP` charged
+through an LM4040-3.0 and 34 kΩ, and a 27 nH / 100 nF bias-T into the
+antenna. The CR2032 does not back up the GPS and has no charge path. There
+is no UPS on this board. See [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Open in KiCad
 
@@ -54,7 +57,7 @@ python3 hardware/hat/scripts/place_pcb.py
 python3 hardware/hat/scripts/route_pcb.py
 ```
 
-`check_netlist.py` is the schematic check. It passed for rev 0.3 (64 nets).
+`check_netlist.py` is the schematic check. It passed for rev 0.3 (69 nets).
 `place_pcb.py` keeps the template socket and mounting holes and deletes
 tracks. `route_pcb.py` restores the route and the 4-layer stackup.
 
