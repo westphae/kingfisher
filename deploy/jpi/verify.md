@@ -38,6 +38,12 @@ and the hourly run still merges them.
    copy of this script (the one in `/usr/local/bin`) still does. A fit is
    written only when the existing quality gates pass (path, fix count,
    median error, distinct peak). A refused fit keeps any previous merge.
+   It opens one flight DB at a time. GPS and OAT are read at one sample
+   per second, and a high-rate IMU temperature column is not loaded. A
+   session the recorder still has open (newest file with a fresh `-wal`,
+   or any non-empty `-wal` written in the last two minutes) is skipped.
+   `--since YYYY-MM-DD` and `--limit N` bound a manual pass; the timer
+   does not pass them.
 3. `analyze_flights.py engine --all` refreshes `analysis-cache/engine/`.
 
 Every attempt is a row in `~/kingfisher/engine/ingest.json`: file hash, JPI
@@ -57,6 +63,21 @@ uv run --project analysis python scripts/analyze_flights.py engine --all
 
 `jpi` without `-auto` is still the one-flight command. Dry-run is its
 default. `jpi-auto` applies when the gates pass; `--dry-run` only records.
+
+## Python environment
+
+`analysis` and `enclosures` share one uv workspace and one `.venv`.
+CadQuery (the enclosure package) depends on vtk and trame. From the repo
+root:
+
+```bash
+uv sync --all-packages
+```
+
+`uv sync --project analysis` makes that shared venv match the analysis
+package only. uv then uninstalls the enclosure packages, including vtk
+and trame. Do not use it on the Pi. `uv run --project analysis` is the
+right way to run a command; it does not prune the other member.
 
 ## NAS key
 

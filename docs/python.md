@@ -16,7 +16,9 @@ workspace. From the repo root:
 # Install uv once (also in deploy/system-rebuild-playbook.md)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Sync workspace (analysis + enclosures) into ./.venv
+# Sync workspace (analysis + enclosures) into ./.venv.
+# Do not `uv sync --project analysis`: that prunes the shared venv down
+# to the analysis package and uninstalls CadQuery's vtk and trame.
 uv sync --all-packages
 
 # Analysis CLI
