@@ -188,9 +188,21 @@ Overlapping times are not written. A recording whose file hash is unchanged
 is not refitted. A refused re-fit keeps the previous rows. The ledger is
 `~/kingfisher/engine/ingest.json`, one row per recording.
 
+One flight database is open at a time. The fit reads GPS, pressure
+altitude, and pod `bmp581` temperature at one sample per second. It does
+not load an IMU `temp_c` column, and it does not keep every parsed
+download in memory for the whole run. A session the recorder still has
+open is skipped: a non-empty `-wal` written in the last two minutes, or
+the newest `*.db` when its `-wal`/`-shm` was written in that window. A
+finished flight is merged once those sidecars go quiet. `--since
+YYYY-MM-DD` skips older sessions (the timestamp in the filename, or the
+file mtime when the name has none). `--limit N` opens at most N databases
+after those filters.
+
 ```bash
 uv run --project analysis python scripts/analyze_flights.py jpi-auto
 uv run --project analysis python scripts/analyze_flights.py jpi-auto --dry-run
+uv run --project analysis python scripts/analyze_flights.py jpi-auto --since 2026-09-01 --limit 20
 ```
 
 The hourly timer that pulls `U*.JPI` from the NAS and then runs this is

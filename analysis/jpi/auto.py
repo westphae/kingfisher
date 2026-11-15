@@ -12,19 +12,26 @@ that lives on the NAS.
 from __future__ import annotations
 
 import argparse
+import gc
 import hashlib
 import json
+import re
 import sqlite3
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from analysis.jpi.align import DEFAULT_WINDOW_S, AlignResult, _db_span, _jpi_track, align_flight, flight_unix
-from analysis.jpi.duplicates import flag_sessions
+from analysis.jpi.duplicates import fingerprint_conn, flags_from_fingerprints
 from analysis.jpi.parse import Download, Flight, ParseError, parse_file
 from analysis.jpi.store import Capture, read_kept_rows, write_captures
 
 _SUFFIXES = {".jpi", ".dat", ".csv", ".txt"}
+# A session the recorder still has open. The WAL sidecar is rewritten on
+# each flush; two minutes is longer than a flush and shorter than a flight.
+_LIVE_S = 120.0
+_STAMP = re.compile(r"^(\d{8}T\d{6}Z)")
 
 
 def run_auto(
@@ -34,27 +41,54 @@ def run_auto(
     ledger_path: Path,
     apply: bool = True,
     window_s: float = DEFAULT_WINDOW_S,
+    since: float | None = None,
+    limit: int | None = None,
 ) -> dict:
     flights_dir = Path(flights_dir)
     jpi_dir = Path(jpi_dir)
     ledger_path = Path(ledger_path)
     ledger = _load_ledger(ledger_path)
     now = _now()
-    downloads = _load_downloads(jpi_dir)
+    # Flight spans only. The sample arrays are dropped before the DB loop
+    # and parsed again for the one download a DB actually overlaps.
+    files, spans = _catalog_downloads(jpi_dir)
     ledger["files"] = [
-        {
-            "name": item["name"],
-            "sha256": item["sha256"],
-            "flights": 0 if item["download"] is None else len(item["download"].flights),
-            "error": item["error"],
-        }
-        for item in downloads
+        {"name": item["name"], "sha256": item["sha256"], "flights": item["flights"], "error": item["error"]}
+        for item in files
     ]
-    dbs = sorted(flights_dir.glob("*.db")) if flights_dir.is_dir() else []
-    print(f"jpi-auto: {len(downloads)} JPI file(s), {len(dbs)} flight DB(s)")
+    dbs = sorted(p for p in flights_dir.glob("*.db") if p.is_file()) if flights_dir.is_dir() else []
+    live = _live_names(dbs)
+    selected = []
+    skipped_live = []
+    n_since = 0
     for db in dbs:
+        if db.name in live:
+            skipped_live.append(db)
+            continue
+        if since is not None and _session_unix(db) < since:
+            n_since += 1
+            continue
+        selected.append(db)
+    if limit is not None:
+        selected = selected[: max(0, limit)]
+    extra = ""
+    if skipped_live:
+        extra += f", {len(skipped_live)} live skipped"
+    if n_since:
+        extra += f", {n_since} before --since"
+    if limit is not None:
+        extra += f", limit {limit}"
+    print(f"jpi-auto: {len(files)} JPI file(s), {len(selected)} flight DB(s){extra}")
+    for db in skipped_live:
+        _record(
+            ledger,
+            _attempt(now, db.name, status="skipped", reason="recorder has this session open"),
+        )
+        print(f"  {db.name}: skipped, recorder has this session open")
+    fingerprints = []
+    for db in selected:
         try:
-            _one_db(db, downloads, ledger, apply=apply, window_s=window_s, now=now)
+            fp = _one_db(db, files, spans, ledger, apply=apply, window_s=window_s, now=now)
         except sqlite3.OperationalError as exc:
             _record(
                 ledger,
@@ -66,10 +100,16 @@ def run_auto(
                 ),
             )
             print(f"  {db.name}: error {exc}")
+            fp = None
         except OSError as exc:
             _record(ledger, _attempt(now, db.name, status="error", reason=str(exc)))
             print(f"  {db.name}: error {exc}")
-    flags = flag_sessions(flights_dir) if flights_dir.is_dir() else []
+            fp = None
+        if fp is not None:
+            fingerprints.append(fp)
+        _checkpoint(ledger_path, ledger, now, jpi_dir, flights_dir)
+        _release_memory()
+    flags = flags_from_fingerprints(fingerprints)
     ledger["flags"] = flags
     ledger["updated"] = now
     ledger["jpi_dir"] = str(jpi_dir)
@@ -82,15 +122,37 @@ def run_auto(
     return ledger
 
 
-def _one_db(db: Path, downloads: list[dict], ledger: dict, *, apply: bool, window_s: float, now: str) -> None:
-    conn = sqlite3.connect(db, timeout=5.0)
+def _one_db(
+    db: Path,
+    files: list[dict],
+    spans: list[dict],
+    ledger: dict,
+    *,
+    apply: bool,
+    window_s: float,
+    now: str,
+) -> dict | None:
+    fp_holder: list = [None]
+    box = [_connect(db, write=False)]
     try:
-        conn.execute("PRAGMA busy_timeout=5000")
+        _one_db_work(
+            box, fp_holder, db, files, spans, ledger, apply=apply, window_s=window_s, now=now
+        )
+    finally:
+        _release_memory()
+    return fp_holder[0]
+
+
+def _one_db_work(box, fp_holder, db, files, spans, ledger, *, apply, window_s, now) -> None:
+    conn = box[0]
+    try:
         span = _db_span(conn)
         if span is None:
             _record(ledger, _attempt(now, db.name, status="skipped", reason="no gps or press_alt span"))
             print(f"  {db.name}: no time span")
             return
+        # Parse only the downloads whose flight clock overlaps this session.
+        downloads = _downloads_for_span(files, spans, span, window_s)
         stored = _stored_captures(conn)
         candidates = _candidates(downloads, span, window_s, only=None)
         if not candidates and not stored:
@@ -199,6 +261,11 @@ def _one_db(db: Path, downloads: list[dict], ledger: dict, *, apply: bool, windo
                 )
             print(f"  {db.name}: dry-run, {len(kept)} capture(s)")
             return
+        # Read-only until there is something to write, so a dry-run does not
+        # open hundreds of flight DBs in WAL mode.
+        conn.close()
+        conn = _connect(db, write=True)
+        box[0] = conn
         keep_rows = []
         if missing:
             keep_rows = read_kept_rows(conn, {cap["id"] for cap in missing if cap.get("id")})
@@ -236,6 +303,11 @@ def _one_db(db: Path, downloads: list[dict], ledger: dict, *, apply: bool, windo
             )
         print(f"  {db.name}: merged {len(captures)} capture(s), {n} rows")
     finally:
+        conn = box[0]
+        try:
+            fp_holder[0] = fingerprint_conn(conn, db.name)
+        except sqlite3.Error:
+            fp_holder[0] = None
         conn.close()
 
 
@@ -446,28 +518,162 @@ def _set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
     )
 
 
-def _load_downloads(jpi_dir: Path) -> list[dict]:
+def _catalog_downloads(jpi_dir: Path) -> tuple[list[dict], list[dict]]:
+    """File hashes and flight time spans. Sample arrays are not kept."""
     if not jpi_dir.is_dir():
-        return []
-    out = []
+        return [], []
+    files = []
+    spans = []
     for path in sorted(jpi_dir.iterdir()):
         if not path.is_file() or path.suffix.lower() not in _SUFFIXES:
             continue
-        # Whole-download names from the USB stick, plus any CSV dropped beside them.
         if path.suffix.lower() in {".csv", ".txt"} and not path.name.upper().startswith("U"):
             continue
         sha = _sha256(path)
+        download: Download | None = None
+        error = ""
         try:
-            download: Download | None = parse_file(path)
-            error = ""
+            download = parse_file(path)
         except ParseError as exc:
-            download = None
             error = str(exc)
         except OSError as exc:
-            download = None
             error = str(exc)
-        out.append({"path": path, "name": path.name, "sha256": sha, "download": download, "error": error})
+        n_flights = 0 if download is None else len(download.flights)
+        files.append(
+            {"path": path, "name": path.name, "sha256": sha, "error": error, "flights": n_flights}
+        )
+        if download is not None:
+            for flight in download.flights:
+                if not flight.samples or flight.start is None or flight.end is None:
+                    continue
+                spans.append(
+                    {
+                        "name": path.name,
+                        "t0": flight.start.replace(tzinfo=timezone.utc).timestamp(),
+                        "t1": flight.end.replace(tzinfo=timezone.utc).timestamp(),
+                    }
+                )
+        del download
+    _release_memory()
+    return files, spans
+
+
+def _downloads_for_span(files: list[dict], spans: list[dict], span: tuple[float, float], window_s: float) -> list[dict]:
+    db0, db1 = span
+    needed = {
+        item["name"]
+        for item in spans
+        if min(item["t1"] + window_s, db1) - max(item["t0"] - window_s, db0) > 0
+    }
+    out = []
+    for meta in files:
+        row = {
+            "path": meta["path"],
+            "name": meta["name"],
+            "sha256": meta["sha256"],
+            "error": meta["error"],
+            "download": None,
+        }
+        if meta["name"] in needed and not meta["error"]:
+            try:
+                row["download"] = parse_file(meta["path"])
+            except (ParseError, OSError) as exc:
+                row["error"] = str(exc)
+        out.append(row)
     return out
+
+
+def _connect(db: Path, *, write: bool) -> sqlite3.Connection:
+    if write:
+        conn = sqlite3.connect(db, timeout=5.0)
+    else:
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
+    conn.execute("PRAGMA busy_timeout=5000")
+    # Do not map the whole flight file. IMU tables are most of the bytes
+    # and the fit only needs the low-rate gps / pressure columns.
+    conn.execute("PRAGMA mmap_size=0")
+    conn.execute("PRAGMA cache_size=-2048")
+    return conn
+
+
+def _live_names(dbs: list[Path], now: float | None = None) -> set[str]:
+    """Sessions the recorder still has open.
+
+    That is a non-empty ``*-wal`` written in the last two minutes, or the
+    newest session file when it or its WAL was written in that window.
+    A leftover WAL from an unclean shutdown is older than the window and
+    is still merged. A finished flight is the newest file only until the
+    next session, and it is merged once its mtime goes quiet.
+    """
+    if not dbs:
+        return set()
+    now = time.time() if now is None else now
+    live = set()
+    newest = max(dbs, key=lambda path: (path.stat().st_mtime, path.name))
+
+    def fresh(path: Path, *, nonempty: bool) -> bool:
+        try:
+            st = path.stat()
+        except OSError:
+            return False
+        if nonempty and st.st_size <= 0:
+            return False
+        return now - st.st_mtime <= _LIVE_S
+
+    for db in dbs:
+        # Non-empty WAL touched in the last two minutes is being written.
+        if fresh(Path(str(db) + "-wal"), nonempty=True):
+            live.add(db.name)
+    # The recorder's current file is the newest one, and it has a -wal/-shm
+    # while it is open. A finished flight is also newest until the next
+    # session, but its sidecars are gone or older than the window.
+    newest_wal = Path(str(newest) + "-wal")
+    newest_shm = Path(str(newest) + "-shm")
+    sidecar_fresh = fresh(newest_wal, nonempty=False) or fresh(newest_shm, nonempty=False)
+    try:
+        file_fresh = now - newest.stat().st_mtime <= _LIVE_S
+    except OSError:
+        file_fresh = False
+    if file_fresh and (newest_wal.exists() or newest_shm.exists()) and sidecar_fresh:
+        live.add(newest.name)
+    return live
+
+
+def _session_unix(path: Path) -> float:
+    match = _STAMP.match(path.name)
+    if match:
+        return datetime.strptime(match.group(1), "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc).timestamp()
+    return path.stat().st_mtime
+
+
+def _parse_since(text: str) -> float:
+    raw = text.strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1]
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%Y%m%dT%H%M%S"):
+        try:
+            return datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc).timestamp()
+        except ValueError:
+            continue
+    raise ValueError(text)
+
+
+def _release_memory() -> None:
+    gc.collect()
+    try:
+        import ctypes
+
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):
+        pass
+
+
+def _checkpoint(path: Path, ledger: dict, now: str, jpi_dir: Path, flights_dir: Path) -> None:
+    ledger["updated"] = now
+    ledger["jpi_dir"] = str(jpi_dir)
+    ledger["flights_dir"] = str(flights_dir)
+    ledger["version"] = 1
+    _write_ledger(path, ledger)
 
 
 def _file_by_name(downloads: list[dict], name: str) -> dict | None:
@@ -614,6 +820,17 @@ def add_parser(sub) -> None:
         default=DEFAULT_WINDOW_S,
         help="half-width of the clock search, seconds (default ±900)",
     )
+    p.add_argument(
+        "--since",
+        default=None,
+        help="skip sessions that start before this UTC time (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)",
+    )
+    p.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="open at most this many flight DBs after the live-session skip and --since",
+    )
 
 
 def cmd_jpi_auto(args) -> int:
@@ -625,11 +842,24 @@ def cmd_jpi_auto(args) -> int:
     if not jpi_dir.is_dir():
         print(f"JPI dir not found: {jpi_dir}", file=sys.stderr)
         return 2
+    since = None
+    if getattr(args, "since", None):
+        try:
+            since = _parse_since(args.since)
+        except ValueError:
+            print(f"--since {args.since!r} is not a UTC date or timestamp", file=sys.stderr)
+            return 2
+    limit = getattr(args, "limit", None)
+    if limit is not None and limit < 0:
+        print("--limit must be >= 0", file=sys.stderr)
+        return 2
     run_auto(
         flights_dir=flights,
         jpi_dir=jpi_dir,
         ledger_path=Path(args.ledger),
         apply=not args.dry_run,
         window_s=args.window_s,
+        since=since,
+        limit=limit,
     )
     return 0

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -272,6 +274,85 @@ def _csv_two(path: Path) -> None:
         t = start2 + timedelta(seconds=6 * i)
         lines.append(f"{t:%m/%d/%Y},{t:%H:%M:%S},1000,12.0,3.0,,")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _touch_old(path: Path) -> None:
+    past = time.time() - 7 * 86400
+    os.utime(path, (past, past))
+
+
+class BoundsTests(unittest.TestCase):
+    def test_open_wal_is_not_merged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            flights = root / "flights"
+            raw = root / "raw"
+            flights.mkdir()
+            raw.mkdir()
+            old = flights / "20240101T000000Z.db"
+            live = flights / "20240601T180000Z.db"
+            _db(old)
+            _db(live)
+            _touch_old(old)
+            wal = Path(str(live) + "-wal")
+            wal.write_bytes(b"x" * 64)
+            with mock.patch("analysis.jpi.auto.align_flight", return_value=_ok()) as fit:
+                ledger = run_auto(
+                    flights_dir=flights, jpi_dir=raw, ledger_path=root / "ingest.json", apply=False
+                )
+            self.assertEqual(fit.call_count, 0)
+            by_db = {row["db"]: row for row in ledger["attempts"]}
+            self.assertEqual(by_db[live.name]["status"], "skipped")
+            self.assertIn("recorder", by_db[live.name]["reason"])
+            self.assertEqual(by_db[old.name]["status"], "no_overlap")
+
+    def test_quiet_newest_file_is_merged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            flights = root / "flights"
+            raw = root / "raw"
+            flights.mkdir()
+            raw.mkdir()
+            db = flights / "20240601T180000Z.db"
+            _db(db)
+            _touch_old(db)
+            _csv(raw / "U240601.JPI", "one")
+            with mock.patch("analysis.jpi.auto.align_flight", return_value=_ok()) as fit:
+                ledger = run_auto(
+                    flights_dir=flights, jpi_dir=raw, ledger_path=root / "ingest.json", apply=False
+                )
+            self.assertEqual(fit.call_count, 1)
+            self.assertEqual(ledger["attempts"][0]["status"], "dry_run")
+
+    def test_limit_and_since(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            flights = root / "flights"
+            raw = root / "raw"
+            flights.mkdir()
+            raw.mkdir()
+            names = ["20240101T000000Z.db", "20240601T000000Z.db", "20240901T000000Z.db"]
+            for name in names:
+                path = flights / name
+                _db(path)
+                _touch_old(path)
+            (raw / "empty.jpi").write_bytes(b"")
+            first = run_auto(
+                flights_dir=flights,
+                jpi_dir=raw,
+                ledger_path=root / "a.json",
+                apply=False,
+                limit=1,
+            )
+            self.assertEqual({row["db"] for row in first["attempts"]}, {"20240101T000000Z.db"})
+            later = run_auto(
+                flights_dir=flights,
+                jpi_dir=raw,
+                ledger_path=root / "b.json",
+                apply=False,
+                since=datetime(2024, 8, 1, tzinfo=timezone.utc).timestamp(),
+            )
+            self.assertEqual({row["db"] for row in later["attempts"]}, {"20240901T000000Z.db"})
 
 
 def _csv_overlap(path: Path) -> None:
