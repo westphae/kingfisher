@@ -47,6 +47,17 @@
       </div>
       <div id="plotWrap" class="plotWrap"></div>
       <div id="cursorVals" class="cursorVals dim"></div>
+      <section id="engineBox" class="engineBox" hidden>
+        <div class="engineHead">
+          <h2>Engine review</h2>
+          <span id="engineOverall" class="badge"></span>
+          <button type="button" id="engineSummaryBtn" class="ghost">All flights</button>
+        </div>
+        <p id="engineNotes" class="dim"></p>
+        <div id="enginePhases" class="phaseBar"></div>
+        <table id="engineChecks" class="engineTable"></table>
+        <ul id="engineEvents" class="engineEvents"></ul>
+      </section>
       <h2>Tables</h2>
       <div id="tables" class="tables"></div>
       <div id="healthBox" class="healthBox dim">Sampling health…</div>
@@ -57,6 +68,15 @@
       <h2>Add series</h2>
       <input id="seriesSearch" type="search" placeholder="table or column…">
       <div id="seriesPicker" class="seriesPicker"></div>
+      <div class="dlgRow">
+        <button type="submit" value="cancel">Close</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="engineDlg">
+    <form method="dialog">
+      <h2>Engine review — all flights</h2>
+      <div id="engineSummaryBody" class="engineSummary">Loading…</div>
       <div class="dlgRow">
         <button type="submit" value="cancel">Close</button>
       </div>

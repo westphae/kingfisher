@@ -23,6 +23,8 @@ Outputs:
 | Health JSON | `~/kingfisher/analysis-cache/health.json` |
 | Motion windows | `~/kingfisher/analysis-cache/windows/` (parquet) |
 | Noise study | `~/kingfisher/analysis-cache/noise/` + `docs/analysis/sensor_noise.md` |
+| Engine review | `~/kingfisher/analysis-cache/engine/` |
+| JPI ingest ledger | `~/kingfisher/engine/ingest.json` |
 | Full plan | [`PLAN.md`](PLAN.md) |
 | Ledger (git) | `docs/analysis/ledger.md` |
 | Web UI | `analyze_flights.py serve` → http://0.0.0.0:8765 |
@@ -37,6 +39,9 @@ uv run --project analysis python scripts/analyze_flights.py noise
 uv run --project analysis python scripts/analyze_flights.py report
 uv run --project analysis python scripts/analyze_flights.py cal-accel --json ~/kingfisher/calibration/cabin_accel_….json --plot
 uv run --project analysis python scripts/analyze_flights.py perf --file ~/kingfisher/flights/<session>.db
+uv run --project analysis python scripts/analyze_flights.py jpi-auto
+uv run --project analysis python scripts/analyze_flights.py engine --db ~/kingfisher/flights/<session>.db
+uv run --project analysis python scripts/analyze_flights.py engine --all
 uv run --project analysis python scripts/analyze_flights.py serve
 uv run --project analysis python scripts/analyze_flights.py windows --file 20260722T203620Z_n456t.db
 
@@ -63,7 +68,7 @@ docs/analysis/
   flights-archive/        # move no_info here after review
   analysis-cache/         # regenerable JSON
   imu_tempcal/            # bias/TCO experiments
-  engine/                 # planned: engine-monitor dumps
+  engine/                 # raw U*.JPI, ingest.json, limits.json
   weather/                # planned: METAR/TAF/winds aloft/turb
 ```
 

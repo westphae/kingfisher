@@ -30,6 +30,11 @@ Dry-run is the default. `--apply` writes `jpi_edm930` and the
 requires `--flight` before `--apply`. A refused match exits non-zero and
 writes nothing.
 
+`jpi-auto` is the unattended pass: it applies only when those same gates
+pass, records every attempt in `~/kingfisher/engine/ingest.json`, and does
+not write NAS copies. The timer is `deploy/jpi/`. The engine scorecard is
+`engine` (`docs/analysis/engine.md`). Neither path touches `live.Hub`.
+
 ## This installation
 
 The pilot's EDM-930 download has no altitude and no second TIT. Alignment

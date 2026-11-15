@@ -351,7 +351,7 @@ on the cockpit page). It is **disabled by default**; enable in `config.json`:
   "enabled": true,
   "user": "eric",
   "authorized_keys": [
-    "ssh-ed25519 AAAA... kingfisher-terminal"
+    "ssh-ed25519 <cockpit-public-key> kingfisher-terminal"
   ],
   "allow_password": false,
   "session_timeout_min": 480,

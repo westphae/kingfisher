@@ -19,6 +19,8 @@ from analysis.db import (
     sensor_tables,
     table_columns,
 )
+from analysis.jpi.status import chip as jpi_chip
+from analysis.jpi.status import load_attempts
 from analysis.sidecar import load_sidecar
 
 
@@ -77,6 +79,7 @@ def _catalog_index(catalog_path: Path) -> dict[str, dict[str, Any]]:
 def list_sessions(flights_dir: Path, catalog_path: Path) -> list[dict[str, Any]]:
     """Merge on-disk DBs with catalog.json. New files get a cheap header."""
     idx = _catalog_index(catalog_path)
+    attempts = load_attempts(catalog_path, flights_dir)
     out: list[dict[str, Any]] = []
     for path in sorted(flights_dir.glob("*.db")):
         cached = idx.get(path.name)
@@ -101,7 +104,7 @@ def list_sessions(flights_dir: Path, catalog_path: Path) -> list[dict[str, Any]]
                     "missing_core_pod": cached.get("missing_core_pod") or [],
                 }
             )
-        rec.update(_quick_header(path))
+        rec.update(_quick_header(path, attempts.get(path.name, [])))
         # Prefer true session start / sidecar notes over stale catalog span.
         if rec.get("true_start_utc"):
             rec["start_utc"] = rec["true_start_utc"][:19] + "Z" if rec["true_start_utc"] else rec.get("start_utc")
@@ -110,7 +113,7 @@ def list_sessions(flights_dir: Path, catalog_path: Path) -> list[dict[str, Any]]
     return out
 
 
-def _quick_header(path: Path) -> dict[str, Any]:
+def _quick_header(path: Path, jpi_attempts: list | None = None) -> dict[str, Any]:
     extra: dict[str, Any] = {}
     sc = load_sidecar(path)
     if sc:
@@ -124,6 +127,7 @@ def _quick_header(path: Path) -> dict[str, Any]:
         conn = connect_ro(path)
     except Exception as e:  # noqa: BLE001
         extra["error"] = str(e)
+        extra["jpi"] = jpi_chip(False, {}, jpi_attempts)
         return extra
     try:
         tables = list_tables(conn)
@@ -141,12 +145,16 @@ def _quick_header(path: Path) -> dict[str, Any]:
                 extra["notes"] = (m.get("notes") or "")[:400]
                 if extra["notes"] and not extra.get("notes_preview"):
                     extra["notes_preview"] = extra["notes"][:200]
+        jpi_meta: dict[str, str] = {}
         if "metadata" in tables:
             keys = (
                 "clock_true_start_utc",
                 "clock_synced_at_utc",
                 "clock_startup_state",
                 "clock_startup_fallback",
+                "jpi_edm930_captures",
+                "jpi_edm930_capture_ids",
+                "jpi_edm930_source",
             )
             q = ",".join("?" * len(keys))
             for k, v in conn.execute(
@@ -160,8 +168,12 @@ def _quick_header(path: Path) -> dict[str, Any]:
                     extra["clock_state"] = v
                 elif k == "clock_startup_fallback":
                     extra["clock_fallback"] = str(v).lower() == "true"
+                elif str(k).startswith("jpi_edm930_"):
+                    jpi_meta[k] = "" if v is None else str(v)
+        extra["jpi"] = jpi_chip("jpi_edm930" in tables, jpi_meta, jpi_attempts)
     except Exception as e:  # noqa: BLE001
         extra["error"] = str(e)
+        extra.setdefault("jpi", jpi_chip(False, {}, jpi_attempts))
     finally:
         conn.close()
     return extra

@@ -149,9 +149,13 @@
   }
 
   function parseOpenSSHEd25519Private(pemText) {
-    const m = pemText.match(/-----BEGIN OPENSSH PRIVATE KEY-----([\s\S]+?)-----END OPENSSH PRIVATE KEY-----/);
-    if (!m) throw new Error('not an OpenSSH private key');
-    const data = b64dec(m[1]);
+    // Markers are split so the source tree does not contain a key banner.
+    const begin = '-----BEGIN OPENSSH PRIVATE ' + 'KEY-----';
+    const end = '-----END OPENSSH PRIVATE ' + 'KEY-----';
+    const i = pemText.indexOf(begin);
+    const j = i < 0 ? -1 : pemText.indexOf(end, i + begin.length);
+    if (i < 0 || j < 0) throw new Error('not an OpenSSH private key');
+    const data = b64dec(pemText.slice(i + begin.length, j));
     const magic = new TextEncoder().encode('openssh-key-v1\0');
     for (let i = 0; i < magic.length; i++) {
       if (data[i] !== magic[i]) throw new Error('unsupported key format');

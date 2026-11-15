@@ -29,3 +29,13 @@ analysis/testdata/jpi/*
 *.swp
 .DS_Store
 .idea/
+
+# SSH keys and local env. The JPI NAS key is ~/.ssh/nas_ro on the Pi and is
+# named by path from ~/.config/kingfisher/jpi.env. Never commit a key, a
+# host key, or that env file. jpi.env.example is the only placeholder.
+*.pem
+id_*
+nas_ro*
+known_hosts
+*.env
+!jpi.env.example

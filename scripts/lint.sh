@@ -3,6 +3,7 @@
 #
 # Hard gates:
 #   gofmt on staged *.go files (the index blob, not unstaged edits).
+#   scripts/check-secrets.sh (no tracked OpenSSH private key or ed25519 blob).
 #   scripts/check-wire.sh when pod_wire/ or internal/pod/wire/ is part of
 #   this commit, and when those trees have unstaged drift. A partial stage
 #   is checked twice: the index (what will be committed) and the worktree
@@ -304,6 +305,9 @@ golangci_staged() {
 }
 
 if ! gofmt_staged; then
+  mark_fail
+fi
+if ! scripts/check-secrets.sh; then
   mark_fail
 fi
 if ! wire_check; then
