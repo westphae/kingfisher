@@ -1,0 +1,25 @@
+# /etc/kingfisher-jpi-ingest.conf
+# Copy to /etc and edit. The unit ships with TRANSPORT=none, so nothing
+# contacts the NAS until this file says so.
+
+RAW_DIR="/home/eric/kingfisher/engine/raw"
+FLIGHTS_DIR="/home/eric/kingfisher/flights"
+LEDGER="/home/eric/kingfisher/engine/ingest.json"
+REPO="/home/eric/go/src/github.com/westphae/kingfisher"
+
+# none | rsyncd | ssh
+TRANSPORT="none"
+REQUIRE_IFACE="wlan1"
+NAS_HOST=""
+
+# rsync daemon (read-only module). The module must not be writable by this user.
+RSYNC_USER="kingfisher"
+RSYNC_MODULE="bonanza"
+RSYNC_MODULE_PATH="JPI"
+RSYNC_SECRET="/home/eric/.config/kingfisher/jpi.secret"
+
+# or SSH, read-only key, path of the archive on the NAS
+SSH_USER="eric"
+SSH_PORT="22"
+SSH_KEY="/home/eric/.ssh/kingfisher_jpi"
+NAS_PATH="/volume1/Public/archive/Documents/Bonanza/JPI"

@@ -1,0 +1,14 @@
+# Hourly JPI ingest. The script no-ops the NAS pull when the share is not
+# configured or the host is unreachable, then still reviews whatever is
+# already in ~/kingfisher/engine/raw.
+
+[Unit]
+Description=Hourly Kingfisher JPI ingest
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

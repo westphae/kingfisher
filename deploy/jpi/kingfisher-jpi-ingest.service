@@ -1,0 +1,21 @@
+# Hourly EDM-930 ingest. Syncs U*.JPI from the NAS when that share is
+# configured, then merges overlapping flights into the Pi's own databases
+# and refreshes the engine-review cache.
+#
+# Install: deploy/jpi/verify.md
+
+[Unit]
+Description=Kingfisher JPI ingest and engine review
+Documentation=file:///home/eric/go/src/github.com/westphae/kingfisher/deploy/jpi/verify.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=eric
+Group=eric
+Nice=10
+IOSchedulingClass=idle
+Environment=PATH=/home/eric/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/local/bin/kingfisher-jpi-ingest.sh
+TimeoutStartSec=infinity
