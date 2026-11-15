@@ -154,9 +154,28 @@ The fit is stored once in `metadata`, keys `jpi_edm930_*`:
 | `jpi_edm930_residual` | median meters, or ft/s RMS of rate of climb |
 | `jpi_edm930_residual_unit` | unit of that residual |
 | `jpi_edm930_source` | file name |
+| `jpi_edm930_sha256` | sha256 of that file, empty if the manual merge did not pass one |
 | `jpi_edm930_flight_id` | `$D` id or CSV flight number |
 | `jpi_edm930_oat_pearson` | OAT check at the fitted offset, may be empty |
 | `jpi_edm930_oat_source` | Kingfisher temperature column used |
 | `jpi_edm930_detail` | which streams were compared |
 
 Running again drops `jpi_edm930` and those keys, then writes them once.
+
+## Automatic ingest
+
+`jpi-auto` walks `~/kingfisher/flights` and `~/kingfisher/engine/raw`. A
+database that already has `jpi_edm930` from the same file hash is left
+alone. A database with no engine rows, or whose source file changed, is
+fitted with the same gates as `jpi`. The fit is written only when those
+gates pass. A refused re-fit keeps the previous table. The ledger is
+`~/kingfisher/engine/ingest.json`.
+
+```bash
+uv run --project analysis python scripts/analyze_flights.py jpi-auto
+uv run --project analysis python scripts/analyze_flights.py jpi-auto --dry-run
+```
+
+The hourly timer that pulls `U*.JPI` from the NAS and then runs this is
+`deploy/jpi/`. Merges are applied to the Pi's flight databases only.
+The one-flight `jpi` command is unchanged: dry-run unless `--apply`.

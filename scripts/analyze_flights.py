@@ -9,6 +9,9 @@ Examples (from repo root; uses uv workspace — see docs/python.md):
   uv run --project analysis python scripts/analyze_flights.py cal-accel --json ~/kingfisher/calibration/cabin_imu_….json
   uv run --project analysis python scripts/analyze_flights.py all
   uv run --project analysis python scripts/analyze_flights.py jpi --jpi FILE.jpi --db FLIGHT.sqlite [--flight N] [--apply]
+  uv run --project analysis python scripts/analyze_flights.py jpi-auto
+  uv run --project analysis python scripts/analyze_flights.py engine --db FLIGHT.sqlite
+  uv run --project analysis python scripts/analyze_flights.py engine --all
   uv run --project analysis python scripts/analyze_flights.py serve
 """
 
@@ -25,6 +28,10 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from analysis.cal_accel import run as run_cal_accel
+from analysis.engine.cli import add_parser as add_engine_parser
+from analysis.engine.cli import cmd_engine
+from analysis.jpi.auto import add_parser as add_jpi_auto_parser
+from analysis.jpi.auto import cmd_jpi_auto
 from analysis.jpi.cli import add_parser as add_jpi_parser
 from analysis.jpi.cli import cmd_jpi
 from analysis.performance import summarize
@@ -372,6 +379,8 @@ def main() -> int:
         help="subtract from raw ms4525 ΔP when airspeed_dp_cal_pa is absent",
     )
     add_jpi_parser(sub)
+    add_jpi_auto_parser(sub)
+    add_engine_parser(sub)
 
     args = p.parse_args()
     if args.cmd == "catalog":
@@ -394,6 +403,10 @@ def main() -> int:
         return cmd_perf(args)
     if args.cmd == "jpi":
         return cmd_jpi(args)
+    if args.cmd == "jpi-auto":
+        return cmd_jpi_auto(args)
+    if args.cmd == "engine":
+        return cmd_engine(args)
     return 1
 
 

@@ -34,6 +34,7 @@ def write_flight(
     flight: Flight,
     result: AlignResult,
     source_name: str,
+    source_sha256: str = "",
 ) -> int:
     if not result.ok:
         raise ValueError(f"refusing to write a rejected alignment: {result.reason}")
@@ -64,7 +65,7 @@ def write_flight(
             f'INSERT INTO "{TABLE}" ({col_sql}) VALUES ({placeholders})',
             rows,
         )
-        _write_meta(conn, flight, result, source_name)
+        _write_meta(conn, flight, result, source_name, source_sha256)
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")
@@ -74,7 +75,13 @@ def write_flight(
     return len(rows)
 
 
-def _write_meta(conn, flight: Flight, result: AlignResult, source_name: str) -> None:
+def _write_meta(
+    conn,
+    flight: Flight,
+    result: AlignResult,
+    source_name: str,
+    source_sha256: str = "",
+) -> None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS metadata (
@@ -94,6 +101,7 @@ def _write_meta(conn, flight: Flight, result: AlignResult, source_name: str) -> 
         "jpi_edm930_residual": f"{result.residual:.6g}",
         "jpi_edm930_residual_unit": result.residual_unit,
         "jpi_edm930_source": source_name,
+        "jpi_edm930_sha256": source_sha256,
         "jpi_edm930_flight_id": str(flight.flight_id),
         "jpi_edm930_oat_pearson": oat,
         "jpi_edm930_oat_source": result.oat_source or "",

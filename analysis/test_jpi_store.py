@@ -84,7 +84,8 @@ class WriteTests(unittest.TestCase):
         keys = conn.execute(
             "SELECT COUNT(*) FROM metadata WHERE key LIKE 'jpi_edm930_%'"
         ).fetchone()[0]
-        self.assertEqual(keys, 12)
+        self.assertEqual(keys, 13)
+        self.assertIn("jpi_edm930_sha256", meta)
 
     def test_refused_match_does_not_write(self):
         conn, flight, result, _base, _true = _build()
