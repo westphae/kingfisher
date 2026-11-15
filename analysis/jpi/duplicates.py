@@ -21,6 +21,11 @@ def flag_sessions(flights_dir: Path) -> list[dict]:
         fp = _fingerprint(path)
         if fp is not None:
             fingerprints.append(fp)
+    return flags_from_fingerprints(fingerprints)
+
+
+def flags_from_fingerprints(fingerprints: list[dict]) -> list[dict]:
+    """Duplicate and clock-step flags for fingerprints already collected."""
     flags = []
     groups: dict[tuple, list[dict]] = {}
     for fp in fingerprints:
@@ -87,6 +92,14 @@ def _fingerprint(path: Path) -> dict | None:
     except sqlite3.Error:
         return None
     try:
+        return fingerprint_conn(conn, path.name)
+    finally:
+        conn.close()
+
+
+def fingerprint_conn(conn: sqlite3.Connection, name: str) -> dict | None:
+    """COUNT/MAX and metadata only. Does not read the track into Python."""
+    try:
         gps_rows = None
         max_gs = None
         row = conn.execute(
@@ -99,8 +112,8 @@ def _fingerprint(path: Path) -> dict | None:
         if method and method != "gps_track":
             residual = None
         return {
-            "name": path.name,
-            "path": str(path),
+            "name": name,
+            "path": name,
             "gps_rows": int(gps_rows) if gps_rows else 0,
             "max_gs": None if max_gs is None else float(max_gs),
             "jpi_residual_m": residual,
@@ -108,8 +121,6 @@ def _fingerprint(path: Path) -> dict | None:
         }
     except sqlite3.Error:
         return None
-    finally:
-        conn.close()
 
 
 def _meta(conn: sqlite3.Connection, key: str) -> str | None:

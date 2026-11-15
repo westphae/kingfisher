@@ -32,9 +32,18 @@ and the hourly run still merges them.
    unreachable host is a skip, not a failed unit. `ConnectTimeout=10` is
    there so a host that accepts TCP and then stalls cannot hang the oneshot.
 2. `analyze_flights.py jpi-auto` fits every local flight DB that has no
-   `jpi_edm930` rows, or whose source file bytes changed. A fit is written
-   only when the existing quality gates pass (path, fix count, median
-   error, distinct peak). A refused fit keeps any previous merge.
+   `jpi_edm930` rows, or whose source file bytes changed. `--flights-dir`
+   is a top-level option, so the oneshot passes it before `jpi-auto` and
+   before `engine`. The subcommands accept it too, which is what an older
+   copy of this script (the one in `/usr/local/bin`) still does. A fit is
+   written only when the existing quality gates pass (path, fix count,
+   median error, distinct peak). A refused fit keeps any previous merge.
+   It opens one flight DB at a time. GPS and OAT are read at one sample
+   per second, and a high-rate IMU temperature column is not loaded. A
+   session the recorder still has open (newest file with a fresh `-wal`,
+   or any non-empty `-wal` written in the last two minutes) is skipped.
+   `--since YYYY-MM-DD` and `--limit N` bound a manual pass; the timer
+   does not pass them.
 3. `analyze_flights.py engine --all` refreshes `analysis-cache/engine/`.
 
 Every attempt is a row in `~/kingfisher/engine/ingest.json`: file hash, JPI
@@ -54,6 +63,21 @@ uv run --project analysis python scripts/analyze_flights.py engine --all
 
 `jpi` without `-auto` is still the one-flight command. Dry-run is its
 default. `jpi-auto` applies when the gates pass; `--dry-run` only records.
+
+## Python environment
+
+`analysis` and `enclosures` share one uv workspace and one `.venv`.
+CadQuery (the enclosure package) depends on vtk and trame. From the repo
+root:
+
+```bash
+uv sync --all-packages
+```
+
+`uv sync --project analysis` makes that shared venv match the analysis
+package only. uv then uninstalls the enclosure packages, including vtk
+and trame. Do not use it on the Pi. `uv run --project analysis` is the
+right way to run a command; it does not prune the other member.
 
 ## NAS key
 
@@ -91,6 +115,13 @@ One shot: `sudo systemctl start kingfisher-jpi-ingest.service`
 The oneshot runs as `eric`, so it can read `~/kingfisher`, `~/.ssh/nas_ro`,
 and the repo checkout at `REPO`. `TimeoutStartSec=infinity` because a
 directory of downloads can take a while; `flock` keeps two runs from stacking.
+
+The service PATH is `~/.local/bin:/usr/local/bin:/usr/bin:/bin`. It does
+not load mise. On this Pi, uv is installed by mise, so the oneshot will
+not see it unless `UV=` in `~/.config/kingfisher/jpi.env` is an absolute
+path. From a login shell, `command -v uv` prints that path (the mise shim
+is `~/.local/share/mise/shims/uv`). When `UV` is unset, the script uses
+`command -v uv` and exits if that finds nothing.
 
 Thresholds Eric tunes live in `~/kingfisher/engine/limits.json`. See
 `docs/analysis/engine.md`.

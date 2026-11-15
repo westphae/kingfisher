@@ -251,7 +251,7 @@ def cmd_all(args: argparse.Namespace) -> int:
     return cmd_report(args)
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     cache = default_cache_dir()
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
@@ -382,7 +382,11 @@ def main() -> int:
     add_jpi_auto_parser(sub)
     add_engine_parser(sub)
 
-    args = p.parse_args()
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     if args.cmd == "catalog":
         return cmd_catalog(args)
     if args.cmd == "health":

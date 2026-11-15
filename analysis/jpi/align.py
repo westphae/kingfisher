@@ -23,8 +23,10 @@ Observables, in order:
    term so a constant altimeter bias does not dominate. Kingfisher
    ``press_alt.pressure_alt_ft`` is preferred, then ``indicated_alt_ft``,
    then GPS ``alt_msl`` converted to feet.
-3. OAT (JPI vs pod ``static_temp_c``, else a cabin ``temp_c``) is computed
-   after the fit and reported. It is not in the objective.
+3. OAT (JPI vs pod ``bmp581.static_temp_c``, one sample per second) is
+   computed after the fit and reported. It is not in the objective. A
+   high-rate ``temp_c`` column is not read; that scan was loading whole
+   IMU tables.
 
 The search window defaults to ±15 minutes (the floor asked for is ±10) and
 ±3 minutes of accumulated drift over the overlap. A weak peak is a refusal:
@@ -213,8 +215,13 @@ def _path_length_m(lat: np.ndarray, lon: np.ndarray) -> float:
 def _load_gps(conn: sqlite3.Connection) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
     if not _has_column(conn, "gps", "lat") or not _has_column(conn, "gps", "lon"):
         return None
+    # One row per second. The refusal gate is 750 m, and a second of
+    # Bonanza motion is well inside that. The whole gps table is not
+    # pulled into Python.
     rows = conn.execute(
-        'SELECT ts_ns, lat, lon FROM gps WHERE lat IS NOT NULL AND lon IS NOT NULL ORDER BY ts_ns'
+        "SELECT (ts_ns / 1000000000) * 1000000000, AVG(lat), AVG(lon) "
+        "FROM gps WHERE lat IS NOT NULL AND lon IS NOT NULL "
+        "GROUP BY ts_ns / 1000000000 ORDER BY 1"
     ).fetchall()
     if len(rows) < GPS_MIN_POINTS:
         return None
@@ -277,38 +284,18 @@ def _align_gps(track, conn, t_ref: float, window_s: float) -> AlignResult | None
 
 
 def _kingfisher_altitude(conn: sqlite3.Connection) -> tuple[str, np.ndarray, np.ndarray] | None:
-    if _has_column(conn, "press_alt", "pressure_alt_ft"):
-        rows = conn.execute(
-            "SELECT ts_ns, pressure_alt_ft FROM press_alt "
-            "WHERE pressure_alt_ft IS NOT NULL ORDER BY ts_ns"
-        ).fetchall()
-        if len(rows) >= ALT_MIN_POINTS:
-            return (
-                "press_alt.pressure_alt_ft",
-                np.array([r[0] / 1e9 for r in rows]),
-                np.array([r[1] for r in rows], dtype=np.float64),
-            )
-    if _has_column(conn, "press_alt", "indicated_alt_ft"):
-        rows = conn.execute(
-            "SELECT ts_ns, indicated_alt_ft FROM press_alt "
-            "WHERE indicated_alt_ft IS NOT NULL ORDER BY ts_ns"
-        ).fetchall()
-        if len(rows) >= ALT_MIN_POINTS:
-            return (
-                "press_alt.indicated_alt_ft",
-                np.array([r[0] / 1e9 for r in rows]),
-                np.array([r[1] for r in rows], dtype=np.float64),
-            )
-    if _has_column(conn, "gps", "alt_msl"):
-        rows = conn.execute(
-            "SELECT ts_ns, alt_msl FROM gps WHERE alt_msl IS NOT NULL ORDER BY ts_ns"
-        ).fetchall()
-        if len(rows) >= ALT_MIN_POINTS:
-            return (
-                "gps.alt_msl",
-                np.array([r[0] / 1e9 for r in rows]),
-                np.array([r[1] * _FT_PER_M for r in rows], dtype=np.float64),
-            )
+    for table, column, scale, label in (
+        ("press_alt", "pressure_alt_ft", 1.0, "press_alt.pressure_alt_ft"),
+        ("press_alt", "indicated_alt_ft", 1.0, "press_alt.indicated_alt_ft"),
+        ("gps", "alt_msl", _FT_PER_M, "gps.alt_msl"),
+    ):
+        loaded = _load_series(conn, table, column, min_rows=ALT_MIN_POINTS)
+        if loaded is None:
+            continue
+        ts, values = loaded
+        if scale != 1.0:
+            values = values * scale
+        return label, ts, values
     return None
 
 
@@ -498,48 +485,31 @@ def _attach_oat(result: AlignResult, flight: Flight, t_j, conn, window_s: float)
 
 
 def _load_oat(conn: sqlite3.Connection) -> tuple[str, np.ndarray, np.ndarray] | None:
-    if _has_column(conn, "bmp581", "static_temp_c"):
-        rows = conn.execute(
-            "SELECT ts_ns, static_temp_c FROM bmp581 "
-            "WHERE static_temp_c IS NOT NULL ORDER BY ts_ns"
-        ).fetchall()
-        if len(rows) >= 10:
-            return (
-                "bmp581.static_temp_c",
-                np.array([r[0] / 1e9 for r in rows]),
-                np.array([r[1] for r in rows], dtype=np.float64),
-            )
-    tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
-    for table in tables:
-        if table in {"jpi_edm930", "gps", "metadata"}:
-            continue
-        if not _has_column(conn, table, "static_temp_c"):
-            continue
-        rows = conn.execute(
-            f'SELECT ts_ns, static_temp_c FROM "{table}" '
-            "WHERE static_temp_c IS NOT NULL ORDER BY ts_ns"
-        ).fetchall()
-        if len(rows) >= 10:
-            return (
-                f"{table}.static_temp_c",
-                np.array([r[0] / 1e9 for r in rows]),
-                np.array([r[1] for r in rows], dtype=np.float64),
-            )
-    for table in tables:
-        if table.startswith("jpi") or table in {"gps", "metadata", "ahrs"}:
-            continue
-        if not _has_column(conn, table, "temp_c"):
-            continue
-        rows = conn.execute(
-            f'SELECT ts_ns, temp_c FROM "{table}" WHERE temp_c IS NOT NULL ORDER BY ts_ns'
-        ).fetchall()
-        if len(rows) >= 10:
-            return (
-                f"{table}.temp_c",
-                np.array([r[0] / 1e9 for r in rows]),
-                np.array([r[1] for r in rows], dtype=np.float64),
-            )
-    return None
+    # Pod static temperature only, bucketed to 1 Hz. Walking every table
+    # for temp_c fetched high-rate IMU columns and was enough to exhaust
+    # a Pi when jpi-auto opened the whole flights directory.
+    loaded = _load_series(conn, "bmp581", "static_temp_c", min_rows=10)
+    if loaded is None:
+        return None
+    ts, values = loaded
+    return "bmp581.static_temp_c", ts, values
+
+
+def _load_series(
+    conn: sqlite3.Connection, table: str, column: str, *, min_rows: int
+) -> tuple[np.ndarray, np.ndarray] | None:
+    if not _has_column(conn, table, column):
+        return None
+    rows = conn.execute(
+        f'SELECT (ts_ns / 1000000000) * 1000000000, AVG("{column}") '
+        f'FROM "{table}" WHERE "{column}" IS NOT NULL '
+        "GROUP BY ts_ns / 1000000000 ORDER BY 1"
+    ).fetchall()
+    if len(rows) < min_rows:
+        return None
+    ts = np.array([r[0] / 1e9 for r in rows], dtype=np.float64)
+    values = np.array([r[1] for r in rows], dtype=np.float64)
+    return ts, values
 
 
 def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:

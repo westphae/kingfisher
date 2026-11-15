@@ -17,6 +17,8 @@ User=eric
 Group=eric
 Nice=10
 IOSchedulingClass=idle
+# mise is not on this PATH. Set UV= in ~/.config/kingfisher/jpi.env
+# when `command -v uv` would miss it (see verify.md).
 Environment=PATH=/home/eric/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/usr/local/bin/kingfisher-jpi-ingest.sh
 TimeoutStartSec=infinity

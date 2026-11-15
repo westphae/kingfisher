@@ -205,5 +205,40 @@ class GpsAlignTests(unittest.TestCase):
         self.assertIn("750", result.reason)
 
 
+class SeriesBoundTests(unittest.TestCase):
+    def test_tracks_are_one_sample_per_second_and_imu_temp_is_not_read(self):
+        from analysis.jpi.align import _load_gps, _load_oat
+
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE gps (ts_ns INTEGER, lat REAL, lon REAL)")
+        base = 1_700_000_000 * 1_000_000_000
+        rows = []
+        for sec in range(25):
+            for k in range(5):
+                rows.append((base + sec * 1_000_000_000 + k * 1000, 33.0, -112.0))
+        conn.executemany("INSERT INTO gps VALUES (?,?,?)", rows)
+        conn.execute("CREATE TABLE icm45686_accel (ts_ns INTEGER, temp_c REAL)")
+        conn.executemany(
+            "INSERT INTO icm45686_accel VALUES (?,?)",
+            [(base + i * 1_000_000, 40.0) for i in range(5000)],
+        )
+        ts, lat, lon = _load_gps(conn)
+        self.assertEqual(len(ts), 25)
+        self.assertEqual(len(lat), 25)
+        self.assertEqual(len(lon), 25)
+        self.assertIsNone(_load_oat(conn))
+        conn.execute("CREATE TABLE bmp581 (ts_ns INTEGER, static_temp_c REAL)")
+        oat_rows = []
+        for sec in range(12):
+            for k in range(4):
+                oat_rows.append((base + sec * 1_000_000_000 + k, 15.0 + 0.1 * k))
+        conn.executemany("INSERT INTO bmp581 VALUES (?,?)", oat_rows)
+        source, oat_ts, oat_v = _load_oat(conn)
+        self.assertEqual(source, "bmp581.static_temp_c")
+        self.assertEqual(len(oat_ts), 12)
+        self.assertEqual(len(oat_v), 12)
+        conn.close()
+
+
 if __name__ == "__main__":
     unittest.main()
