@@ -170,6 +170,122 @@ class AutoTests(unittest.TestCase):
             dup = next(f for f in flags if f["kind"] == "suspected_duplicate")
             self.assertIn("621", dup["detail"])
 
+    def test_two_records_share_a_clock_and_rerun_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            flights = root / "flights"
+            raw = root / "raw"
+            flights.mkdir()
+            raw.mkdir()
+            db = flights / "flight.db"
+            jpi = raw / "U240601.JPI"
+            _wide_db(db)
+            _csv_two(jpi)
+            ledger = root / "ingest.json"
+
+            def fit(flight, conn, window_s=900.0):
+                if "lat_deg" in flight.channels:
+                    return _ok()
+                return _refused()
+
+            with mock.patch("analysis.jpi.auto.align_flight", side_effect=fit) as aligned:
+                run_auto(flights_dir=flights, jpi_dir=raw, ledger_path=ledger, apply=True)
+                self.assertEqual(aligned.call_count, 2)
+            conn = sqlite3.connect(db)
+            rows = conn.execute("SELECT capture_id, ts_ns FROM jpi_edm930 ORDER BY ts_ns").fetchall()
+            meta = dict(conn.execute("SELECT key, value FROM metadata").fetchall())
+            conn.close()
+            ids = []
+            for cid, _ts in rows:
+                if cid not in ids:
+                    ids.append(cid)
+            self.assertEqual(len(ids), 2, ids)
+            self.assertEqual(meta["jpi_edm930_captures"], "2")
+            described = json.loads(meta["jpi_edm930_captures_json"])
+            self.assertTrue(any(item.get("shared") for item in described), described)
+            stamps = [ts for _cid, ts in rows]
+            self.assertEqual(len(stamps), len(set(stamps)))
+            n = len(rows)
+            with mock.patch("analysis.jpi.auto.align_flight", side_effect=fit) as aligned:
+                run_auto(flights_dir=flights, jpi_dir=raw, ledger_path=ledger, apply=True)
+                self.assertEqual(aligned.call_count, 0)
+            conn = sqlite3.connect(db)
+            n2 = conn.execute("SELECT COUNT(*) FROM jpi_edm930").fetchone()[0]
+            conn.close()
+            self.assertEqual(n2, n)
+
+    def test_overlapping_records_are_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            flights = root / "flights"
+            raw = root / "raw"
+            flights.mkdir()
+            raw.mkdir()
+            db = flights / "flight.db"
+            _wide_db(db)
+            _csv_overlap(raw / "U240601.JPI")
+            ledger = root / "ingest.json"
+            with mock.patch("analysis.jpi.auto.align_flight", return_value=_ok()):
+                run_auto(flights_dir=flights, jpi_dir=raw, ledger_path=ledger, apply=True)
+            conn = sqlite3.connect(db)
+            n = conn.execute("SELECT COUNT(*) FROM jpi_edm930").fetchone()[0]
+            distinct = conn.execute("SELECT COUNT(DISTINCT ts_ns) FROM jpi_edm930").fetchone()[0]
+            caps = conn.execute("SELECT COUNT(DISTINCT capture_id) FROM jpi_edm930").fetchone()[0]
+            conn.close()
+            self.assertGreater(n, 0)
+            self.assertEqual(n, distinct)
+            self.assertEqual(caps, 1)
+            data = json.loads(ledger.read_text())
+            self.assertTrue(any(a["status"] == "overlap" for a in data["attempts"]))
+            with mock.patch("analysis.jpi.auto.align_flight", return_value=_ok()):
+                run_auto(flights_dir=flights, jpi_dir=raw, ledger_path=ledger, apply=True)
+            conn = sqlite3.connect(db)
+            n2 = conn.execute("SELECT COUNT(*) FROM jpi_edm930").fetchone()[0]
+            conn.close()
+            self.assertEqual(n2, n)
+
+
+def _wide_db(path: Path) -> None:
+    start = datetime(2024, 6, 1, 17, 50, tzinfo=timezone.utc)
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE gps (ts_ns INTEGER, lat REAL, lon REAL, gs REAL, alt_msl REAL)")
+    base = int(start.timestamp() * 1e9)
+    conn.executemany(
+        "INSERT INTO gps VALUES (?,?,?,?,?)",
+        [(base + i * int(1e9), 33.4, -112.0, 80.0, 3000.0) for i in range(4000)],
+    )
+    conn.commit()
+    conn.close()
+
+
+def _csv_two(path: Path) -> None:
+    lines = ["DATE,TIME,RPM,MAP,FF,LAT,LONG"]
+    start = datetime(2024, 6, 1, 18, 0, 0)
+    for i in range(25):
+        t = start + timedelta(seconds=6 * i)
+        lines.append(
+            f"{t:%m/%d/%Y},{t:%H:%M:%S},2400,29.0,15.0,"
+            f"{33.4 + i * 0.01:.4f},{-112.0 - i * 0.01:.4f}"
+        )
+    start2 = datetime(2024, 6, 1, 18, 12, 0)
+    for i in range(8):
+        t = start2 + timedelta(seconds=6 * i)
+        lines.append(f"{t:%m/%d/%Y},{t:%H:%M:%S},1000,12.0,3.0,,")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _csv_overlap(path: Path) -> None:
+    lines = ["FLIGHT,DATE,TIME,RPM,MAP,FF,LAT,LONG"]
+    start = datetime(2024, 6, 1, 18, 0, 0)
+    for fid in (1, 2):
+        for i in range(25):
+            t = start + timedelta(seconds=6 * i)
+            lines.append(
+                f"{fid},{t:%m/%d/%Y},{t:%H:%M:%S},2400,29.0,15.0,"
+                f"{33.4 + i * 0.01:.4f},{-112.0 - i * 0.01:.4f}"
+            )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
 
 if __name__ == "__main__":
     unittest.main()

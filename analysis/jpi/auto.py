@@ -18,10 +18,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from analysis.jpi.align import DEFAULT_WINDOW_S, _db_span, align_flight
+from analysis.jpi.align import DEFAULT_WINDOW_S, AlignResult, _db_span, _jpi_track, align_flight, flight_unix
 from analysis.jpi.duplicates import flag_sessions
 from analysis.jpi.parse import Download, Flight, ParseError, parse_file
-from analysis.jpi.store import write_flight
+from analysis.jpi.store import Capture, read_kept_rows, write_captures
 
 _SUFFIXES = {".jpi", ".dat", ".csv", ".txt"}
 
@@ -86,110 +86,60 @@ def _one_db(db: Path, downloads: list[dict], ledger: dict, *, apply: bool, windo
     try:
         conn.execute("PRAGMA busy_timeout=5000")
         span = _db_span(conn)
-        existing = _existing(conn)
         if span is None:
             _record(ledger, _attempt(now, db.name, status="skipped", reason="no gps or press_alt span"))
             print(f"  {db.name}: no time span")
             return
-        changed = None
-        if existing:
-            named = _file_by_name(downloads, existing["source"]) if existing["source"] else None
-            if existing["sha256"] and named is not None and named["sha256"] == existing["sha256"]:
+        stored = _stored_captures(conn)
+        candidates = _candidates(downloads, span, window_s, only=None)
+        if not candidates and not stored:
+            _record(ledger, _attempt(now, db.name, status="no_overlap", reason="no JPI flight overlaps this DB"))
+            print(f"  {db.name}: no JPI flight overlaps this DB")
+            return
+        by_file: dict[str, list[tuple[dict, Flight]]] = {}
+        for item, flight in candidates:
+            by_file.setdefault(item["name"], []).append((item, flight))
+        fitted: list[tuple[dict, Flight, AlignResult, bool]] = []
+        for group in by_file.values():
+            fitted.extend(_fit_group(group, conn, stored, window_s, db.name))
+        kept, overlapped = _resolve_overlaps(fitted)
+        stored_caps = [cap for cap in stored.values() if isinstance(cap, dict)]
+        missing = [
+            cap
+            for cap in stored_caps
+            if cap.get("source") and _file_by_name(downloads, cap["source"]) is None
+        ]
+        kept_ids = {f"{item['name']}#{flight.flight_id}" for item, flight, _result, _shared in kept}
+        stored_ids = {str(cap["id"]) for cap in stored_caps if cap.get("id")}
+        unchanged = bool(stored_ids) and kept_ids == stored_ids and not missing and all(
+            _stored_sha_ok(stored, item, flight) for item, flight, _r, _s in kept
+        )
+        if unchanged:
+            for item, flight, result, _shared in kept:
                 _record(
                     ledger,
                     _attempt(
                         now,
                         db.name,
-                        jpi_file=named["name"],
-                        jpi_sha256=existing["sha256"],
-                        jpi_flight_id=existing["flight_id"],
+                        jpi_file=item["name"],
+                        jpi_sha256=item["sha256"],
+                        jpi_flight_id=flight.flight_id,
+                        offset_s=result.offset_s,
+                        drift_s_per_s=result.drift_s_per_s,
+                        residual=result.residual,
+                        residual_unit=result.residual_unit,
+                        method=result.method,
                         status="skipped",
                         reason="already merged from this file",
                     ),
                 )
-                print(f"  {db.name}: already merged from {named['name']}")
-                return
-            if not existing["sha256"] and named is not None and named["download"] is not None:
-                _set_meta(conn, "jpi_edm930_sha256", named["sha256"])
-                conn.commit()
-                _record(
-                    ledger,
-                    _attempt(
-                        now,
-                        db.name,
-                        jpi_file=named["name"],
-                        jpi_sha256=named["sha256"],
-                        jpi_flight_id=existing["flight_id"],
-                        status="backfilled",
-                        reason="stored the current file hash; rows kept",
-                    ),
-                )
-                print(f"  {db.name}: recorded sha256 of {named['name']}")
-                return
-            if named is None:
-                _record(
-                    ledger,
-                    _attempt(
-                        now,
-                        db.name,
-                        jpi_file=existing["source"],
-                        jpi_sha256=existing["sha256"],
-                        jpi_flight_id=existing["flight_id"],
-                        status="kept",
-                        reason="already merged; source file is not in the raw directory",
-                    ),
-                )
-                print(f"  {db.name}: kept existing merge ({existing['source'] or 'unknown source'})")
-                return
-            # Named file is on disk and its bytes differ from the stored hash.
-            changed = named
-        candidates = _candidates(downloads, span, window_s, only=changed)
-        if not candidates:
-            status = "kept" if existing else "no_overlap"
-            reason = (
-                "source file changed but it does not overlap this DB"
-                if existing
-                else "no JPI flight overlaps this DB"
-            )
-            _record(ledger, _attempt(now, db.name, status=status, reason=reason))
-            print(f"  {db.name}: {reason}")
+            print(f"  {db.name}: already merged ({len(kept_ids)} capture(s))")
             return
-        fitted = []
-        for item, flight in candidates:
-            if item["download"] is None:
-                continue
-            result = align_flight(flight, conn, window_s=window_s)
-            fitted.append((item, flight, result))
-            print(
-                f"  {db.name} × {item['name']} flight {flight.flight_id}: "
-                + ("ok" if result.ok else "REFUSED")
-                + f" {result.residual if result.ok else result.reason}"
-            )
-        ok = [row for row in fitted if row[2].ok]
-        ok.sort(key=lambda row: row[2].residual)
-        winner = ok[0] if ok else None
-        for item, flight, result in fitted:
-            chosen = winner is not None and flight is winner[1] and item is winner[0]
-            if result.ok and chosen:
-                status = "applied" if apply else "dry_run"
-                reason = "" if apply else "dry-run; limits passed, nothing written"
-                if apply:
-                    if existing and item["sha256"] == (existing["sha256"] or ""):
-                        status = "skipped"
-                        reason = "already merged from this file"
-                    else:
-                        write_flight(conn, flight, result, item["name"], item["sha256"])
-                        reason = "merged"
-                        if existing:
-                            reason = "replaced the previous merge; source file changed or there was no hash"
-            elif result.ok:
-                status = "not_applied"
-                reason = "another overlapping flight matched more closely"
-            else:
-                status = "refused"
-                reason = result.reason
-                if existing and winner is None:
-                    reason = f"{result.reason} Previous merge kept."
+        refused = [row for row in fitted if not row[2].ok]
+        for item, flight, result, _shared in refused:
+            reason = result.reason
+            if stored and not kept:
+                reason = f"{result.reason} Previous merge kept."
             _record(
                 ledger,
                 _attempt(
@@ -198,21 +148,198 @@ def _one_db(db: Path, downloads: list[dict], ledger: dict, *, apply: bool, windo
                     jpi_file=item["name"],
                     jpi_sha256=item["sha256"],
                     jpi_flight_id=flight.flight_id,
-                    offset_s=result.offset_s if result.ok else None,
-                    drift_s_per_s=result.drift_s_per_s if result.ok else None,
-                    residual=result.residual if result.ok else None,
-                    residual_unit=result.residual_unit if result.ok else "",
                     method=result.method,
-                    status=status,
+                    status="refused",
                     reason=reason,
                 ),
             )
-        if winner is None:
+            print(f"  {db.name} × {item['name']} flight {flight.flight_id}: REFUSED {result.reason}")
+        for item, flight, result, _shared in overlapped:
+            _record(
+                ledger,
+                _attempt(
+                    now,
+                    db.name,
+                    jpi_file=item["name"],
+                    jpi_sha256=item["sha256"],
+                    jpi_flight_id=flight.flight_id,
+                    offset_s=result.offset_s,
+                    drift_s_per_s=result.drift_s_per_s,
+                    residual=result.residual,
+                    residual_unit=result.residual_unit,
+                    method=result.method,
+                    status="overlap",
+                    reason="aligned time range overlaps another capture; not written",
+                ),
+            )
+            print(f"  {db.name} × {item['name']} flight {flight.flight_id}: overlap, not written")
+        if not kept and not missing:
             print(f"  {db.name}: not written")
-        elif apply:
-            print(f"  {db.name}: merged flight {winner[1].flight_id} from {winner[0]['name']}")
+            return
+        if not apply:
+            for item, flight, result, shared in kept:
+                _record(
+                    ledger,
+                    _attempt(
+                        now,
+                        db.name,
+                        jpi_file=item["name"],
+                        jpi_sha256=item["sha256"],
+                        jpi_flight_id=flight.flight_id,
+                        offset_s=result.offset_s,
+                        drift_s_per_s=result.drift_s_per_s,
+                        residual=result.residual,
+                        residual_unit=result.residual_unit,
+                        method=result.method,
+                        status="dry_run",
+                        reason="dry-run; limits passed, nothing written"
+                        + (" (shared clock)" if shared else ""),
+                    ),
+                )
+            print(f"  {db.name}: dry-run, {len(kept)} capture(s)")
+            return
+        keep_rows = []
+        if missing:
+            keep_rows = read_kept_rows(conn, {cap["id"] for cap in missing if cap.get("id")})
+            only = next((cap["id"] for cap in missing if cap.get("id")), "kept")
+            for row in keep_rows:
+                if not row.get("capture_id"):
+                    row["capture_id"] = only
+        captures = [
+            Capture(flight, result, item["name"], item["sha256"], shared=shared)
+            for item, flight, result, shared in kept
+        ]
+        try:
+            n = write_captures(conn, captures, keep_rows)
+        except ValueError as exc:
+            _record(ledger, _attempt(now, db.name, status="error", reason=str(exc)))
+            print(f"  {db.name}: not written ({exc})")
+            return
+        for item, flight, result, shared in kept:
+            _record(
+                ledger,
+                _attempt(
+                    now,
+                    db.name,
+                    jpi_file=item["name"],
+                    jpi_sha256=item["sha256"],
+                    jpi_flight_id=flight.flight_id,
+                    offset_s=result.offset_s,
+                    drift_s_per_s=result.drift_s_per_s,
+                    residual=result.residual,
+                    residual_unit=result.residual_unit,
+                    method=result.method,
+                    status="applied",
+                    reason="merged" + (" (shared clock from another flight in this download)" if shared else ""),
+                ),
+            )
+        print(f"  {db.name}: merged {len(captures)} capture(s), {n} rows")
     finally:
         conn.close()
+
+
+def _fit_group(group, conn, stored, window_s, db_name) -> list[tuple[dict, Flight, AlignResult, bool]]:
+    out: list[tuple[dict, Flight, AlignResult, bool]] = []
+    donors: list[AlignResult] = []
+    for item, flight in group:
+        cid = f"{item['name']}#{flight.flight_id}"
+        prev = stored.get(cid) if isinstance(stored, dict) else None
+        if prev and prev.get("sha256") and prev.get("sha256") == item["sha256"] and prev.get("offset_s") is not None:
+            result = _result_from_stored(prev)
+            shared = bool(prev.get("shared"))
+            out.append((item, flight, result, shared))
+            if result.ok and not shared:
+                donors.append(result)
+            continue
+        result = align_flight(flight, conn, window_s=window_s)
+        print(
+            f"  {db_name} × {item['name']} flight {flight.flight_id}: "
+            + ("ok" if result.ok else "REFUSED")
+            + f" {result.residual if result.ok else result.reason}"
+        )
+        out.append((item, flight, result, False))
+        if result.ok:
+            donors.append(result)
+    if not donors:
+        return out
+    donor = min(donors, key=lambda r: r.residual if r.residual == r.residual else 1e18)
+    shared_out = []
+    for item, flight, result, shared in out:
+        if result.ok or shared:
+            shared_out.append((item, flight, result, shared))
+            continue
+        if _has_track(flight):
+            shared_out.append((item, flight, result, False))
+            continue
+        shared_out.append((item, flight, _shared_result(donor), True))
+        print(
+            f"  {db_name} × {item['name']} flight {flight.flight_id}: "
+            f"shared clock from this download ({donor.method})"
+        )
+    return shared_out
+
+
+def _has_track(flight: Flight) -> bool:
+    try:
+        return _jpi_track(flight, flight_unix(flight)) is not None
+    except (TypeError, ValueError):
+        return False
+
+
+def _shared_result(donor: AlignResult) -> AlignResult:
+    return AlignResult(
+        ok=True,
+        method=donor.method + "+shared",
+        offset_s=donor.offset_s,
+        drift_s_per_s=donor.drift_s_per_s,
+        t_ref_unix=donor.t_ref_unix,
+        residual=donor.residual,
+        residual_unit=donor.residual_unit,
+        detail=f"Shared clock from another flight in the same download ({donor.method}).",
+        n_points=donor.n_points,
+    )
+
+
+def _resolve_overlaps(fitted):
+    from analysis.jpi.store import aligned_times
+
+    ok = [row for row in fitted if row[2].ok]
+    spans = []
+    for item, flight, result, shared in ok:
+        stamps = aligned_times(flight, result)
+        if not stamps:
+            continue
+        spans.append((min(stamps), max(stamps), (item, flight, result, shared)))
+    spans.sort(key=lambda row: row[0])
+    kept_spans = []
+    overlapped = []
+    for start, end, row in spans:
+        clash = None
+        for ks, ke, krow in kept_spans:
+            if start <= ke and end >= ks:
+                clash = (ks, ke, krow)
+                break
+        if clash is None:
+            kept_spans.append((start, end, row))
+            continue
+        if _rank(row) < _rank(clash[2]):
+            overlapped.append(clash[2])
+            kept_spans = [s for s in kept_spans if s[2] is not clash[2]]
+            kept_spans.append((start, end, row))
+        else:
+            overlapped.append(row)
+    return [s[2] for s in kept_spans], overlapped
+
+
+def _rank(row) -> tuple:
+    _item, flight, result, shared = row
+    residual = result.residual if result.residual == result.residual else 1e18
+    return (1 if shared else 0, residual, -len(flight.samples), int(flight.flight_id))
+
+
+def _stored_sha_ok(stored: dict, item: dict, flight: Flight) -> bool:
+    cap = stored.get(f"{item['name']}#{flight.flight_id}")
+    return bool(cap) and cap.get("sha256") == item["sha256"]
 
 
 def _candidates(downloads, span, window_s, only) -> list[tuple[dict, Flight]]:
@@ -233,27 +360,73 @@ def _candidates(downloads, span, window_s, only) -> list[tuple[dict, Flight]]:
     return found
 
 
-def _existing(conn: sqlite3.Connection) -> dict | None:
+def _stored_captures(conn: sqlite3.Connection) -> dict:
     row = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='jpi_edm930'"
     ).fetchone()
     if not row:
-        return None
-    n = conn.execute("SELECT COUNT(*) FROM jpi_edm930").fetchone()[0]
-    if not n:
-        return None
+        return {}
+    if conn.execute("SELECT 1 FROM jpi_edm930 LIMIT 1").fetchone() is None:
+        return {}
     meta = {}
     if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='metadata'").fetchone():
         for key, value in conn.execute(
             "SELECT key, value FROM metadata WHERE key LIKE 'jpi_edm930_%'"
         ):
             meta[key] = value or ""
+    raw = meta.get("jpi_edm930_captures_json") or ""
+    if raw:
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            data = None
+        if isinstance(data, list):
+            return {str(item["id"]): item for item in data if isinstance(item, dict) and item.get("id")}
+    source = meta.get("jpi_edm930_source") or ""
+    fid = meta.get("jpi_edm930_flight_id") or ""
+    if not source and not fid:
+        return {"legacy": {"id": "legacy", "source": "", "sha256": "", "kept": True}}
+    cid = f"{source}#{fid}" if source else str(fid)
+
+    def fnum(key: str):
+        try:
+            return float(meta.get(key) or "nan")
+        except ValueError:
+            return float("nan")
+
     return {
-        "rows": int(n),
-        "sha256": meta.get("jpi_edm930_sha256") or "",
-        "source": meta.get("jpi_edm930_source") or "",
-        "flight_id": meta.get("jpi_edm930_flight_id") or "",
+        cid: {
+            "id": cid,
+            "source": source,
+            "sha256": meta.get("jpi_edm930_sha256") or "",
+            "flight_id": fid,
+            "offset_s": fnum("jpi_edm930_offset_s"),
+            "drift_s_per_s": fnum("jpi_edm930_drift_s_per_s"),
+            "t_ref_unix": fnum("jpi_edm930_t_ref_unix"),
+            "method": meta.get("jpi_edm930_method") or "",
+            "residual": fnum("jpi_edm930_residual"),
+            "residual_unit": meta.get("jpi_edm930_residual_unit") or "",
+            "shared": False,
+        }
     }
+
+
+def _result_from_stored(cap: dict) -> AlignResult:
+    residual = cap.get("residual")
+    try:
+        residual_f = float("nan") if residual is None else float(residual)
+    except (TypeError, ValueError):
+        residual_f = float("nan")
+    return AlignResult(
+        ok=True,
+        method=str(cap.get("method") or "stored"),
+        offset_s=float(cap.get("offset_s") or 0.0),
+        drift_s_per_s=float(cap.get("drift_s_per_s") or 0.0),
+        t_ref_unix=float(cap.get("t_ref_unix") or 0.0),
+        residual=residual_f,
+        residual_unit=str(cap.get("residual_unit") or ""),
+        detail="reused the stored fit",
+    )
 
 
 def _set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:

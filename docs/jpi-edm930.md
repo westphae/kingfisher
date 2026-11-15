@@ -140,7 +140,11 @@ accumulated drift. Widen it with `--window-s` only on purpose.
 
 `jpi_edm930.ts_ns` is the aligned Pi `CLOCK_REALTIME` nanosecond, the same
 base as every other flight table (`docs/timestamps.md`). `jpi_time` is the
-monitor face, `YYYY-MM-DDTHH:MM:SS`, text, no timezone.
+monitor face, `YYYY-MM-DDTHH:MM:SS`, text, no timezone. `capture_id` is
+`<file>#<flight id>`. One Kingfisher session can hold several EDM recordings
+(a taxi to the pump, then a restart). They share this table. Captures do
+not overlap in time; an overlap is refused instead of writing a second
+value at the same timestamp.
 
 The fit is stored once in `metadata`, keys `jpi_edm930_*`:
 
@@ -159,17 +163,30 @@ The fit is stored once in `metadata`, keys `jpi_edm930_*`:
 | `jpi_edm930_oat_pearson` | OAT check at the fitted offset, may be empty |
 | `jpi_edm930_oat_source` | Kingfisher temperature column used |
 | `jpi_edm930_detail` | which streams were compared |
+| `jpi_edm930_captures` | how many recordings are in the table |
+| `jpi_edm930_capture_ids` | comma-separated `capture_id` values |
+| `jpi_edm930_captures_json` | per-recording offset, hash, and whether the clock was shared |
 
-Running again drops `jpi_edm930` and those keys, then writes them once.
+The single-flight keys describe the recording with the most samples. A
+short taxi that has no GPS track of its own reuses the offset from another
+flight in the same download (`method` ends in `+shared`). A re-run with the
+same file hash does not refit that recording. A download whose bytes
+changed is fitted again; a refusal keeps the previous rows. Running again
+rewrites the table as a set, so a second apply does not append.
+
+The analysis flight list reads `jpi_edm930_captures` (or treats a legacy
+table with no count as one capture) plus the ingest ledger. It does not
+scan the data rows. The chip is `JPI`, `JPI ×N`, `no JPI`, or `JPI refused`.
 
 ## Automatic ingest
 
-`jpi-auto` walks `~/kingfisher/flights` and `~/kingfisher/engine/raw`. A
-database that already has `jpi_edm930` from the same file hash is left
-alone. A database with no engine rows, or whose source file changed, is
-fitted with the same gates as `jpi`. The fit is written only when those
-gates pass. A refused re-fit keeps the previous table. The ledger is
-`~/kingfisher/engine/ingest.json`.
+`jpi-auto` walks `~/kingfisher/flights` and `~/kingfisher/engine/raw` and
+keeps every EDM recording whose time falls inside a session. Each recording
+is fitted on its own, with the same gates as `jpi`. A short recording with
+no GPS track reuses the clock from another flight in that download.
+Overlapping times are not written. A recording whose file hash is unchanged
+is not refitted. A refused re-fit keeps the previous rows. The ledger is
+`~/kingfisher/engine/ingest.json`, one row per recording.
 
 ```bash
 uv run --project analysis python scripts/analyze_flights.py jpi-auto
