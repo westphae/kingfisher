@@ -219,6 +219,7 @@
     }
     alignEl.checked = true;
     alignEl.disabled = !clock.needs_align;
+    document.getElementById("engineBox").hidden = true;
 
     fullT0 = current.plot_t0_ns;
     fullT1 = current.plot_t1_ns;
@@ -229,6 +230,151 @@
     renderChips();
     await reloadSeries();
     loadHealth(file);
+    loadEngine(file);
+  }
+
+  const engineBox = document.getElementById("engineBox");
+  const engineDlg = document.getElementById("engineDlg");
+
+  async function loadEngine(file) {
+    engineBox.hidden = false;
+    document.getElementById("engineOverall").textContent = "…";
+    document.getElementById("engineOverall").className = "badge";
+    document.getElementById("engineNotes").textContent = "Reviewing…";
+    document.getElementById("enginePhases").innerHTML = "";
+    document.getElementById("engineChecks").innerHTML = "";
+    document.getElementById("engineEvents").innerHTML = "";
+    try {
+      const r = await fetch(`/api/sessions/${encodeURIComponent(file)}/engine`);
+      if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+      const review = await r.json();
+      if (activeFile !== file) return;
+      renderEngine(review);
+    } catch (err) {
+      document.getElementById("engineNotes").textContent = "Engine review failed: " + err.message;
+    }
+  }
+
+  function statusClass(status) {
+    if (status === "pass") return "ok";
+    if (status === "caution") return "warn";
+    if (status === "fail") return "bad";
+    return "dim";
+  }
+
+  function renderEngine(review) {
+    const overall = review.overall || "skip";
+    const badge = document.getElementById("engineOverall");
+    const counts = review.counts || {};
+    badge.textContent = `${overall}  ${counts.pass || 0} pass · ${counts.caution || 0} caution · ${counts.fail || 0} fail`;
+    badge.className = "badge " + statusClass(overall);
+    const notes = [...(review.notes || [])];
+    if (review.alt_source) notes.unshift("altitude: " + review.alt_source);
+    if (review.ias && review.ias !== "ok") notes.push("IAS: " + review.ias);
+    document.getElementById("engineNotes").textContent = notes.join("  ");
+    const phases = review.phases || [];
+    const total = phases.reduce((s, p) => s + (p.duration_s || 0), 0) || 1;
+    document.getElementById("enginePhases").innerHTML = phases.map((p) => {
+      const pct = Math.max(1.2, (100 * (p.duration_s || 0)) / total);
+      return `<button type="button" class="phase phase-${esc(p.name)}" style="flex:${pct}" data-t0="${p.t0_ns}" data-t1="${p.t1_ns}" title="${esc(p.name)} ${Math.round((p.duration_s || 0) / 60)} min">${esc(p.name.replace("_", " "))}</button>`;
+    }).join("");
+    const checks = review.checks || [];
+    document.getElementById("engineChecks").innerHTML =
+      `<thead><tr><th></th><th>Check</th><th>Observed</th><th>Limit</th></tr></thead><tbody>` +
+      checks.map((c) => `<tr class="${statusClass(c.status)}">
+        <td>${esc(c.status)}</td>
+        <td>${esc(c.title)}${c.detail ? `<div class="dim">${esc(c.detail)}</div>` : ""}</td>
+        <td>${esc(c.observed)}</td>
+        <td>${esc(c.limit)}</td>
+      </tr>`).join("") + `</tbody>`;
+    const events = review.events || [];
+    document.getElementById("engineEvents").innerHTML = events.map((ev, i) =>
+      `<li><button type="button" class="event ${statusClass(ev.severity)}" data-i="${i}">
+        <span class="when">${esc((ev.t_iso || "").slice(11, 19))}Z</span>
+        ${esc(ev.message)}
+      </button></li>`
+    ).join("") || `<li class="dim">No timestamped events.</li>`;
+    engineBox._review = review;
+  }
+
+  document.getElementById("enginePhases").addEventListener("click", (e) => {
+    const b = e.target.closest(".phase");
+    if (!b) return;
+    zoomWindow(Number(b.dataset.t0), Number(b.dataset.t1), [
+      { table: "jpi_edm930", column: "rpm" },
+      { table: "jpi_edm930", column: "fuel_flow_gph" },
+      { table: "jpi_edm930", column: "tit1_f" },
+    ]);
+  });
+
+  document.getElementById("engineEvents").addEventListener("click", (e) => {
+    const b = e.target.closest(".event");
+    if (!b || !engineBox._review) return;
+    const ev = (engineBox._review.events || [])[Number(b.dataset.i)];
+    if (!ev) return;
+    zoomWindow(ev.t0_ns, ev.t1_ns, ev.series);
+  });
+
+  function zoomWindow(t0, t1, series) {
+    if (!t0 || !t1 || t1 <= t0) return;
+    t0ns = t0;
+    t1ns = t1;
+    let added = false;
+    for (const s of series || []) {
+      if (!s || !s.table || !s.column) continue;
+      if (selectedIndex(s.table, s.column) >= 0) continue;
+      selected.push({ table: s.table, column: s.column, color: nextColor() });
+      added = true;
+    }
+    if (added) renderChips();
+    reloadSeries();
+    plotWrap.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+
+  document.getElementById("engineSummaryBtn").addEventListener("click", async () => {
+    const body = document.getElementById("engineSummaryBody");
+    body.textContent = "Loading cached reviews…";
+    engineDlg.showModal();
+    try {
+      const r = await fetch("/api/engine/summary");
+      if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+      body.innerHTML = renderSummary(await r.json());
+    } catch (err) {
+      body.textContent = "Summary failed: " + err.message;
+    }
+  });
+
+  function renderSummary(data) {
+    const flags = (data.flags || []).map((f) => `<p class="warn">${esc(f.detail)}</p>`).join("");
+    const corr = data.correlation || {};
+    const note = corr.note ? `<p class="dim">${esc(corr.note)}</p>` : "";
+    const rows = (data.flights || []).map((f) => `<tr>
+      <td>${esc(String(f.session || "").replace(/\.db$/, ""))}</td>
+      <td class="${statusClass(f.overall)}">${esc(f.overall)}</td>
+      <td>${num(f.cht3_offset_climb_f)}</td>
+      <td>${num(f.cht3_offset_cruise_f)}</td>
+      <td>${num(f.peak_cht_f, 0)}</td>
+      <td>${num(f.time_above_380_s, 0)}</td>
+      <td>${num(f.cruise_ff_gph)}</td>
+      <td>${num(f.cruise_tit_f, 0)}</td>
+      <td>${num(f.lop_depth_f, 0)}</td>
+      <td>${(f.boost_lo || 0) + (f.boost_hi || 0)}/${f.boost_lo_ff_drop || 0}</td>
+      <td>${f.vapor_events || 0}</td>
+      <td class="${statusClass(f.mag_status)}">${esc(f.mag_status || "")}</td>
+      <td>${num(f.oil_press_min, 0)} / ${num(f.oil_temp_max_f, 0)}</td>
+    </tr>`).join("");
+    return `${flags}${note}<table>
+      <thead><tr>
+        <th>Flight</th><th>Result</th><th>CHT3 climb</th><th>CHT3 cruise</th>
+        <th>Peak CHT</th><th>s &gt;380</th><th>FF</th><th>TIT</th><th>LOP</th>
+        <th>boost</th><th>vapor</th><th>mag</th><th>oil P/T</th>
+      </tr></thead><tbody>${rows || `<tr><td colspan="13">No reviewed flights.</td></tr>`}</tbody>
+    </table>`;
+  }
+
+  function num(v, digits) {
+    if (v == null || Number.isNaN(Number(v))) return "—";
+    return Number(v).toFixed(digits == null ? 1 : digits);
   }
 
   function renderTables() {

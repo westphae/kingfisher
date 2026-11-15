@@ -15,8 +15,13 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from analysis.browse import list_sessions, resolve_db, session_detail
+from analysis.clockalign import load_clock
 from analysis.db import connect_ro
+from analysis.engine.limits import load_limits
+from analysis.engine.run import review_all, review_db
+from analysis.engine.summary import summarize
 from analysis.health import analyze_health
+from analysis.jpi.duplicates import flag_sessions
 from analysis.series import DEFAULT_POINTS, query_series
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -29,6 +34,7 @@ def _json(obj: Any) -> bytes:
 class Handler(BaseHTTPRequestHandler):
     flights_dir: Path
     catalog_path: Path
+    engine_cache: Path | None = None
     server_version = "kingfisher-analysis/0.1"
 
     def log_message(self, fmt: str, *args: Any) -> None:
@@ -84,6 +90,13 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/api/sessions/([^/]+)/series", path)
         if m:
             self._series(m.group(1), q)
+            return
+        m = re.fullmatch(r"/api/sessions/([^/]+)/engine", path)
+        if m:
+            self._engine(m.group(1))
+            return
+        if path == "/api/engine/summary":
+            self._engine_summary()
             return
         self._err(404, "not found")
 
@@ -172,6 +185,59 @@ class Handler(BaseHTTPRequestHandler):
         payload["y"] = payload.pop("values")
         self._send_json(200, payload)
 
+    def _engine(self, name: str) -> None:
+        try:
+            path = self._db(name)
+        except FileNotFoundError:
+            self._err(404, "no such session")
+            return
+        except ValueError as e:
+            self._err(400, str(e))
+            return
+        review = review_db(path, load_limits(None), self.engine_cache)
+        self._send_json(200, _align_review(path, review))
+
+    def _engine_summary(self) -> None:
+        limits = load_limits(None)
+        reviews = review_all(self.flights_dir, limits, cache_dir=self.engine_cache)
+        flags = flag_sessions(self.flights_dir)
+        self._send_json(200, summarize(reviews, flags))
+
+
+def _align_review(path: Path, review: dict) -> dict:
+    """Shift event and phase times onto the same clock the chart uses.
+
+    The cache keeps raw ``ts_ns``. This copy is what the browser zooms to.
+    """
+    out = json.loads(json.dumps(review))
+    conn = connect_ro(path)
+    try:
+        model = load_clock(conn)
+    finally:
+        conn.close()
+    if not model.needs_align:
+        return out
+
+    def shift(ns):
+        if ns is None:
+            return None
+        return int(model.align_ts_ns(int(ns)))
+
+    for phase in out.get("phases") or []:
+        phase["t0_ns"] = shift(phase.get("t0_ns"))
+        phase["t1_ns"] = shift(phase.get("t1_ns"))
+    for event in out.get("events") or []:
+        raw = event.get("t_ns")
+        aligned = shift(raw)
+        if raw is not None and aligned is not None:
+            delta_s = (aligned - int(raw)) / 1e9
+            if event.get("t_unix") is not None:
+                event["t_unix"] = float(event["t_unix"]) + delta_s
+        event["t_ns"] = aligned
+        event["t0_ns"] = shift(event.get("t0_ns"))
+        event["t1_ns"] = shift(event.get("t1_ns"))
+    return out
+
 
 def serve(
     *,
@@ -182,6 +248,7 @@ def serve(
 ) -> None:
     Handler.flights_dir = flights_dir
     Handler.catalog_path = catalog_path
+    Handler.engine_cache = catalog_path.parent / "engine"
     ThreadingHTTPServer.allow_reuse_address = True
     httpd = ThreadingHTTPServer((host, port), Handler)
     print(f"Flight analysis UI → http://{host}:{port}")

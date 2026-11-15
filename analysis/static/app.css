@@ -205,6 +205,73 @@ h2 { font-size: 0.85rem; font-weight: 650; margin: 1.2rem 0 0.4rem; color: var(-
   font-variant-numeric: tabular-nums;
 }
 
+.engineBox {
+  margin: 0.8rem 0 1rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.engineHead {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.engineHead h2 { margin: 0; font-size: 1rem; }
+.engineHead .badge { font-weight: 650; }
+
+.phaseBar {
+  display: flex;
+  gap: 2px;
+  margin: 0.45rem 0 0.6rem;
+  min-height: 1.8rem;
+}
+
+.phase {
+  padding: 0.15rem 0.2rem;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #1a2740;
+}
+
+.phase-climb { background: #1d3a32; }
+.phase-cruise { background: #1a3050; }
+.phase-descent, .phase-landing { background: #3a2e18; }
+.phase-takeoff, .phase-level_off { background: #3a2218; }
+.phase-mag_check { background: #2a2040; }
+
+.engineTable { border-collapse: collapse; width: 100%; font-size: 13px; }
+.engineTable th, .engineTable td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.25rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+.engineTable td:first-child { width: 4.5rem; font-weight: 650; text-transform: uppercase; font-size: 11px; }
+
+.engineEvents { list-style: none; margin: 0.5rem 0 0; padding: 0; }
+.engineEvents .event {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin: 0.15rem 0;
+  background: var(--bg);
+}
+.engineEvents .when { font-variant-numeric: tabular-nums; margin-right: 0.4rem; color: var(--dim); }
+
+#engineDlg { max-width: 1100px; width: 92vw; }
+.engineSummary { overflow: auto; max-height: 70vh; }
+.engineSummary table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.engineSummary th, .engineSummary td {
+  text-align: left;
+  padding: 0.2rem 0.35rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
 .ok { color: var(--good); }
 .warn { color: var(--warn); }
 .bad { color: var(--bad); }
