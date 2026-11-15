@@ -26,7 +26,8 @@ RAW_DIR="${HOME}/kingfisher/engine/raw"
 FLIGHTS_DIR="${HOME}/kingfisher/flights"
 LEDGER="${HOME}/kingfisher/engine/ingest.json"
 REPO="${HOME}/go/src/github.com/westphae/kingfisher"
-UV="${UV:-uv}"
+# UV is resolved after jpi.env is sourced. systemd does not load mise, so
+# an absolute path in jpi.env is how the oneshot finds uv on the Pi.
 
 # none | ssh | rsyncd. none is the default so a checkout without jpi.env
 # does not try the NAS. jpi.env.example turns ssh on.
@@ -49,8 +50,16 @@ NAS_PATH=""
 # shellcheck source=/dev/null
 [ -r "$CONF" ] && . "$CONF"
 
+# Inherited UV= wins over the default, and jpi.env (sourced above) wins
+# over both. Empty means "look it up".
+if [ -z "${UV:-}" ]; then
+	UV="$(command -v uv 2>/dev/null || true)"
+fi
+
 log() { echo "kingfisher-jpi: $*"; }
 die() { log "$*"; exit 1; }
+
+[ -n "$UV" ] || die "uv not found; set UV= in $ENV_FILE (mise is not on the oneshot PATH)"
 
 LOCK="/tmp/kingfisher-jpi-ingest.lock"
 if command -v flock >/dev/null 2>&1; then

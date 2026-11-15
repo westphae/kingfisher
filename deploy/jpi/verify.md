@@ -95,5 +95,12 @@ The oneshot runs as `eric`, so it can read `~/kingfisher`, `~/.ssh/nas_ro`,
 and the repo checkout at `REPO`. `TimeoutStartSec=infinity` because a
 directory of downloads can take a while; `flock` keeps two runs from stacking.
 
+The service PATH is `~/.local/bin:/usr/local/bin:/usr/bin:/bin`. It does
+not load mise. On this Pi, uv is installed by mise, so the oneshot will
+not see it unless `UV=` in `~/.config/kingfisher/jpi.env` is an absolute
+path. From a login shell, `command -v uv` prints that path (the mise shim
+is `~/.local/share/mise/shims/uv`). When `UV` is unset, the script uses
+`command -v uv` and exits if that finds nothing.
+
 Thresholds Eric tunes live in `~/kingfisher/engine/limits.json`. See
 `docs/analysis/engine.md`.

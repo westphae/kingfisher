@@ -28,20 +28,20 @@ def _load_cli():
     return module
 
 
-def _run_script(root: Path) -> list[list[str]]:
+def _run_script(root: Path, *, uv_in_env: str | None = None, extra_env: str = "") -> subprocess.CompletedProcess[str]:
     bindir = root / "bin"
-    bindir.mkdir()
+    bindir.mkdir(exist_ok=True)
     log = root / "uv.args"
     flights = root / "flights"
-    flights.mkdir()
+    flights.mkdir(exist_ok=True)
     repo = root / "repo"
-    repo.mkdir()
-    (repo / "scripts").mkdir()
+    repo.mkdir(exist_ok=True)
+    (repo / "scripts").mkdir(exist_ok=True)
     stubs = {
         "ip": "#!/bin/sh\necho '    inet 192.168.86.151/24 brd 192.168.86.255 scope global wlan1'\n",
         "nc": "#!/bin/sh\nexit 0\n",
         "rsync": "#!/bin/sh\nexit 0\n",
-        "uv": "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$UV_LOG\"\nexit 0\n",
+        "uv": "#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$*\" >> \"$UV_LOG\"\nexit 0\n",
     }
     for name, body in stubs.items():
         path = bindir / name
@@ -56,6 +56,7 @@ def _run_script(root: Path) -> list[list[str]]:
                 f'RAW_DIR="{root / "raw"}"',
                 f'LEDGER="{root / "ledger.json"}"',
                 f'REPO="{repo}"',
+                extra_env,
                 "",
             ]
         ),
@@ -68,7 +69,9 @@ def _run_script(root: Path) -> list[list[str]]:
     env["KINGFISHER_JPI_CONF"] = str(root / "no-such.conf")
     env["UV_LOG"] = str(log)
     env.pop("UV", None)
-    proc = subprocess.run(
+    if uv_in_env is not None:
+        env["UV"] = uv_in_env
+    return subprocess.run(
         ["sh", str(SCRIPT)],
         cwd=root,
         env=env,
@@ -76,10 +79,6 @@ def _run_script(root: Path) -> list[list[str]]:
         capture_output=True,
         text=True,
     )
-    if proc.returncode != 0:
-        raise AssertionError(proc.stdout + proc.stderr)
-    lines = [line for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
-    return [line.split() for line in lines]
 
 
 class IngestArgvTests(unittest.TestCase):
@@ -87,8 +86,14 @@ class IngestArgvTests(unittest.TestCase):
         cli = _load_cli()
         parser = cli.build_parser()
         with tempfile.TemporaryDirectory() as tmp:
-            invocations = _run_script(Path(tmp))
+            root = Path(tmp)
+            proc = _run_script(root)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            log = (root / "uv.args").read_text(encoding="utf-8")
+        invocations = [line.split() for line in log.splitlines() if line.strip()]
         self.assertEqual(len(invocations), 2, invocations)
+        # Unset UV resolves through `command -v uv`, which is the stub on PATH.
+        self.assertTrue(invocations[0][0].endswith("/uv"), invocations[0])
         commands = []
         for argv in invocations:
             # uv run --project analysis python scripts/analyze_flights.py ...
@@ -106,6 +111,45 @@ class IngestArgvTests(unittest.TestCase):
         self.assertEqual(commands, ["jpi-auto", "engine"])
         self.assertEqual(invocations[0][invocations[0].index("scripts/analyze_flights.py") + 1], "--flights-dir")
         self.assertEqual(invocations[1][invocations[1].index("scripts/analyze_flights.py") + 1], "--flights-dir")
+
+
+    def test_jpi_env_uv_overrides_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            chosen = root / "mise-uv"
+            chosen.write_text(
+                "#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$*\" >> \"$UV_LOG\"\nexit 0\n",
+                encoding="utf-8",
+            )
+            chosen.chmod(chosen.stat().st_mode | stat.S_IEXEC)
+            # The stub named uv stays first on PATH. jpi.env must win.
+            proc = _run_script(root, extra_env=f'UV="{chosen}"')
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            first = (root / "uv.args").read_text(encoding="utf-8").splitlines()[0]
+            self.assertTrue(first.startswith(str(chosen) + " "), first)
+
+    def test_missing_uv_is_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _run_script(root)
+            empty = root / "empty-path"
+            empty.mkdir()
+            env = os.environ.copy()
+            env["PATH"] = str(empty)
+            env["HOME"] = str(root)
+            env["KINGFISHER_JPI_ENV"] = str(root / "jpi.env")
+            env["KINGFISHER_JPI_CONF"] = str(root / "no-such.conf")
+            env.pop("UV", None)
+            proc = subprocess.run(
+                ["/bin/sh", str(SCRIPT)],
+                cwd=root,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("uv not found", proc.stdout + proc.stderr)
 
 
 def _flights_dir_after_subcommand(tail: list[str]) -> list[str]:
