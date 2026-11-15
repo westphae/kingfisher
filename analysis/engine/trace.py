@@ -20,6 +20,8 @@ from analysis.jpi.parse import Flight
 _M_TO_FT = 3.280839895
 _MPS_TO_KT = 1.9438444924406
 _SERIES_TABLE = "jpi_edm930"
+# A gap longer than this is a separate engine run (fuel stop, EDM reset).
+CAPTURE_GAP_S = 90.0
 
 
 @dataclass
@@ -46,6 +48,41 @@ class Trace:
     hp_pct: np.ndarray | None
     series_table: str = _SERIES_TABLE
     jpi_flight_id: int | None = None
+    capture_id: np.ndarray | None = None
+    segment: np.ndarray | None = None
+
+    def slice(self, idx: np.ndarray) -> "Trace":
+        """Rows of one capture, for phase logic that must not cross a gap."""
+
+        def cut(arr):
+            if arr is None:
+                return None
+            return np.asarray(arr)[idx]
+
+        cap = None if self.capture_id is None else self.capture_id[idx]
+        return from_columns(
+            session=self.session,
+            source=self.source,
+            t=self.t[idx],
+            t_ns=self.t_ns[idx],
+            rpm=self.rpm[idx],
+            map_inhg=self.map_inhg[idx],
+            ff=self.ff[idx],
+            tit=self.tit[idx],
+            oil_temp_f=self.oil_temp_f[idx],
+            oil_press=self.oil_press[idx],
+            oat_c=self.oat_c[idx],
+            egt=self.egt[idx],
+            cht=self.cht[idx],
+            alt_ft=cut(self.alt_ft),
+            alt_source=self.alt_source,
+            ias_kt=cut(self.ias_kt),
+            gs_kt=cut(self.gs_kt),
+            gs_source=self.gs_source,
+            hp_pct=cut(self.hp_pct),
+            jpi_flight_id=self.jpi_flight_id,
+            capture_id=cap,
+        )
 
     @property
     def n(self) -> int:
@@ -191,6 +228,7 @@ def from_columns(
     gs_source,
     hp_pct,
     jpi_flight_id: int | None = None,
+    capture_id: np.ndarray | None = None,
 ) -> Trace:
     ias = None if ias_kt is None else np.asarray(ias_kt, dtype=np.float64)
     gs = None if gs_kt is None else np.asarray(gs_kt, dtype=np.float64)
@@ -216,7 +254,28 @@ def from_columns(
         gs_source=gs_source,
         hp_pct=None if hp_pct is None else np.asarray(hp_pct, dtype=np.float64),
         jpi_flight_id=jpi_flight_id,
+        capture_id=None if capture_id is None else np.asarray(capture_id, dtype=object),
+        segment=segment_ids(np.asarray(t, dtype=np.float64), None if capture_id is None else np.asarray(capture_id, dtype=object)),
     )
+
+
+def segment_parts(segment: np.ndarray | None) -> list[np.ndarray] | None:
+    """Index arrays for each engine run, or None when the trace is one run."""
+    if segment is None or int(segment.size) == 0 or int(np.max(segment)) == 0:
+        return None
+    return [np.flatnonzero(segment == seg_id) for seg_id in range(int(np.max(segment)) + 1)]
+
+
+def segment_ids(t: np.ndarray, capture_id: np.ndarray | None) -> np.ndarray:
+    """0, 1, 2, … splitting on a capture change or a gap longer than ``CAPTURE_GAP_S``."""
+    n = int(t.size)
+    seg = np.zeros(n, dtype=np.int32)
+    for i in range(1, n):
+        split = float(t[i] - t[i - 1]) > CAPTURE_GAP_S
+        if capture_id is not None and capture_id[i] != capture_id[i - 1]:
+            split = True
+        seg[i] = seg[i - 1] + (1 if split else 0)
+    return seg
 
 
 def _interp(t_src: np.ndarray, y: np.ndarray, t_dst: np.ndarray) -> np.ndarray:
@@ -265,6 +324,8 @@ def from_connection(conn: sqlite3.Connection, session: str) -> Trace | None:
     select = [c for c in wanted if c in cols]
     if "rpm" not in select:
         return None
+    if "capture_id" in cols:
+        select.append("capture_id")
     rows = conn.execute(
         f'SELECT {", ".join(select)} FROM "{_SERIES_TABLE}" ORDER BY ts_ns'
     ).fetchall()
@@ -371,6 +432,11 @@ def from_connection(conn: sqlite3.Connection, session: str) -> Trace | None:
         gs_source=gs_source,
         hp_pct=hp,
         jpi_flight_id=flight_id,
+        capture_id=(
+            np.array([row[idx["capture_id"]] or "" for row in rows], dtype=object)
+            if "capture_id" in idx
+            else None
+        ),
     )
 
 

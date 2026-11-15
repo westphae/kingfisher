@@ -17,7 +17,7 @@ import numpy as np
 
 from analysis.engine.limits import Limits
 from analysis.engine.stats import rolling_median, rolling_std
-from analysis.engine.trace import Trace
+from analysis.engine.trace import Trace, segment_parts
 
 
 @dataclass
@@ -42,6 +42,16 @@ def egt_mean(tr: Trace) -> np.ndarray:
 
 
 def find_boost_steps(tr: Trace, mask: np.ndarray, lim: Limits) -> list[BoostStep]:
+    parts = segment_parts(tr.segment)
+    if parts is not None:
+        out: list[BoostStep] = []
+        for idx in parts:
+            if idx.size < 8:
+                continue
+            for step in find_boost_steps(tr.slice(idx), mask[idx], lim):
+                step.i = int(idx[step.i])
+                out.append(step)
+        return out
     n = tr.n
     if n < 8:
         return []
@@ -105,6 +115,16 @@ def find_boost_steps(tr: Trace, mask: np.ndarray, lim: Limits) -> list[BoostStep
 
 def find_vapor(tr: Trace, mask: np.ndarray, lim: Limits) -> list[VaporEvent]:
     """Fuel-flow wiggle, a sag at steady power, or a TIT rise that FF does not explain."""
+    parts = segment_parts(tr.segment)
+    if parts is not None:
+        out: list[VaporEvent] = []
+        for idx in parts:
+            if idx.size < 12:
+                continue
+            for event in find_vapor(tr.slice(idx), mask[idx], lim):
+                event.i = int(idx[event.i])
+                out.append(event)
+        return out
     n = tr.n
     if n < 12 or not mask.any():
         return []

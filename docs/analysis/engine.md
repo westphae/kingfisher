@@ -32,6 +32,11 @@ shutdown. A high-power climb stays a climb through a brief level bump.
 Without altitude, a descent flown at cruise power stays cruise and the
 descent check says so.
 
+A session can contain more than one EDM recording. Phase logic, rolling
+windows, and boost/vapor steps run inside each capture. A gap is not
+filled in, and a second engine start gets its own taxi and takeoff. The
+flight list shows `JPI`, `JPI ×N`, `no JPI`, or `JPI refused`.
+
 Each item is pass, caution, fail, or skip. Skip is not a pass. The flight
 fails if any item fails. The observed value and the limit are both on the
 row. Events carry a timestamp so the chart can zoom to them.
@@ -57,11 +62,12 @@ Defaults are AFMS Rev K where the supplement states a number:
   Oil temperature red 240°F, green 100–240. The wastegate note is about
   45 psi to hold rated MAP up high.
 
-These are review judgments, not lines in the supplement, and they are the
-ones to edit first: the 410°F CHT fail, how long "briefly" is for cold-oil
-MAP (default 90 seconds), taxi-lean fuel flow, boost step sizes from the
-11/11 ground test (LO about +0.5 gph and +20°F EGT, HI about +3.5 gph,
-+60°F EGT, +0.2 in Hg), the LO-lowers-fuel-flow anomaly, and vapor wiggle.
+These are review judgments, not lines in the supplement. Eric accepted the
+current defaults: cold-oil MAP under 170°F for at most 90 seconds, CHT
+fail at 410°F, a missing mag check as a caution, taxi lean at 6 gph, and
+vapor residual at 0.35 gph. The other inferred sizes stay as coded: boost
+steps from the 11/11 ground test (LO about +0.5 gph and +20°F EGT, HI
+about +3.5 gph, +60°F EGT, +0.2 in Hg) and the LO-lowers-fuel-flow anomaly.
 LO is expected above 5,000 ft density altitude and HI above 10,000. Density
 altitude is estimated from the altitude source plus OAT. A missing mag check
 on a flight that had a takeoff is a caution, not a failed drop.

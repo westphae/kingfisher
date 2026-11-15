@@ -17,7 +17,15 @@ from analysis.engine.boost import find_boost_steps, find_vapor
 from analysis.engine.limits import Limits, takeoff_ff_target
 from analysis.engine.mag import MagCheck, detect_mag
 from analysis.engine.phases import Span, label_phases, spans_from_labels
-from analysis.engine.stats import fmt_num, nan_max, nan_median, nan_min, rolling_median, rolling_std
+from analysis.engine.stats import (
+    fmt_num,
+    nan_max,
+    nan_median,
+    nan_min,
+    rolling_median,
+    rolling_median_blocked,
+    rolling_std,
+)
 from analysis.engine.trace import Trace
 
 _RANK = {"skip": 0, "pass": 1, "caution": 2, "fail": 3}
@@ -118,6 +126,12 @@ def _notes(tr: Trace, spans: list[Span]) -> list[str]:
     names = [s.name for s in spans]
     if "descent" not in names and tr.alt_source is None:
         notes.append("Without altitude, a descent at cruise power stays in cruise.")
+    if tr.segment is not None and int(np.max(tr.segment)) > 0:
+        ncap = int(np.max(tr.segment)) + 1
+        notes.append(
+            f"{ncap} engine captures. Gaps between them are not filled in, "
+            "and each start is phased on its own."
+        )
     return notes
 
 
@@ -456,8 +470,16 @@ def _climb_power(tr, lim, segs, checks, events, metrics) -> None:
     metrics["climb_ff"] = [round(float(nan_median(tr.ff[s.i0 : s.i1])), 2) for s in segs]
 
 
+def _same_capture(tr: Trace, i: int, j: int) -> bool:
+    if tr.segment is None:
+        return True
+    if j < 0 or j >= tr.n:
+        return False
+    return int(tr.segment[i]) == int(tr.segment[j])
+
+
 def _map_steps(tr: Trace, seg: Span, lim: Limits) -> bool:
-    mp = rolling_median(tr.map_inhg, 3)
+    mp = rolling_median_blocked(tr.map_inhg, 3, tr.segment)
     rpm = tr.rpm
     hop = max(2, int(round(6.0 / max(tr.dt_s, 0.5))))
     i = seg.i0
@@ -723,7 +745,10 @@ def _rich_hold_s(tr, lim, seg: Span) -> float:
     """Seconds of 2700 RPM and full-rich fuel flow at the end of the climb, before the pull."""
     i = seg.i0
     # Walk back into the climb as well. The painted level-off may start at the pull.
+    # Stop at the previous capture: that climb belongs to another engine run.
     while i > 0 and tr.t[seg.i0] - tr.t[i] < lim.level_off_lookback_s + 30:
+        if not _same_capture(tr, seg.i0, i - 1):
+            break
         i -= 1
     sl = slice(i, seg.i1)
     rpm = tr.rpm[sl]
@@ -734,10 +759,12 @@ def _rich_hold_s(tr, lim, seg: Span) -> float:
 
 
 def _lean_slew_s(tr, seg: Span) -> float | None:
-    ff = rolling_median(tr.ff, 3)
+    ff = rolling_median_blocked(tr.ff, 3, tr.segment)
     # From the last sample above 28 gph to the first sample under 18, inside or just after the segment.
     i0 = seg.i0
     i1 = min(tr.n - 1, seg.i1 + int(30 / max(tr.dt_s, 0.5)))
+    while i1 > i0 and not _same_capture(tr, i0, i1):
+        i1 -= 1
     hi = None
     for i in range(i0, i1):
         if np.isfinite(ff[i]) and ff[i] >= 28.0:
@@ -751,21 +778,34 @@ def _lean_slew_s(tr, seg: Span) -> float | None:
 
 
 def _peak_tit(tr: Trace, lim: Limits) -> dict | None:
-    tit = rolling_median(tr.tit, 5)
+    tit = rolling_median_blocked(tr.tit, 5, tr.segment)
     if not np.isfinite(tit).any():
         return None
     finds = []
     i = 2
     n = tr.n
     while i < n - 2:
+        if not _same_capture(tr, i, i - 1) or not _same_capture(tr, i, i + 1):
+            i += 1
+            continue
         if not np.isfinite(tit[i]) or tit[i] < tit[i - 1] or tit[i] < tit[i + 1] or tit[i] < 1500:
             i += 1
             continue
         left = i
-        while left > 0 and tr.t[i] - tr.t[left] < 180 and (not np.isfinite(tit[left]) or tit[left] > tit[i] - 40):
+        while (
+            left > 0
+            and _same_capture(tr, i, left - 1)
+            and tr.t[i] - tr.t[left] < 180
+            and (not np.isfinite(tit[left]) or tit[left] > tit[i] - 40)
+        ):
             left -= 1
         right = i
-        while right < n - 1 and tr.t[right] - tr.t[i] < 180 and (not np.isfinite(tit[right]) or tit[right] > tit[i] - 40):
+        while (
+            right < n - 1
+            and _same_capture(tr, i, right + 1)
+            and tr.t[right] - tr.t[i] < 180
+            and (not np.isfinite(tit[right]) or tit[right] > tit[i] - 40)
+        ):
             right += 1
         dur = float(tr.t[min(right, n - 1)] - tr.t[max(left, 0)])
         block = tr.ff[left : right + 1]
@@ -1144,7 +1184,7 @@ def _cool_rate(tr, sl) -> float:
 
 
 def _max_map_drop(tr, seg: Span) -> float:
-    mp = rolling_median(tr.map_inhg, 3)
+    mp = rolling_median_blocked(tr.map_inhg, 3, tr.segment)
     hop = max(1, int(round(4.0 / max(tr.dt_s, 0.5))))
     worst = 0.0
     for i in range(seg.i0, max(seg.i0, seg.i1 - hop)):
@@ -1451,11 +1491,22 @@ def _cht3_wiggle(tr: Trace, labels) -> float:
     idx = np.flatnonzero((labels == "cruise") | (labels == "climb"))
     if idx.size < 20:
         idx = np.arange(tr.n)
-    series = tr.cht[idx, 2]
-    if not np.isfinite(series).any():
-        return float("nan")
-    resid = series - rolling_median(series, 11)
-    return float(np.nanstd(resid)) if np.isfinite(resid).sum() > 10 else float("nan")
+
+    def one(series: np.ndarray) -> float:
+        if series.size < 11 or not np.isfinite(series).any():
+            return float("nan")
+        resid = series - rolling_median(series, 11)
+        return float(np.nanstd(resid)) if np.isfinite(resid).sum() > 10 else float("nan")
+
+    if tr.segment is None or int(np.max(tr.segment)) == 0:
+        return one(tr.cht[idx, 2])
+    scores = []
+    for seg_id in range(int(np.max(tr.segment)) + 1):
+        sub = idx[tr.segment[idx] == seg_id]
+        score = one(tr.cht[sub, 2]) if sub.size else float("nan")
+        if np.isfinite(score):
+            scores.append(score)
+    return float(max(scores)) if scores else float("nan")
 
 
 def _noisy_probes(tr: Trace, lim: Limits) -> list[str]:
@@ -1463,7 +1514,7 @@ def _noisy_probes(tr: Trace, lim: Limits) -> list[str]:
     for stem, block in (("cht", tr.cht), ("egt", tr.egt)):
         wig = []
         for c in range(6):
-            resid = block[:, c] - rolling_median(block[:, c], 11)
+            resid = block[:, c] - rolling_median_blocked(block[:, c], 11, tr.segment)
             wig.append(float(np.nanstd(resid)) if np.isfinite(resid).sum() > 10 else float("nan"))
         med = nan_median(wig)
         for c, w in enumerate(wig, 1):

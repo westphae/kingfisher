@@ -47,6 +47,24 @@ class Span:
 
 
 def label_phases(tr: Trace, lim: Limits) -> np.ndarray:
+    """Label each engine run on its own.
+
+    A gap or a new ``capture_id`` is a second start. Shutdown on the first
+    run must not paint the restart, and a rolling window must not cross the
+    gap.
+    """
+    if tr.segment is not None and tr.n and int(np.max(tr.segment)) > 0:
+        labels = np.empty(tr.n, dtype=object)
+        for seg_id in range(int(np.max(tr.segment)) + 1):
+            idx = np.flatnonzero(tr.segment == seg_id)
+            if idx.size == 0:
+                continue
+            labels[idx] = _label_one(tr.slice(idx), lim)
+        return labels
+    return _label_one(tr, lim)
+
+
+def _label_one(tr: Trace, lim: Limits) -> np.ndarray:
     n = tr.n
     labels = np.array(["ground"] * n, dtype=object)
     if n == 0:
@@ -80,9 +98,19 @@ def spans_from_labels(tr: Trace, labels: np.ndarray) -> list[Span]:
     while i < n:
         j = i + 1
         while j < n and labels[j] == labels[i]:
+            if tr.segment is not None and int(tr.segment[j]) != int(tr.segment[i]):
+                break
             j += 1
-        t1 = float(tr.t[j]) if j < n else float(tr.t[n - 1])
-        if j == n and n >= 2:
+        split = j < n and tr.segment is not None and int(tr.segment[j]) != int(tr.segment[i])
+        if split:
+            # End on the last sample of this capture. The next sample is a
+            # later engine run, and the clock gap between them is not flight.
+            t1 = float(tr.t[j - 1])
+        elif j < n:
+            t1 = float(tr.t[j])
+        else:
+            t1 = float(tr.t[n - 1])
+        if j == n and n >= 2 and not split:
             t1 = float(tr.t[n - 1] + (tr.t[n - 1] - tr.t[n - 2]))
         spans.append(Span(str(labels[i]), i, j, float(tr.t[i]), t1))
         i = j

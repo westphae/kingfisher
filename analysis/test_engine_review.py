@@ -207,6 +207,86 @@ class ReviewTests(unittest.TestCase):
         review = review_trace(tr, Limits())
         self.assertEqual(_status(review, "climb_ias"), "skip")
 
+    def test_second_start_does_not_cross_the_gap(self):
+        from analysis.engine.phases import label_phases, spans_from_labels
+        from analysis.engine.trace import from_columns
+
+        tr = _two_starts()
+        self.assertEqual(int(np.max(tr.segment)), 1)
+        labels = label_phases(tr, Limits())
+        spans = spans_from_labels(tr, labels)
+        takeoffs = [span for span in spans if span.name == "takeoff"]
+        self.assertEqual(len(takeoffs), 2, [span.name for span in spans])
+        self.assertGreater(takeoffs[1].t0 - takeoffs[0].t1, 90.0)
+        for span in spans:
+            self.assertLess(span.duration_s, 100.0, span)
+        review = review_trace(tr, Limits())
+        self.assertTrue(any("engine captures" in note for note in review["notes"]), review["notes"])
+
+    def test_boost_step_does_not_cross_a_capture_gap(self):
+        tr = _two_starts()
+        # Flat fuel flow on each side, with a step that exists only if the
+        # window is allowed to jump the gap.
+        tr.ff[:] = 12.0
+        tr.ff[tr.segment == 1] = 16.0
+        tr.egt[:] = 1400.0
+        tr.egt[tr.segment == 1] = 1460.0
+        tr.rpm[:] = 2400.0
+        tr.map_inhg[:] = 28.0
+        steps = find_boost_steps(tr, np.ones(tr.n, dtype=bool), Limits())
+        self.assertEqual(steps, [])
+
+
+def _two_starts() -> Trace:
+    from analysis.engine.trace import from_columns
+
+    dt = 2.0
+    gap = 120.0
+    specs = [
+        (20, {"rpm": 1100, "map": 14, "ff": 4, "gs": 6, "alt": 300}),
+        (20, {"rpm": 2700, "map": 29.6, "ff": 35, "gs": 60, "alt": 450}),
+        (8, {"rpm": 0, "map": 0, "ff": 0, "gs": 0, "alt": 300}),
+        (20, {"rpm": 1100, "map": 14, "ff": 4, "gs": 6, "alt": 300}),
+        (20, {"rpm": 2700, "map": 29.6, "ff": 35, "gs": 70, "alt": 500}),
+    ]
+    rows = []
+    t = 1_700_000_000.0
+    for block, (count, vals) in enumerate(specs):
+        if block == 3:
+            t += gap
+        cap = "U1.JPI#1" if block < 3 else "U1.JPI#2"
+        for _ in range(count):
+            rows.append((t, vals, cap))
+            t += dt
+    n = len(rows)
+    t_arr = np.array([row[0] for row in rows])
+
+    def col(key, default):
+        return np.array([row[1].get(key, default) for row in rows], dtype=np.float64)
+
+    return from_columns(
+        session="two-starts",
+        source="jpi",
+        t=t_arr,
+        t_ns=(t_arr * 1e9).astype(np.int64),
+        rpm=col("rpm", 2300),
+        map_inhg=col("map", 29),
+        ff=col("ff", 16),
+        tit=np.full(n, 1500.0),
+        oil_temp_f=np.full(n, 180.0),
+        oil_press=np.full(n, 50.0),
+        oat_c=np.full(n, 20.0),
+        egt=np.full((n, 6), 1400.0),
+        cht=np.full((n, 6), 340.0),
+        alt_ft=col("alt", 3000),
+        alt_source="gps.alt_msl",
+        ias_kt=None,
+        gs_kt=col("gs", 0),
+        gs_source="gps.gs",
+        hp_pct=np.full(n, 60.0),
+        capture_id=np.array([row[2] for row in rows], dtype=object),
+    )
+
 
 if __name__ == "__main__":
     unittest.main()

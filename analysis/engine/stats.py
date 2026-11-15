@@ -55,6 +55,19 @@ def rolling_median(x: np.ndarray, win: int) -> np.ndarray:
     return out
 
 
+def rolling_median_blocked(x: np.ndarray, win: int, segment: np.ndarray | None) -> np.ndarray:
+    """Rolling median that does not mix samples from two engine captures."""
+    a = np.asarray(x, dtype=np.float64)
+    if segment is None or a.size == 0 or int(np.max(segment)) == 0:
+        return rolling_median(a, win)
+    out = np.empty(a.shape[0], dtype=np.float64)
+    for seg_id in range(int(np.max(segment)) + 1):
+        idx = np.flatnonzero(segment == seg_id)
+        if idx.size:
+            out[idx] = rolling_median(a[idx], win)
+    return out
+
+
 def rolling_std(x: np.ndarray, win: int) -> np.ndarray:
     a = np.asarray(x, dtype=np.float64)
     n = a.size
