@@ -109,6 +109,7 @@ button.ghost { background: transparent; }
 .badge.flight { color: var(--good); border-color: #245c40; }
 .badge.warn { color: var(--warn); border-color: #6a5a20; }
 .badge.bad { color: var(--bad); border-color: #6a3030; }
+.badge.dim { color: var(--dim); }
 
 main {
   min-width: 0;

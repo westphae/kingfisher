@@ -114,8 +114,10 @@
       const gs = s.max_gs != null ? `${Math.round(s.max_gs * MPS_TO_KT)} kt` : "";
       const dur = s.duration_h != null && s.duration_h < 48 ? `${s.duration_h.toFixed(1)} h` : "";
       const note = esc((s.notes_preview || s.notes || "").slice(0, 80));
+      const jpi = s.jpi || { label: "no JPI", state: "none", title: "No engine data merged" };
+      const jpiCls = jpi.state === "ok" || jpi.state === "multi" ? "flight" : jpi.state === "refused" ? "bad" : "dim";
       return `<button type="button" class="sess${s.file === activeFile ? " active" : ""}" data-file="${esc(s.file)}">
-        <div class="when">${esc(when)} <span class="badge ${s.class === "flight" ? "flight" : ""}">${esc(s.class)}</span></div>
+        <div class="when">${esc(when)} <span class="badge ${s.class === "flight" ? "flight" : ""}">${esc(s.class)}</span> <span class="badge ${jpiCls}" title="${esc(jpi.title || "")}">${esc(jpi.label || "no JPI")}</span></div>
         <div class="sub">${esc(s.file.replace(/_n456t\.db$/, ""))} ${gs} ${dur}</div>
         ${note ? `<div class="sub">${note}</div>` : ""}
       </button>`;
