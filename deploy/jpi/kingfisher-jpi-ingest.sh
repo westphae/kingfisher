@@ -2,11 +2,16 @@
 # Pull new EDM-930 downloads from the NAS, merge them into local flight DBs,
 # and refresh the engine review cache.
 #
-# The NAS is read-only from this script's point of view: rsync copies U*.JPI
-# into ~/kingfisher/engine/raw and never --delete. Merges are written only to
-# the Pi's own flight SQLite files, never to a copy that lives on the NAS.
+# The NAS is read-only from this script's point of view. The NAS account is
+# forced to `rrsync -ro` rooted at the JPI folder, so the rsync source is
+# user@host: with no path. rsync copies U*.JPI into ~/kingfisher/engine/raw
+# and never uses --delete. Flight databases are not fetched. Merges are
+# written only to the Pi's own SQLite files.
 #
-# If the NAS is down, the secret is missing, or TRANSPORT=none, the sync is
+# The key is named by path in ~/.config/kingfisher/jpi.env (outside this
+# repo). This script never prints or copies the key.
+#
+# If the NAS is down, the key is unreadable, or TRANSPORT=none, the sync is
 # skipped and the local ingest still runs. A flight that fails the alignment
 # gates is recorded in the ledger and is not a unit failure.
 #
@@ -14,30 +19,33 @@
 
 set -eu
 
+ENV_FILE="${KINGFISHER_JPI_ENV:-${HOME}/.config/kingfisher/jpi.env}"
 CONF="${KINGFISHER_JPI_CONF:-/etc/kingfisher-jpi-ingest.conf}"
 
-RAW_DIR="/home/eric/kingfisher/engine/raw"
-FLIGHTS_DIR="/home/eric/kingfisher/flights"
-LEDGER="/home/eric/kingfisher/engine/ingest.json"
-REPO="/home/eric/go/src/github.com/westphae/kingfisher"
+RAW_DIR="${HOME}/kingfisher/engine/raw"
+FLIGHTS_DIR="${HOME}/kingfisher/flights"
+LEDGER="${HOME}/kingfisher/engine/ingest.json"
+REPO="${HOME}/go/src/github.com/westphae/kingfisher"
 UV="${UV:-uv}"
 
-# none | rsyncd | ssh. none is the default so a fresh install does not
-# fail looking for a share that has not been exported yet.
+# none | ssh | rsyncd. none is the default so a checkout without jpi.env
+# does not try the NAS. jpi.env.example turns ssh on.
 TRANSPORT="none"
 REQUIRE_IFACE="wlan1"
 NAS_HOST=""
 RSYNC_USER="kingfisher"
 RSYNC_MODULE="bonanza"
 RSYNC_MODULE_PATH="JPI"
-RSYNC_SECRET="/home/eric/.config/kingfisher/jpi.secret"
+RSYNC_SECRET="${HOME}/.config/kingfisher/jpi.secret"
 SSH_USER="eric"
 SSH_PORT="22"
-SSH_KEY="/home/eric/.ssh/kingfisher_jpi"
-# The path Eric named. The flight-backup host in deploy/backup is an Asustor;
-# this archive may be a different NAS. Leave NAS_HOST empty until that is confirmed.
-NAS_PATH="/volume1/Public/archive/Documents/Bonanza/JPI"
+# Restricted key on the Pi. Never a path inside the git checkout.
+SSH_KEY="${HOME}/.ssh/nas_ro"
+# Empty when rrsync -ro is rooted at the JPI folder.
+NAS_PATH=""
 
+# shellcheck source=/dev/null
+[ -r "$ENV_FILE" ] && . "$ENV_FILE"
 # shellcheck source=/dev/null
 [ -r "$CONF" ] && . "$CONF"
 
@@ -74,9 +82,19 @@ sync_nas() {
 	ssh)
 		[ -r "$SSH_KEY" ] || { log "ssh key $SSH_KEY unreadable; skipping NAS"; return 0; }
 		probe="$SSH_PORT"
-		src="${SSH_USER}@${NAS_HOST}:${NAS_PATH}/"
+		# rrsync -ro is already rooted at the JPI folder, so the source is
+		# user@host: and not a volume path. Flight DBs are not part of this pull.
+		if [ -z "$NAS_PATH" ]; then
+			src="${SSH_USER}@${NAS_HOST}:"
+		else
+			src="${SSH_USER}@${NAS_HOST}:${NAS_PATH}/"
+		fi
 		xport="-e"
-		xval="ssh -i $SSH_KEY -p $SSH_PORT -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new"
+		ssh_e="ssh -i ${SSH_KEY} -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10"
+		if [ "$SSH_PORT" != "22" ]; then
+			ssh_e="ssh -i ${SSH_KEY} -p ${SSH_PORT} -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10"
+		fi
+		xval="$ssh_e"
 		;;
 	*)
 		log "unknown TRANSPORT '$TRANSPORT'; skipping NAS"
@@ -89,11 +107,10 @@ sync_nas() {
 		timeout 4 sh -c "echo > /dev/tcp/$NAS_HOST/$probe" 2>/dev/null || { log "$NAS_HOST:$probe unreachable; skipping NAS"; return 0; }
 	fi
 	log "rsync ($TRANSPORT) $src -> $RAW_DIR"
-	# Read-only toward the NAS. No --delete: a renamed download stays until
-	# Eric removes it. Only the whole-download names.
+	# Read-only toward the NAS. No --delete. Only whole-download names at
+	# the rrsync root. FLIGHTS_DIR is local and is not an rsync source.
 	if ! rsync -a --partial \
-		--include='U*.JPI' --include='U*.jpi' --include='U*.DAT' --include='U*.dat' \
-		--exclude='*' \
+		--include='U*.JPI' --exclude='*' \
 		"$xport" "$xval" "$src" "$RAW_DIR/"; then
 		log "rsync failed; continuing with files already in $RAW_DIR"
 	fi

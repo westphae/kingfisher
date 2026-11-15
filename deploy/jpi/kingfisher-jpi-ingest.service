@@ -1,6 +1,7 @@
-# Hourly EDM-930 ingest. Syncs U*.JPI from the NAS when that share is
-# configured, then merges overlapping flights into the Pi's own databases
-# and refreshes the engine-review cache.
+# Hourly EDM-930 ingest. Pulls U*.JPI from the NAS over the restricted
+# key at ~/.ssh/nas_ro (see ~/.config/kingfisher/jpi.env), then merges
+# overlapping flights into the Pi's own databases and refreshes the
+# engine-review cache. Flight databases are not fetched.
 #
 # Install: deploy/jpi/verify.md
 

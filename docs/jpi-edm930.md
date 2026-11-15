@@ -177,5 +177,11 @@ uv run --project analysis python scripts/analyze_flights.py jpi-auto --dry-run
 ```
 
 The hourly timer that pulls `U*.JPI` from the NAS and then runs this is
-`deploy/jpi/`. Merges are applied to the Pi's flight databases only.
-The one-flight `jpi` command is unchanged: dry-run unless `--apply`.
+`deploy/jpi/`. The NAS account is forced to `rrsync -ro` rooted at the JPI
+folder, so the source is `eric@192.168.86.40:` (no path). The restricted
+key is `~/.ssh/nas_ro` on the Pi, named by path in
+`~/.config/kingfisher/jpi.env`. That env file, the key, and the host key
+stay out of git. The pull is `U*.JPI` only, with no `--delete`, and it
+does not fetch flight databases. Merges are applied to the Pi's flight
+databases only. The one-flight `jpi` command is unchanged: dry-run unless
+`--apply`.

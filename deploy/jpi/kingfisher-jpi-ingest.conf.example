@@ -1,25 +1,28 @@
-# /etc/kingfisher-jpi-ingest.conf
-# Copy to /etc and edit. The unit ships with TRANSPORT=none, so nothing
-# contacts the NAS until this file says so.
+# Optional override: /etc/kingfisher-jpi-ingest.conf
+# The file the Pi uses is ~/.config/kingfisher/jpi.env (see jpi.env.example).
+# That file is outside the repo. This /etc file, when present, is sourced
+# after it. Neither file holds key bytes; SSH_KEY is only a path.
 
-RAW_DIR="/home/eric/kingfisher/engine/raw"
-FLIGHTS_DIR="/home/eric/kingfisher/flights"
-LEDGER="/home/eric/kingfisher/engine/ingest.json"
-REPO="/home/eric/go/src/github.com/westphae/kingfisher"
+RAW_DIR="${HOME}/kingfisher/engine/raw"
+FLIGHTS_DIR="${HOME}/kingfisher/flights"
+LEDGER="${HOME}/kingfisher/engine/ingest.json"
+REPO="${HOME}/go/src/github.com/westphae/kingfisher"
 
-# none | rsyncd | ssh
-TRANSPORT="none"
+# none | ssh | rsyncd
+TRANSPORT="ssh"
 REQUIRE_IFACE="wlan1"
-NAS_HOST=""
+NAS_HOST="192.168.86.40"
 
-# rsync daemon (read-only module). The module must not be writable by this user.
+# Restricted key. The NAS account is forced to `rrsync -ro` rooted at the
+# JPI folder, so the source is eric@192.168.86.40: and NAS_PATH stays empty.
+SSH_USER="eric"
+SSH_PORT="22"
+SSH_KEY="${HOME}/.ssh/nas_ro"
+NAS_PATH=""
+
+# Unused unless TRANSPORT=rsyncd. The password file, if any, also stays
+# outside the repo.
 RSYNC_USER="kingfisher"
 RSYNC_MODULE="bonanza"
 RSYNC_MODULE_PATH="JPI"
-RSYNC_SECRET="/home/eric/.config/kingfisher/jpi.secret"
-
-# or SSH, read-only key, path of the archive on the NAS
-SSH_USER="eric"
-SSH_PORT="22"
-SSH_KEY="/home/eric/.ssh/kingfisher_jpi"
-NAS_PATH="/volume1/Public/archive/Documents/Bonanza/JPI"
+RSYNC_SECRET="${HOME}/.config/kingfisher/jpi.secret"
