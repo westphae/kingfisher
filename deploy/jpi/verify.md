@@ -32,9 +32,12 @@ and the hourly run still merges them.
    unreachable host is a skip, not a failed unit. `ConnectTimeout=10` is
    there so a host that accepts TCP and then stalls cannot hang the oneshot.
 2. `analyze_flights.py jpi-auto` fits every local flight DB that has no
-   `jpi_edm930` rows, or whose source file bytes changed. A fit is written
-   only when the existing quality gates pass (path, fix count, median
-   error, distinct peak). A refused fit keeps any previous merge.
+   `jpi_edm930` rows, or whose source file bytes changed. `--flights-dir`
+   is a top-level option, so the oneshot passes it before `jpi-auto` and
+   before `engine`. The subcommands accept it too, which is what an older
+   copy of this script (the one in `/usr/local/bin`) still does. A fit is
+   written only when the existing quality gates pass (path, fix count,
+   median error, distinct peak). A refused fit keeps any previous merge.
 3. `analyze_flights.py engine --all` refreshes `analysis-cache/engine/`.
 
 Every attempt is a row in `~/kingfisher/engine/ingest.json`: file hash, JPI

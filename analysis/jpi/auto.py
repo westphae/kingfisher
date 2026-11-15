@@ -11,6 +11,7 @@ that lives on the NAS.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import sqlite3
@@ -580,6 +581,15 @@ def add_parser(sub) -> None:
     p = sub.add_parser(
         "jpi-auto",
         help="merge overlapping JPI downloads into flight DBs that have no current merge",
+    )
+    # Also a parent option. SUPPRESS so a value passed before the subcommand
+    # is not replaced by this default. The copy installed at /usr/local/bin
+    # used to pass it after the subcommand.
+    p.add_argument(
+        "--flights-dir",
+        type=Path,
+        default=argparse.SUPPRESS,
+        help="directory of *.db sessions (also accepted before the subcommand)",
     )
     p.add_argument(
         "--jpi-dir",

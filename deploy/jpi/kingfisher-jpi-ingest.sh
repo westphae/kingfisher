@@ -123,13 +123,18 @@ sync_nas
 
 cd "$REPO"
 log "jpi-auto"
-"$UV" run --project analysis python scripts/analyze_flights.py jpi-auto \
+# --flights-dir is a top-level option. It has to come before the subcommand.
+# The subcommands also accept it, so a copy of this script that still passes
+# it afterwards does not die with "unrecognized arguments".
+"$UV" run --project analysis python scripts/analyze_flights.py \
 	--flights-dir "$FLIGHTS_DIR" \
+	jpi-auto \
 	--jpi-dir "$RAW_DIR" \
 	--ledger "$LEDGER"
 log "engine review"
-"$UV" run --project analysis python scripts/analyze_flights.py engine \
-	--all \
+"$UV" run --project analysis python scripts/analyze_flights.py \
 	--flights-dir "$FLIGHTS_DIR" \
+	engine \
+	--all \
 	--jpi-dir "$RAW_DIR"
 log "done"

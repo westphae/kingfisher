@@ -20,6 +20,12 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         "engine",
         help="AFMS engine review for one flight DB or every flight",
     )
+    p.add_argument(
+        "--flights-dir",
+        type=Path,
+        default=argparse.SUPPRESS,
+        help="directory of *.db sessions (also accepted before the subcommand)",
+    )
     p.add_argument("--db", type=Path, default=None, help="one Kingfisher flight SQLite")
     p.add_argument("--all", action="store_true", help="every flight DB, plus raw JPI flights that are not merged")
     p.add_argument("--jpi", type=Path, default=None, help="review a raw EDM-930 download (no Kingfisher DB)")
