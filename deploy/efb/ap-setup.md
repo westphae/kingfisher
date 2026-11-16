@@ -1,6 +1,6 @@
 # Pi AP setup for EFB apps (ForeFlight, iFlyEFB)
 
-Use when the Pi runs the **`kingfisher`** Wi‑Fi access point (NetworkManager
+Use when the Pi runs the **`kf-ap`** Wi‑Fi access point (NetworkManager
 `ipv4.method: shared` on `wlan0`, typically **`192.168.10.1/24`**) and tablets
 should receive GDL90 from kingfisher.
 
@@ -27,7 +27,7 @@ Pin each tablet by MAC so it always gets the same address in the pool
 
 ### Find MAC addresses
 
-After a device joins `kingfisher`:
+After a device joins `kf-ap`:
 
 ```bash
 sudo cat /var/lib/NetworkManager/dnsmasq-wlan0.leases
@@ -38,11 +38,11 @@ Columns: `epoch MAC IP hostname clientid`.
 ### Disable randomized Wi‑Fi MAC
 
 iOS and Android may use a **different MAC per network**. Turn that off for
-`kingfisher` or reservations will drift:
+`kf-ap` or reservations will drift:
 
-- **iPad:** Settings → Wi‑Fi → `i` on `kingfisher` → **Private Wi‑Fi Address**
+- **iPad:** Settings → Wi‑Fi → `i` on `kf-ap` → **Private Wi‑Fi Address**
   → **Off**
-- **Android:** Wi‑Fi → `kingfisher` → details → **Privacy** / **MAC address
+- **Android:** Wi‑Fi → `kf-ap` → details → **Privacy** / **MAC address
   type** → **Use device MAC** (wording varies by OEM)
 
 Forget the network, rejoin, and confirm the MAC in the leases file again.
@@ -59,10 +59,10 @@ EOF
 Replace MACs and IPs with yours. Restart the hotspot:
 
 ```bash
-nmcli connection down kingfisher && nmcli connection up kingfisher
+nmcli connection down kf-ap && nmcli connection up kf-ap
 ```
 
-On each device: **Forget** `kingfisher`, reconnect, verify the assigned IP in
+On each device: **Forget** `kf-ap`, reconnect, verify the assigned IP in
 Wi‑Fi details.
 
 ### Match `static_ips`
@@ -84,7 +84,7 @@ Still add that IP to `gdl90.static_ips`.
 
 ## 3. EFB app settings
 
-**ForeFlight:** connect to `kingfisher` → *More* → *Devices* → enable GDL90 at
+**ForeFlight:** connect to `kf-ap` → *More* → *Devices* → enable GDL90 at
 **`192.168.10.1`**.
 
 **iFlyEFB:** *Menu* → *About* → *Connected Devices* → *Wireless Device* →

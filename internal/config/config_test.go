@@ -54,7 +54,7 @@ func TestLoad_migratesPodUDPAddr(t *testing.T) {
 
 func TestDefaults_pod(t *testing.T) {
 	c := Defaults()
-	if c.Pod.WiFiSSID != "kingfisher" {
+	if c.Pod.WiFiSSID != "kf-ap" {
 		t.Fatalf("WiFiSSID=%q", c.Pod.WiFiSSID)
 	}
 	if got := c.PodListenAddr(); got != ":47808" {

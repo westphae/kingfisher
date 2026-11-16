@@ -170,16 +170,18 @@ behind a reverse proxy on the aircraft LAN. Configuration lives in
 port **80** to HTTPS, and reverse-proxies to kingfisher on `localhost:8080`
 (including WebSocket traffic for the live cockpit and `/terminal`).
 
-Example Caddyfile (also in **`deploy/caddy/Caddyfile`**). Adjust the hostname and
-LAN IP for your Pi:
+Example Caddyfile (also in **`deploy/caddy/Caddyfile`**, the copy to install).
+The aircraft Pi is **`kf-pi`**. Legacy `kingfisher` / `kingfisher.lan` names
+stay for a few weeks so old bookmarks keep working. Adjust the list if you
+build another host:
 
 ```caddyfile
-https://kingfisher.lan, https://kingfisher, https://192.168.10.1, https://192.168.86.151, https://127.0.0.1 {
+https://kf-pi.lan, https://kf-pi, https://kf-pi.local, https://kingfisher.lan, https://kingfisher, https://192.168.10.1, https://192.168.86.151, https://127.0.0.1 {
     tls internal
     reverse_proxy localhost:8080
 }
 
-http://kingfisher.lan, http://kingfisher, http://192.168.10.1, http://192.168.86.151, http://127.0.0.1 {
+http://kf-pi.lan, http://kf-pi, http://kf-pi.local, http://kingfisher.lan, http://kingfisher, http://192.168.10.1, http://192.168.86.151, http://127.0.0.1 {
     redir https://{host}{uri} permanent
 }
 ```

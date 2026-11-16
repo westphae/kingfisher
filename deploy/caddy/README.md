@@ -3,7 +3,7 @@
 Caddy terminates TLS in front of kingfisher (which stays plain HTTP on
 `localhost:8080`) and serves it as HTTPS on the AP and home LAN. TLS keeps the
 `eric` password (ssh + web terminal) unsniffable on the deliberately-open
-`kingfisher` AP — see `deploy/system-rebuild-playbook.md` Appendix A.
+`kf-ap` AP — see `deploy/system-rebuild-playbook.md` Appendix A.
 
 ## Files
 
@@ -40,7 +40,7 @@ sudo cp /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt /tmp/ki
 sudo chmod a+r /tmp/kingfisher-root.crt
 
 # on your workstation:
-scp eric@kingfisher:/tmp/kingfisher-root.crt .
+scp eric@kf-pi:/tmp/kingfisher-root.crt .
 ```
 
 Then get `kingfisher-root.crt` onto each device (AirDrop, email, USB, a web
@@ -98,7 +98,7 @@ Gated paths (return `403` for untrusted AP clients):
 | `/api/power/*` | `POST /api/power/off` is unauthenticated poweroff |
 | `/api/access*` | the trusted-device management API itself |
 
-The **only untrusted network is the open kingfisher AP** (`config.access.ap_subnet`,
+The **only untrusted network is the open kf-ap AP** (`config.access.ap_subnet`,
 default `192.168.10.0/24`), so the gate restricts *only there*: those paths are
 blocked for AP clients whose IP is not in `config.access.trusted_ips`. Everything
 **off** the AP is always allowed — loopback, the home LAN over `wlan1`, and any
@@ -131,5 +131,6 @@ curl -sk --interface 192.168.10.1 https://192.168.10.1/terminal -o /dev/null -w 
 The `Caddyfile` lists `192.168.86.151`, the Pi's wlan1 address, as a **site
 address** so Caddy serves TLS on it over the home LAN. It is DHCP-reserved on
 the home router (by the wlan1 MAC), so it stays put; if it ever changes, update
-only the two site-address lists. mDNS names (`kingfisher.lan`, `kingfisher`) are
-also served and don't depend on the lease.
+only the two site-address lists. mDNS names (`kf-pi.lan`, `kf-pi`, `kf-pi.local`)
+are also served and don't depend on the lease. Legacy `kingfisher.lan` and
+`kingfisher` stay on the site list for a few weeks.

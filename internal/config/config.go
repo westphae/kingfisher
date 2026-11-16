@@ -942,7 +942,8 @@ func Defaults() *Config {
 			TrustedIPs: []string{"192.168.10.158", "192.168.10.230"}, // reserved EFBs
 		},
 		Pod: Pod{
-			WiFiSSID:           "kingfisher",
+			// Hotspot SSID. The recorder, units, and config dir stay "kingfisher".
+			WiFiSSID:           "kf-ap",
 			WiFiPassword:       "",
 			BatteryCapacityMah: DefaultPodBatteryCapacityMah,
 		},

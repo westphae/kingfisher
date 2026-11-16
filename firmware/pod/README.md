@@ -138,7 +138,7 @@ See [`config.example.json`](../../config.example.json) for the `pod` block shape
 
 ```json
 "pod": {
-  "wifi_ssid": "kingfisher",
+  "wifi_ssid": "kf-ap",
   "wifi_password": "",
   "udp_addr": "192.168.10.1:47808",
   "battery_capacity_mah": 850,

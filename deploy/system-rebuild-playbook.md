@@ -2,7 +2,7 @@
 
 Provisions a kingfisher flight-data-recorder host **from scratch**: a Raspberry Pi 5
 running RPi OS Lite (trixie, arm64, kernel `6.18.34+rpt-rpi-2712`) on an NVMe SSD,
-hostname `kingfisher`. It captures the full delta from a stock image — packages, boot
+hostname `kf-pi`. It captures the full delta from a stock image — packages, boot
 config, out-of-tree drivers, time sync, networking, and the app — so a fresh build is
 reproducible end to end.
 
@@ -49,7 +49,8 @@ generated on first run (expect one known_hosts prompt; tablets re-trust HTTPS on
         rootfs with `[main]` + `WirelessEnabled=true`.
    - (optional, smooths headless bring-up) on the rootfs: pre-copy `Holonet.nmconnection`
      into `/etc/NetworkManager/system-connections/` (0600 root:root) so it joins the home
-     LAN immediately; pre-set `/etc/hostname` + `/etc/hosts` (kingfisher) and
+     LAN immediately; pre-set `/etc/hostname` to `kf-pi` and `/etc/hosts`
+     (`127.0.1.1 kf-pi kingfisher`, keeping the `kingfisher` alias for a few weeks) and
      `/etc/localtime → /usr/share/zoneinfo/Etc/UTC` — step 4 is then already done.
 3. Partition plan — 128G root, rest `/home` (~804G on a 1TB SSD; the roomy root leaves
    space for e.g. /var/lib/docker). **Gotcha: the firstboot auto-resize REFUSES to grow
@@ -74,7 +75,7 @@ generated on first run (expect one known_hosts prompt; tablets re-trust HTTPS on
    backup.
 4. First boot basics:
    ```sh
-   sudo hostnamectl hostname kingfisher
+   sudo hostnamectl hostname kf-pi
    sudo timedatectl set-timezone Etc/UTC
    sudo timedatectl set-local-rtc 0
    ```
@@ -100,7 +101,7 @@ sudo usermod -aG adm,dialout,plugdev eric      # plugdev is load-bearing (IIO ac
 sudo systemctl disable --now serial-getty@ttyAMA10.service
 
 # ghostty terminfo (run FROM your workstation):
-#   infocmp -x | ssh eric@kingfisher 'tic -x -'
+#   infocmp -x | ssh eric@kf-pi 'tic -x -'
 
 # EEPROM (verify with: sudo rpi-eeprom-config)
 #   BOOT_UART=1, BOOT_ORDER=0xf461 (SD first, then NVMe, then USB — SD-first means an
@@ -331,7 +332,7 @@ RateLimitBurst=5000
 
 ```sh
 # Access point (open network — see Improvements #1):
-sudo nmcli con add type wifi ifname wlan0 con-name kingfisher ssid kingfisher \
+sudo nmcli con add type wifi ifname wlan0 con-name kf-ap ssid kf-ap \
   802-11-wireless.mode ap 802-11-wireless.band bg 802-11-wireless.channel 6 \
   802-11-wireless.powersave 2 ipv4.method shared ipv4.addresses 192.168.10.1/24 \
   connection.autoconnect yes connection.autoconnect-priority 100
@@ -341,7 +342,11 @@ sudo nmcli con add type wifi ifname wlan0 con-name kingfisher ssid kingfisher \
 # nmcli con reload    — or re-add with nmcli device wifi connect.
 ```
 
-`/etc/NetworkManager/dnsmasq-shared.d/kingfisher-efb.conf` (EFB DHCP reservations):
+Connection id and SSID are both `kf-ap`. `pod.wifi_ssid` in
+`~/.config/kingfisher/config.json` is `kf-ap` so the pod firmware (`build.rs`)
+joins the same network. DHCP reservations stay in
+`/etc/NetworkManager/dnsmasq-shared.d/kingfisher-efb.conf` (the filename is the
+project; leases are pinned by MAC):
 ```
 dhcp-host=5c:33:7b:ec:ab:2d,192.168.10.158,Pixel-8-Pro
 dhcp-host=f8:b1:dd:97:60:81,192.168.10.230,iPad-Mini
@@ -354,7 +359,7 @@ dhcp-host=f8:b1:dd:97:60:81,192.168.10.230,iPad-Mini
 
 `/etc/caddy/Caddyfile` (canonical copy + full README in repo `deploy/caddy/`):
 ```
-https://kingfisher.lan, https://kingfisher, https://192.168.10.1, https://192.168.86.151, https://127.0.0.1 {
+https://kf-pi.lan, https://kf-pi, https://kf-pi.local, https://kingfisher.lan, https://kingfisher, https://192.168.10.1, https://192.168.86.151, https://127.0.0.1 {
 	tls internal
 	# kingfisher binds 127.0.0.1:8080 and enforces the AP trusted-device allowlist
 	# itself; Caddy terminates TLS and passes the unspoofable real client IP.
@@ -362,14 +367,15 @@ https://kingfisher.lan, https://kingfisher, https://192.168.10.1, https://192.16
 		header_up X-Real-Client-IP {remote_host}
 	}
 }
-http://kingfisher.lan, http://kingfisher, http://192.168.10.1, http://192.168.86.151, http://127.0.0.1 {
+http://kf-pi.lan, http://kf-pi, http://kf-pi.local, http://kingfisher.lan, http://kingfisher, http://192.168.10.1, http://192.168.86.151, http://127.0.0.1 {
 	redir https://{host}{uri} permanent
 }
 ```
 `sudo systemctl reload caddy`. The internal CA regenerates on a fresh build → re-trust the
 new root cert on the tablets (see `deploy/caddy/README.md`; `sudo caddy trust` locally for
 curl over https). `192.168.86.151` is the Pi's wlan1 address — DHCP-reserve it on the home
-router so it stays put; mDNS (`kingfisher.lan`) also works and doesn't depend on the lease.
+router so it stays put; mDNS (`kf-pi.lan`, `kf-pi.local`) also works and doesn't depend on the lease.
+`kingfisher.lan` and `kingfisher` stay in the site list for a few weeks.
 
 ## Phase 12 — kingfisher app
 
@@ -475,7 +481,7 @@ them back without a reason.
 # of the 2026-07-11 failure: an aging battery pack sagging below 40% charge — a proper
 # aircraft supply is still needed (#4).
 
-1. **Secure the AP.** The `kingfisher` network is **open** (no WPA). Anyone at the tiedown
+1. **Secure the AP.** The `kf-ap` network is **open** (no WPA). Anyone at the tiedown
    can join, get DHCP, reach the app and the GDL90 stream. Add WPA2-PSK
    (`wifi-sec.key-mgmt wpa-psk`); EFB apps handle it fine. Biggest single win.
 2. **DKMS for the two kernel modules.** Today a routine `apt full-upgrade` that bumps the
@@ -559,5 +565,6 @@ notes in `deploy/caddy/README.md`.
 
 **Remote access from outside home (optional, when wanted):** do NOT port-forward —
 install **Tailscale** on the Pi + laptop (zero-config WireGuard mesh; Pi reachable
-from your devices anywhere, no open ports, nothing else gains access). The secure
-option is also the convenient one here.
+from your devices anywhere, no open ports, nothing else gains access). The node
+hostname is `kf-pi` (`sudo tailscale set --hostname=kf-pi`); MagicDNS is
+`kf-pi.mammut-alnitak.ts.net`. The secure option is also the convenient one here.

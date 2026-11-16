@@ -8,16 +8,18 @@
 #
 # Other devices: install root.crt (see README.md).
 #
-# 192.168.86.151 is the Pi's wlan1 (home-LAN) address, DHCP-reserved on the home
-# router. It is only a site address here (for TLS on the home LAN); if it
-# changes, update it in the two site-address lists.
+# Host kf-pi. Site names: kf-pi.lan, kf-pi, kf-pi.local, plus legacy
+# kingfisher.lan and kingfisher for a few weeks. 192.168.10.1 is the kf-ap
+# gateway. 192.168.86.151 is the Pi's wlan1 (home-LAN) address, DHCP-reserved
+# on the home router. Those addresses are only site names here (for TLS); if
+# the home-LAN address changes, update it in the two site-address lists.
 #
 # Access control for /terminal, /api/terminal/*, and /api/power/* is enforced by
 # kingfisher itself (Settings → Trusted devices), not here — see internal/web/
 # access.go and deploy/caddy/README.md. kingfisher binds loopback, so this proxy
 # is the sole ingress; it just needs to pass the real client IP (below).
 
-https://kingfisher.lan, https://kingfisher, https://192.168.10.1, https://192.168.86.151, https://127.0.0.1 {
+https://kf-pi.lan, https://kf-pi, https://kf-pi.local, https://kingfisher.lan, https://kingfisher, https://192.168.10.1, https://192.168.86.151, https://127.0.0.1 {
 	tls internal
 
 	# Pass the real client IP so kingfisher can apply its AP allowlist.
@@ -28,6 +30,6 @@ https://kingfisher.lan, https://kingfisher, https://192.168.10.1, https://192.16
 	}
 }
 
-http://kingfisher.lan, http://kingfisher, http://192.168.10.1, http://192.168.86.151, http://127.0.0.1 {
+http://kf-pi.lan, http://kf-pi, http://kf-pi.local, http://kingfisher.lan, http://kingfisher, http://192.168.10.1, http://192.168.86.151, http://127.0.0.1 {
 	redir https://{host}{uri} permanent
 }
