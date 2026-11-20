@@ -100,9 +100,14 @@ the default path.
 
 ## Cache and duplicates
 
-`analysis-cache/engine/<session>.json` plus `summary.json`. The web response
-shifts event times with `clock_offsets` so a click lines up with the chart;
-the cache itself keeps raw `ts_ns`.
+`analysis-cache/engine/<session>.json` plus `summary.json` and `state.json`.
+A flight is recomputed when its database mtime or size changes, the limits
+fingerprint changes, or `REVIEWER_VERSION` in `analysis/engine/cache.py` is
+bumped. The hourly ingest uses `engine --changed`, which reuses cached
+reviews and finishes in seconds when nothing is new. `engine --all` ignores
+the cache and re-reviews every flight. The web response shifts event times
+with `clock_offsets` so a click lines up with the chart; the cache itself
+keeps raw `ts_ns`.
 
 `jpi-auto` records suspected duplicate sessions in
 `~/kingfisher/engine/ingest.json` under `flags`. See `deploy/jpi/verify.md`.

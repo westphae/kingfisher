@@ -31,20 +31,31 @@ and the hourly run still merges them.
    There is no `--delete`. A missing key, a missing `wlan1` address, or an
    unreachable host is a skip, not a failed unit. `ConnectTimeout=10` is
    there so a host that accepts TCP and then stalls cannot hang the oneshot.
-2. `analyze_flights.py jpi-auto` fits every local flight DB that has no
-   `jpi_edm930` rows, or whose source file bytes changed. `--flights-dir`
-   is a top-level option, so the oneshot passes it before `jpi-auto` and
-   before `engine`. The subcommands accept it too, which is what an older
-   copy of this script (the one in `/usr/local/bin`) still does. A fit is
-   written only when the existing quality gates pass (path, fix count,
-   median error, distinct peak). A refused fit keeps any previous merge.
-   It opens one flight DB at a time. GPS and OAT are read at one sample
-   per second, and a high-rate IMU temperature column is not loaded. A
-   session the recorder still has open (newest file with a fresh `-wal`,
-   or any non-empty `-wal` written in the last two minutes) is skipped.
+2. `analyze_flights.py jpi-auto` merges new or changed JPI files into the
+   flight DBs they overlap. It first checks the ledger for file and DB
+   mtime/size (and SHA when a file has changed). If nothing is new, it
+   does not hash, parse, or open any flight DB and finishes in seconds.
+   A new or changed JPI file only opens the DBs whose time span overlaps
+   that file. A new or changed flight DB is still considered against the
+   existing downloads. `--flights-dir` is a top-level option, so the
+   oneshot passes it before `jpi-auto` and before `engine`. The
+   subcommands accept it too, which is what an older copy of this script
+   (the one in `/usr/local/bin`) still does. A fit is written only when
+   the existing quality gates pass (path, fix count, median error,
+   distinct peak). A refused fit keeps any previous merge. It opens one
+   flight DB at a time. GPS and OAT are read at one sample per second,
+   and a high-rate IMU temperature column is not loaded. A session the
+   recorder still has open (newest file with a fresh `-wal`, or any
+   non-empty `-wal` written in the last two minutes) is skipped.
    `--since YYYY-MM-DD` and `--limit N` bound a manual pass; the timer
    does not pass them.
-3. `analyze_flights.py engine --all` refreshes `analysis-cache/engine/`.
+3. `analyze_flights.py engine --changed` (the timer path) refreshes
+   `analysis-cache/engine/` only for flights whose DB mtime/size, the
+   limits fingerprint, or `REVIEWER_VERSION` changed. Unchanged flights
+   are reused from the cache and `summary.json`. `engine --all` still
+   forces a full re-review. Bump `analysis.engine.cache.REVIEWER_VERSION`
+   after a reviewer code change so the next incremental run redoes every
+   flight.
 
 Every attempt is a row in `~/kingfisher/engine/ingest.json`: file hash, JPI
 flight id, database, offset, drift, residual, and applied / refused / kept
@@ -58,6 +69,7 @@ Manual equivalent:
 ```bash
 uv run --project analysis python scripts/analyze_flights.py jpi-auto --dry-run
 uv run --project analysis python scripts/analyze_flights.py jpi-auto
+uv run --project analysis python scripts/analyze_flights.py engine --changed
 uv run --project analysis python scripts/analyze_flights.py engine --all
 ```
 

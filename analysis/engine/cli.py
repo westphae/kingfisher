@@ -27,7 +27,16 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         help="directory of *.db sessions (also accepted before the subcommand)",
     )
     p.add_argument("--db", type=Path, default=None, help="one Kingfisher flight SQLite")
-    p.add_argument("--all", action="store_true", help="every flight DB, plus raw JPI flights that are not merged")
+    p.add_argument(
+        "--all",
+        action="store_true",
+        help="force a full re-review of every flight DB and unmerged raw JPI (ignores cache)",
+    )
+    p.add_argument(
+        "--changed",
+        action="store_true",
+        help="only review new or changed flights (default when --db/--jpi/--all are omitted)",
+    )
     p.add_argument("--jpi", type=Path, default=None, help="review a raw EDM-930 download (no Kingfisher DB)")
     p.add_argument(
         "--jpi-flight",
@@ -46,9 +55,11 @@ def cmd_engine(args: argparse.Namespace) -> int:
     cache = args.cache_dir
     if cache is None and getattr(args, "catalog", None):
         cache = Path(args.catalog).parent / "engine"
-    if args.db is None and not args.all and args.jpi is None:
-        print("pass --db, --all, or --jpi", file=sys.stderr)
-        return 2
+    if args.db is None and not args.all and not getattr(args, "changed", False) and args.jpi is None:
+        # Incremental over --flights-dir is the default timer path.
+        if not getattr(args, "flights_dir", None):
+            print("pass --db, --all, --changed, or --jpi", file=sys.stderr)
+            return 2
     if args.db is not None:
         path = Path(args.db)
         if not path.is_file():
@@ -82,9 +93,28 @@ def cmd_engine(args: argparse.Namespace) -> int:
     if jpi_dir is None:
         default_raw = Path.home() / "kingfisher" / "engine" / "raw"
         jpi_dir = default_raw if default_raw.is_dir() else None
-    reviews = review_all(flights_dir, limits, cache_dir=cache, jpi_dir=jpi_dir)
-    flags = flag_sessions(flights_dir) if flights_dir.is_dir() else []
-    summary = summarize(reviews, flags)
+    force = bool(args.all)
+    reviews, stats = review_all(
+        flights_dir, limits, cache_dir=cache, jpi_dir=jpi_dir, force=force
+    )
+    print(
+        f"engine: {stats['n_dbs']} flight DB(s), {stats['n_reviewed']} reviewed, "
+        f"{stats['n_reused']} reused, force={int(force)}",
+        file=sys.stderr,
+    )
+    if stats["n_reviewed"] == 0 and cache is not None and (cache / "summary.json").is_file():
+        try:
+            previous = json.loads((cache / "summary.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            previous = {}
+        flags = previous.get("flags") or []
+        # Rebuild so counts stay consistent with the reused reviews.
+        summary = summarize(reviews, flags) if reviews else previous
+        if not reviews and previous:
+            summary = previous
+    else:
+        flags = flag_sessions(flights_dir) if flights_dir.is_dir() else []
+        summary = summarize(reviews, flags)
     if cache is not None:
         cache.mkdir(parents=True, exist_ok=True)
         (cache / "summary.json").write_text(

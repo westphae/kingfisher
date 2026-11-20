@@ -58,8 +58,8 @@ def _csv(path: Path, marker: str) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _db(path: Path, *, gs: float = 50.0, rows: int = 40, clock_step_ns: int | None = None) -> None:
-    start = datetime(2024, 6, 1, 17, 55, tzinfo=timezone.utc)
+def _db(path: Path, *, gs: float = 50.0, rows: int = 40, clock_step_ns: int | None = None, start=None) -> None:
+    start = start or datetime(2024, 6, 1, 17, 55, tzinfo=timezone.utc)
     conn = sqlite3.connect(path)
     conn.execute("CREATE TABLE gps (ts_ns INTEGER, lat REAL, lon REAL, gs REAL, alt_msl REAL)")
     base = int(start.timestamp() * 1e9)
@@ -366,6 +366,101 @@ def _csv_overlap(path: Path) -> None:
                 f"{33.4 + i * 0.01:.4f},{-112.0 - i * 0.01:.4f}"
             )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+
+class IncrementalTests(unittest.TestCase):
+    def test_noop_does_not_parse_hash_or_open(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            flights = root / "flights"
+            raw = root / "raw"
+            flights.mkdir()
+            raw.mkdir()
+            db = flights / "flight.db"
+            jpi = raw / "U240601.JPI"
+            _db(db)
+            _csv(jpi, "one")
+            ledger = root / "ingest.json"
+            with mock.patch("analysis.jpi.auto.align_flight", return_value=_ok()):
+                run_auto(flights_dir=flights, jpi_dir=raw, ledger_path=ledger, apply=True)
+            with (
+                mock.patch("analysis.jpi.auto.parse_file") as parsed,
+                mock.patch("analysis.jpi.auto._sha256") as hashed,
+                mock.patch("analysis.jpi.auto._connect") as connected,
+                mock.patch("analysis.jpi.auto.align_flight", return_value=_ok()) as fit,
+            ):
+                run_auto(flights_dir=flights, jpi_dir=raw, ledger_path=ledger, apply=True)
+            parsed.assert_not_called()
+            hashed.assert_not_called()
+            connected.assert_not_called()
+            fit.assert_not_called()
+            data = json.loads(ledger.read_text())
+            skipped = [a for a in data["attempts"] if a["status"] == "skipped"]
+            self.assertTrue(skipped)
+            self.assertGreaterEqual(skipped[0]["count"], 1)
+
+    def test_changed_jpi_opens_only_overlapping_db(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            flights = root / "flights"
+            raw = root / "raw"
+            flights.mkdir()
+            raw.mkdir()
+            june = flights / "20240601T180000Z.db"
+            sept = flights / "20240901T180000Z.db"
+            _db(june)
+            _db(sept, start=datetime(2024, 9, 1, 17, 55, tzinfo=timezone.utc))
+            _csv(raw / "U240601.JPI", "one")
+            ledger = root / "ingest.json"
+            with mock.patch("analysis.jpi.auto.align_flight", return_value=_ok()):
+                run_auto(flights_dir=flights, jpi_dir=raw, ledger_path=ledger, apply=True)
+            _csv(raw / "U240601.JPI", "two")
+            opened = []
+            real_connect = __import__("analysis.jpi.auto", fromlist=["_connect"])._connect
+
+            def wrapped(db, *, write):
+                opened.append(db.name)
+                return real_connect(db, write=write)
+
+            with (
+                mock.patch("analysis.jpi.auto.align_flight", return_value=_ok()),
+                mock.patch("analysis.jpi.auto._connect", side_effect=wrapped),
+            ):
+                run_auto(flights_dir=flights, jpi_dir=raw, ledger_path=ledger, apply=True)
+            self.assertIn(june.name, opened)
+            self.assertNotIn(sept.name, opened)
+
+    def test_new_db_is_opened_when_jpi_files_are_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            flights = root / "flights"
+            raw = root / "raw"
+            flights.mkdir()
+            raw.mkdir()
+            first = flights / "20240601T180000Z.db"
+            _db(first)
+            _csv(raw / "U240601.JPI", "one")
+            ledger = root / "ingest.json"
+            with mock.patch("analysis.jpi.auto.align_flight", return_value=_ok()):
+                run_auto(flights_dir=flights, jpi_dir=raw, ledger_path=ledger, apply=True)
+            second = flights / "20240601T190000Z.db"
+            _db(second)
+            opened = []
+            real_connect = __import__("analysis.jpi.auto", fromlist=["_connect"])._connect
+
+            def wrapped(db, *, write):
+                opened.append(db.name)
+                return real_connect(db, write=write)
+
+            with (
+                mock.patch("analysis.jpi.auto.align_flight", return_value=_ok()),
+                mock.patch("analysis.jpi.auto._connect", side_effect=wrapped),
+            ):
+                run_auto(flights_dir=flights, jpi_dir=raw, ledger_path=ledger, apply=True)
+            self.assertIn(second.name, opened)
+            self.assertNotIn(first.name, opened)
+            self.assertGreaterEqual(opened.count(second.name), 1)
 
 
 if __name__ == "__main__":

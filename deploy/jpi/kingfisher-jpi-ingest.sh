@@ -140,10 +140,13 @@ log "jpi-auto"
 	jpi-auto \
 	--jpi-dir "$RAW_DIR" \
 	--ledger "$LEDGER"
+# Incremental engine review (new/changed flights only). Use
+# `analyze_flights.py engine --all` for a forced full re-review, or bump
+# analysis.engine.cache.REVIEWER_VERSION after a reviewer code change.
 log "engine review"
 "$UV" run --project analysis python scripts/analyze_flights.py \
 	--flights-dir "$FLIGHTS_DIR" \
 	engine \
-	--all \
+	--changed \
 	--jpi-dir "$RAW_DIR"
 log "done"

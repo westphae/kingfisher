@@ -11,6 +11,7 @@ Examples (from repo root; uses uv workspace — see docs/python.md):
   uv run --project analysis python scripts/analyze_flights.py jpi --jpi FILE.jpi --db FLIGHT.sqlite [--flight N] [--apply]
   uv run --project analysis python scripts/analyze_flights.py jpi-auto
   uv run --project analysis python scripts/analyze_flights.py engine --db FLIGHT.sqlite
+  uv run --project analysis python scripts/analyze_flights.py engine --changed
   uv run --project analysis python scripts/analyze_flights.py engine --all
   uv run --project analysis python scripts/analyze_flights.py serve
 """

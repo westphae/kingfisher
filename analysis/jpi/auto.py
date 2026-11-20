@@ -51,11 +51,8 @@ def run_auto(
     now = _now()
     # Flight spans only. The sample arrays are dropped before the DB loop
     # and parsed again for the one download a DB actually overlaps.
-    files, spans = _catalog_downloads(jpi_dir)
-    ledger["files"] = [
-        {"name": item["name"], "sha256": item["sha256"], "flights": item["flights"], "error": item["error"]}
-        for item in files
-    ]
+    files, spans, n_jpi_changed = _catalog_downloads(jpi_dir, ledger)
+    ledger["files"] = [_file_ledger_row(item) for item in files]
     dbs = sorted(p for p in flights_dir.glob("*.db") if p.is_file()) if flights_dir.is_dir() else []
     live = _live_names(dbs)
     selected = []
@@ -71,6 +68,15 @@ def run_auto(
         selected.append(db)
     if limit is not None:
         selected = selected[: max(0, limit)]
+    prev_dbs = {row["name"]: row for row in ledger.get("dbs") or [] if row.get("name")}
+    updated_unix = _ledger_updated_unix(ledger)
+    considered = set(prev_dbs)
+    for row in ledger.get("attempts") or []:
+        if row.get("db") and "recorder has this session open" not in (row.get("reason") or ""):
+            considered.add(row["db"])
+    to_open, skipped_unchanged = _partition_dbs(
+        selected, files, spans, prev_dbs, n_jpi_changed, window_s, updated_unix, considered
+    )
     extra = ""
     if skipped_live:
         extra += f", {len(skipped_live)} live skipped"
@@ -78,7 +84,12 @@ def run_auto(
         extra += f", {n_since} before --since"
     if limit is not None:
         extra += f", limit {limit}"
-    print(f"jpi-auto: {len(files)} JPI file(s), {len(selected)} flight DB(s){extra}")
+    if skipped_unchanged:
+        extra += f", {len(skipped_unchanged)} unchanged skipped"
+    print(
+        f"jpi-auto: {len(files)} JPI file(s), {n_jpi_changed} new/changed, "
+        f"{len(selected)} flight DB(s), {len(to_open)} to open{extra}"
+    )
     for db in skipped_live:
         _record(
             ledger,
@@ -86,9 +97,24 @@ def run_auto(
         )
         print(f"  {db.name}: skipped, recorder has this session open")
     fingerprints = []
-    for db in selected:
+    kept_fp = {row["name"]: row.get("fingerprint") for row in prev_dbs.values()}
+    new_dbs = {name: dict(row) for name, row in prev_dbs.items()}
+    for db in skipped_unchanged:
+        _touch_unchanged_attempts(ledger, now, db.name)
+        st = db.stat()
+        row = dict(new_dbs.get(db.name) or {"name": db.name})
+        row["name"] = db.name
+        row["mtime_ns"] = st.st_mtime_ns
+        row["size"] = st.st_size
+        new_dbs[db.name] = row
+        fp = row.get("fingerprint")
+        if fp:
+            fingerprints.append(fp)
+    if to_open:
+        _ensure_spans(files, spans)
+    for db in to_open:
         try:
-            fp = _one_db(db, files, spans, ledger, apply=apply, window_s=window_s, now=now)
+            fp, span = _one_db(db, files, spans, ledger, apply=apply, window_s=window_s, now=now)
         except sqlite3.OperationalError as exc:
             _record(
                 ledger,
@@ -100,17 +126,35 @@ def run_auto(
                 ),
             )
             print(f"  {db.name}: error {exc}")
-            fp = None
+            fp, span = None, None
         except OSError as exc:
             _record(ledger, _attempt(now, db.name, status="error", reason=str(exc)))
             print(f"  {db.name}: error {exc}")
-            fp = None
+            fp, span = None, None
+        st = db.stat()
+        row = {"name": db.name, "mtime_ns": st.st_mtime_ns, "size": st.st_size}
+        if span is not None:
+            row["span"] = [span[0], span[1]]
+        elif db.name in new_dbs and new_dbs[db.name].get("span"):
+            row["span"] = new_dbs[db.name]["span"]
         if fp is not None:
+            row["fingerprint"] = fp
             fingerprints.append(fp)
+        new_dbs[db.name] = row
         _checkpoint(ledger_path, ledger, now, jpi_dir, flights_dir)
         _release_memory()
-    flags = flags_from_fingerprints(fingerprints)
-    ledger["flags"] = flags
+    # Drop dbs that no longer exist, keep live/since-skipped rows' prior stamps.
+    present = {path.name for path in dbs}
+    ledger["dbs"] = [new_dbs[name] for name in sorted(new_dbs) if name in present]
+    if to_open:
+        flags = flags_from_fingerprints(fingerprints)
+        ledger["flags"] = flags
+    else:
+        flags = ledger.get("flags") or []
+        # Still recompute if we have a complete fingerprint set.
+        if fingerprints and len(fingerprints) >= len(selected):
+            flags = flags_from_fingerprints(fingerprints)
+            ledger["flags"] = flags
     ledger["updated"] = now
     ledger["jpi_dir"] = str(jpi_dir)
     ledger["flights_dir"] = str(flights_dir)
@@ -131,22 +175,24 @@ def _one_db(
     apply: bool,
     window_s: float,
     now: str,
-) -> dict | None:
+) -> tuple[dict | None, tuple[float, float] | None]:
     fp_holder: list = [None]
+    span_holder: list = [None]
     box = [_connect(db, write=False)]
     try:
         _one_db_work(
-            box, fp_holder, db, files, spans, ledger, apply=apply, window_s=window_s, now=now
+            box, fp_holder, span_holder, db, files, spans, ledger, apply=apply, window_s=window_s, now=now
         )
     finally:
         _release_memory()
-    return fp_holder[0]
+    return fp_holder[0], span_holder[0]
 
 
-def _one_db_work(box, fp_holder, db, files, spans, ledger, *, apply, window_s, now) -> None:
+def _one_db_work(box, fp_holder, span_holder, db, files, spans, ledger, *, apply, window_s, now) -> None:
     conn = box[0]
     try:
         span = _db_span(conn)
+        span_holder[0] = span
         if span is None:
             _record(ledger, _attempt(now, db.name, status="skipped", reason="no gps or press_alt span"))
             print(f"  {db.name}: no time span")
@@ -518,17 +564,239 @@ def _set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
     )
 
 
-def _catalog_downloads(jpi_dir: Path) -> tuple[list[dict], list[dict]]:
-    """File hashes and flight time spans. Sample arrays are not kept."""
+
+def _file_ledger_row(item: dict) -> dict:
+    return {
+        "name": item["name"],
+        "sha256": item["sha256"],
+        "flights": item["flights"],
+        "error": item["error"],
+        "mtime_ns": item.get("mtime_ns"),
+        "size": item.get("size"),
+        "spans": item.get("spans") or [],
+    }
+
+
+def _ledger_updated_unix(ledger: dict) -> float | None:
+    raw = ledger.get("updated")
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(str(raw), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def _jpi_file_unchanged(st, old: dict | None, updated_unix: float | None) -> bool:
+    if not old or not old.get("sha256"):
+        return False
+    if old.get("mtime_ns") == st.st_mtime_ns and old.get("size") == st.st_size:
+        return True
+    # Bootstrap from a ledger written before mtime/size were stored.
+    if old.get("mtime_ns") is None and updated_unix is not None and st.st_mtime <= updated_unix + 2:
+        return True
+    return False
+
+
+def _db_stamp_tuple(path: Path) -> tuple[int, int]:
+    st = path.stat()
+    return st.st_mtime_ns, st.st_size
+
+
+def _db_unchanged(path: Path, prev: dict | None, updated_unix: float | None, considered: set[str] | None = None) -> bool:
+    st = path.stat()
+    if prev and prev.get("mtime_ns") == st.st_mtime_ns and prev.get("size") == st.st_size:
+        return True
+    # Bootstrap from a ledger written before per-DB stamps were stored,
+    # but only for DBs that previous pass already considered. A brand-new
+    # file created just after that run must still be opened.
+    if (
+        prev is None
+        and considered is not None
+        and path.name in considered
+        and updated_unix is not None
+        and st.st_mtime <= updated_unix + 2
+    ):
+        return True
+    return False
+
+
+def _span_overlaps_changed(span: tuple[float, float], changed_spans: list[dict], window_s: float) -> bool:
+    db0, db1 = span
+    for item in changed_spans:
+        if min(item["t1"] + window_s, db1) - max(item["t0"] - window_s, db0) > 0:
+            return True
+    return False
+
+
+def _partition_dbs(selected, files, spans, prev_dbs, n_jpi_changed, window_s, updated_unix, considered=None):
+    """Split selected DBs into those that need opening and those that do not."""
+    changed_spans = [s for item in files if not item.get("reused") for s in (item.get("spans") or [])]
+    # If a file changed but we have no spans yet, we cannot rule any DB out.
+    changed_without_spans = any(
+        (not item.get("reused")) and not (item.get("spans") or []) and not item.get("error")
+        for item in files
+    )
+    to_open = []
+    skipped = []
+    for db in selected:
+        prev = prev_dbs.get(db.name)
+        if not _db_unchanged(db, prev, updated_unix, considered):
+            to_open.append(db)
+            continue
+        if n_jpi_changed == 0:
+            skipped.append(db)
+            continue
+        if changed_without_spans:
+            to_open.append(db)
+            continue
+        span = None
+        if prev and prev.get("span") and len(prev["span"]) == 2:
+            span = (float(prev["span"][0]), float(prev["span"][1]))
+        if span is None or _span_overlaps_changed(span, changed_spans, window_s):
+            to_open.append(db)
+        else:
+            skipped.append(db)
+    return to_open, skipped
+
+
+def _ensure_spans(files: list[dict], spans: list[dict]) -> None:
+    """Parse reused files that never had spans stored, but only when a DB will be opened."""
+    for item in files:
+        if item.get("error") or (item.get("spans") or []) or not item.get("reused"):
+            continue
+        try:
+            download = parse_file(item["path"])
+        except (ParseError, OSError) as exc:
+            item["error"] = str(exc)
+            continue
+        file_spans = []
+        if download is not None:
+            item["flights"] = len(download.flights)
+            for flight in download.flights:
+                if not flight.samples or flight.start is None or flight.end is None:
+                    continue
+                file_spans.append(
+                    {
+                        "name": item["name"],
+                        "t0": flight.start.replace(tzinfo=timezone.utc).timestamp(),
+                        "t1": flight.end.replace(tzinfo=timezone.utc).timestamp(),
+                    }
+                )
+        item["spans"] = file_spans
+        spans.extend(file_spans)
+
+
+def _touch_unchanged_attempts(ledger: dict, now: str, db_name: str) -> None:
+    """Refresh ledger rows for a DB we did not need to open."""
+    attempts = [row for row in ledger.get("attempts") or [] if row.get("db") == db_name]
+    if not attempts:
+        return
+    skipped = [
+        row
+        for row in attempts
+        if row.get("status") == "skipped" and "already merged" in (row.get("reason") or "")
+    ]
+    if skipped:
+        for row in skipped:
+            _record(
+                ledger,
+                _attempt(
+                    now,
+                    db_name,
+                    jpi_file=row.get("jpi_file") or "",
+                    jpi_sha256=row.get("jpi_sha256") or "",
+                    jpi_flight_id=row.get("jpi_flight_id") or "",
+                    offset_s=row.get("offset_s"),
+                    drift_s_per_s=row.get("drift_s_per_s"),
+                    residual=row.get("residual"),
+                    residual_unit=row.get("residual_unit") or "",
+                    method=row.get("method") or "",
+                    status="skipped",
+                    reason=row.get("reason") or "already merged from this file",
+                ),
+            )
+        return
+    applied = [row for row in attempts if row.get("status") == "applied"]
+    if applied:
+        for row in applied:
+            _record(
+                ledger,
+                _attempt(
+                    now,
+                    db_name,
+                    jpi_file=row.get("jpi_file") or "",
+                    jpi_sha256=row.get("jpi_sha256") or "",
+                    jpi_flight_id=row.get("jpi_flight_id") or "",
+                    offset_s=row.get("offset_s"),
+                    drift_s_per_s=row.get("drift_s_per_s"),
+                    residual=row.get("residual"),
+                    residual_unit=row.get("residual_unit") or "",
+                    method=row.get("method") or "",
+                    status="skipped",
+                    reason="already merged from this file",
+                ),
+            )
+        return
+    # no_overlap / dry_run / refused: bump the latest row of that status.
+    latest = attempts[-1]
+    _record(
+        ledger,
+        _attempt(
+            now,
+            db_name,
+            jpi_file=latest.get("jpi_file") or "",
+            jpi_sha256=latest.get("jpi_sha256") or "",
+            jpi_flight_id=latest.get("jpi_flight_id") or "",
+            offset_s=latest.get("offset_s"),
+            drift_s_per_s=latest.get("drift_s_per_s"),
+            residual=latest.get("residual"),
+            residual_unit=latest.get("residual_unit") or "",
+            method=latest.get("method") or "",
+            status=latest.get("status") or "skipped",
+            reason=latest.get("reason") or "unchanged since last ingest",
+        ),
+    )
+
+
+def _catalog_downloads(jpi_dir: Path, ledger: dict | None = None) -> tuple[list[dict], list[dict], int]:
+    """File hashes and flight time spans. Sample arrays are not kept.
+
+    A file whose mtime and size still match the ledger is reused without
+    hashing or parsing. On the first run after this check was added, a
+    file whose mtime is not newer than the ledger's ``updated`` stamp is
+    also reused (the previous pass already hashed those bytes).
+    """
     if not jpi_dir.is_dir():
-        return [], []
+        return [], [], 0
+    prev = {row["name"]: row for row in (ledger or {}).get("files") or [] if row.get("name")}
+    updated_unix = _ledger_updated_unix(ledger or {})
     files = []
-    spans = []
+    spans: list[dict] = []
+    n_changed = 0
     for path in sorted(jpi_dir.iterdir()):
         if not path.is_file() or path.suffix.lower() not in _SUFFIXES:
             continue
         if path.suffix.lower() in {".csv", ".txt"} and not path.name.upper().startswith("U"):
             continue
+        st = path.stat()
+        old = prev.get(path.name)
+        if _jpi_file_unchanged(st, old, updated_unix):
+            item = {
+                "path": path,
+                "name": path.name,
+                "sha256": old.get("sha256") or "",
+                "error": old.get("error") or "",
+                "flights": old.get("flights") or 0,
+                "mtime_ns": st.st_mtime_ns,
+                "size": st.st_size,
+                "spans": list(old.get("spans") or []),
+                "reused": True,
+            }
+            files.append(item)
+            spans.extend(item["spans"])
+            continue
+        n_changed += 1
         sha = _sha256(path)
         download: Download | None = None
         error = ""
@@ -539,23 +807,38 @@ def _catalog_downloads(jpi_dir: Path) -> tuple[list[dict], list[dict]]:
         except OSError as exc:
             error = str(exc)
         n_flights = 0 if download is None else len(download.flights)
-        files.append(
-            {"path": path, "name": path.name, "sha256": sha, "error": error, "flights": n_flights}
-        )
+        file_spans = []
         if download is not None:
             for flight in download.flights:
                 if not flight.samples or flight.start is None or flight.end is None:
                     continue
-                spans.append(
+                file_spans.append(
                     {
                         "name": path.name,
                         "t0": flight.start.replace(tzinfo=timezone.utc).timestamp(),
                         "t1": flight.end.replace(tzinfo=timezone.utc).timestamp(),
                     }
                 )
+        files.append(
+            {
+                "path": path,
+                "name": path.name,
+                "sha256": sha,
+                "error": error,
+                "flights": n_flights,
+                "mtime_ns": st.st_mtime_ns,
+                "size": st.st_size,
+                "spans": file_spans,
+                "reused": False,
+            }
+        )
+        spans.extend(file_spans)
         del download
+    # A disappeared file also counts as a change so overlapping DBs are re-checked.
+    current_names = {item["name"] for item in files}
+    n_changed += sum(1 for name in prev if name not in current_names)
     _release_memory()
-    return files, spans
+    return files, spans, n_changed
 
 
 def _downloads_for_span(files: list[dict], spans: list[dict], span: tuple[float, float], window_s: float) -> list[dict]:
@@ -758,17 +1041,18 @@ def _record(ledger: dict, attempt: dict) -> None:
 
 def _load_ledger(path: Path) -> dict:
     if not path.is_file():
-        return {"version": 1, "attempts": [], "flags": [], "files": []}
+        return {"version": 1, "attempts": [], "flags": [], "files": [], "dbs": []}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         print(f"ledger unreadable, starting a new one: {exc}", file=sys.stderr)
-        return {"version": 1, "attempts": [], "flags": [], "files": []}
+        return {"version": 1, "attempts": [], "flags": [], "files": [], "dbs": []}
     if not isinstance(data, dict):
-        return {"version": 1, "attempts": [], "flags": [], "files": []}
+        return {"version": 1, "attempts": [], "flags": [], "files": [], "dbs": []}
     data.setdefault("attempts", [])
     data.setdefault("flags", [])
     data.setdefault("files", [])
+    data.setdefault("dbs", [])
     return data
 
 

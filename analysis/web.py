@@ -199,8 +199,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _engine_summary(self) -> None:
         limits = load_limits(None)
-        reviews = review_all(self.flights_dir, limits, cache_dir=self.engine_cache)
-        flags = flag_sessions(self.flights_dir)
+        reviews, stats = review_all(self.flights_dir, limits, cache_dir=self.engine_cache)
+        if stats.get("n_reviewed") == 0 and self.engine_cache is not None:
+            prev = self.engine_cache / "summary.json"
+            try:
+                flags = json.loads(prev.read_text(encoding="utf-8")).get("flags") or []
+            except (OSError, json.JSONDecodeError):
+                flags = flag_sessions(self.flights_dir) if self.flights_dir.is_dir() else []
+        else:
+            flags = flag_sessions(self.flights_dir) if self.flights_dir.is_dir() else []
         self._send_json(200, summarize(reviews, flags))
 
 

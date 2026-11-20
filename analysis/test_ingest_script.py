@@ -111,6 +111,9 @@ class IngestArgvTests(unittest.TestCase):
         self.assertEqual(commands, ["jpi-auto", "engine"])
         self.assertEqual(invocations[0][invocations[0].index("scripts/analyze_flights.py") + 1], "--flights-dir")
         self.assertEqual(invocations[1][invocations[1].index("scripts/analyze_flights.py") + 1], "--flights-dir")
+        engine_argv = invocations[1]
+        self.assertIn("--changed", engine_argv)
+        self.assertNotIn("--all", engine_argv)
 
 
     def test_jpi_env_uv_overrides_path(self):
