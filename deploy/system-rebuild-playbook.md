@@ -91,6 +91,16 @@ sudo apt update && sudo apt install -y etckeeper
 sudo mkdir -p /etc/systemd/system.conf.d
 printf '[Manager]\nRuntimeWatchdogSec=15\n' | sudo tee /etc/systemd/system.conf.d/99-watchdog.conf
 
+# hung-task panic (2026-11-15, Eric approved). If a task stays in D-state 120s the
+# kernel panics and reboots 10s later. This did NOT catch the 2026-11-19 freeze.
+sudo tee /etc/sysctl.d/90-kingfisher-crash.conf >/dev/null <<'EOF'
+# 2026-11-15 crash logging (Eric approved). A hung task or panic reboots after 10 s and leaves a pstore record.
+# softlockup/hardlockup detectors are not built into this kernel (6.18.60+rpt-rpi-2712), so those knobs do not exist.
+kernel.panic = 10
+kernel.hung_task_panic = 1
+EOF
+sudo sysctl --system
+
 # passwordless sudo — via visudo:
 #   eric ALL=(ALL) NOPASSWD: ALL
 sudo EDITOR=vim visudo
@@ -106,7 +116,11 @@ sudo systemctl disable --now serial-getty@ttyAMA10.service
 # EEPROM (verify with: sudo rpi-eeprom-config)
 #   BOOT_UART=1, BOOT_ORDER=0xf461 (SD first, then NVMe, then USB — SD-first means an
 #   inserted card wins over the SSD; that's desirable while the SD is the fallback),
-#   NET_INSTALL_AT_POWER_ON=1, FIRMWARE_RELEASE_STATUS="latest" in /etc/default/rpi-eeprom-update
+#   NET_INSTALL_AT_POWER_ON=1, FIRMWARE_RELEASE_STATUS="latest" in /etc/default/rpi-eeprom-update,
+#   PSU_MAX_CURRENT=5000 (2026-11-20, Eric approved). The X1200 powers the Pi via pogo
+#   pins, so firmware never negotiates 5V/5A PD and would otherwise assume 3A.
+#   Apply with: rpi-eeprom-config --apply; takes effect on the next reboot.
+#   Do not set POWER_OFF_ON_HALT without a separate yes — it changes shutdown behaviour.
 ```
 
 ## Phase 3 — apt packages
@@ -568,3 +582,34 @@ install **Tailscale** on the Pi + laptop (zero-config WireGuard mesh; Pi reachab
 from your devices anywhere, no open ports, nothing else gains access). The node
 hostname is `kf-pi` (`sudo tailscale set --hostname=kf-pi`); MagicDNS is
 `kf-pi.mammut-alnitak.ts.net`. The secure option is also the convenient one here.
+
+## Temporary NVMe freeze diagnostics (2026-11-20)
+
+The 2026-11-19 hang left the Pi powered (LEDs on) with no undervoltage latch, while
+JPI ingest / engine review was in the middle of a heavy pass over `~/kingfisher/flights`
+(about 51 GiB). The 15s hardware watchdog and `hung_task_panic` were already on and
+did not reboot it. This service only *records* NVMe temperature and I/O so the next
+freeze has a last-seconds trace. It does not pet or withhold the watchdog, and it
+does not reboot the box.
+
+pstore/ramoops is already enabled (`dtoverlay=ramoops` in `config.txt`). This kernel
+does not build softlockup/hardlockup detectors, so those sysctls do not exist.
+
+```sh
+sudo install -m 755 deploy/nvme-trace/nvme-trace.sh /usr/local/bin/nvme-trace.sh
+sudo install -m 644 deploy/nvme-trace/nvme-trace.service /etc/systemd/system/nvme-trace.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now nvme-trace.service
+# log: /var/log/nvme-trace.log  (1 Hz, fsync per line, rotated at 32 MiB).
+# This kernel has no /proc/pressure/io, so psi_* fields log as NA.
+```
+
+Remove when the investigation is done:
+
+```sh
+sudo systemctl disable --now nvme-trace.service
+sudo rm -f /etc/systemd/system/nvme-trace.service /usr/local/bin/nvme-trace.sh
+sudo systemctl daemon-reload
+# optional: sudo rm -f /var/log/nvme-trace.log*
+```
+

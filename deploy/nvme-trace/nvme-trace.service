@@ -1,0 +1,22 @@
+# Temporary diagnostic (2026-11-20, Eric approved). Read-only NVMe/I/O sampler
+# for freeze forensics. Does not reboot and does not touch kingfisher.service.
+# Remove: sudo systemctl disable --now nvme-trace.service
+#         sudo rm -f /etc/systemd/system/nvme-trace.service /usr/local/bin/nvme-trace.sh
+#         sudo systemctl daemon-reload
+
+[Unit]
+Description=Temporary NVMe temperature and I/O trace (freeze forensics)
+Documentation=file:///home/eric/go/src/github.com/westphae/kingfisher/deploy/system-rebuild-playbook.md
+DefaultDependencies=no
+After=local-fs.target
+Before=shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+ExecStart=/usr/local/bin/nvme-trace.sh 1
+Restart=always
+RestartSec=1
+Nice=10
+
+[Install]
+WantedBy=sysinit.target
