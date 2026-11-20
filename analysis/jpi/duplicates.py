@@ -9,19 +9,112 @@ does not block a merge.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
 
-def flag_sessions(flights_dir: Path) -> list[dict]:
-    """Current flags. Recomputed every run; not a history."""
+def flag_sessions(
+    flights_dir: Path,
+    *,
+    cache_dir: Path | None = None,
+    force: bool = False,
+    previous_flags: list[dict] | None = None,
+) -> list[dict]:
+    """Current flags. Recomputed every run; not a history.
+
+    When ``cache_dir`` is set, fingerprints are reused for databases
+    whose mtime and size have not changed, so an incremental engine
+    pass does not open every flight DB just to refresh flags.
+    ``force`` (``engine --all``) recomputes every fingerprint.
+    """
     flights_dir = Path(flights_dir)
+    cache_path = Path(cache_dir) / "fingerprints.json" if cache_dir is not None else None
+    cached = _load_fp_cache(cache_path)
+    summary_mtime = None
+    if cache_dir is not None:
+        try:
+            summary_mtime = (Path(cache_dir) / "summary.json").stat().st_mtime
+        except OSError:
+            summary_mtime = None
     fingerprints = []
+    new_cache: dict[str, dict] = {}
+    incomplete = False
     for path in sorted(flights_dir.glob("*.db")):
-        fp = _fingerprint(path)
+        try:
+            st = path.stat()
+        except OSError:
+            incomplete = True
+            continue
+        stamp = f"{st.st_mtime_ns}:{st.st_size}"
+        prev = cached.get(path.name) or {}
+        if not force and prev.get("stamp") == stamp and prev.get("pending"):
+            # Still waiting on a full fingerprint; do not open the DB.
+            new_cache[path.name] = {"stamp": stamp, "pending": True}
+            incomplete = True
+            continue
+        if not force and prev.get("stamp") == stamp and "fp" in prev:
+            fp = prev.get("fp")
+        elif not force and not prev and summary_mtime is not None and st.st_mtime <= summary_mtime + 2:
+            # First incremental run: keep previous flags and do not walk
+            # every historical DB just to rebuild a cache.
+            new_cache[path.name] = {"stamp": stamp, "pending": True}
+            incomplete = True
+            continue
+        else:
+            fp = _fingerprint(path)
+        new_cache[path.name] = {"stamp": stamp, "fp": fp}
         if fp is not None:
             fingerprints.append(fp)
-    return flags_from_fingerprints(fingerprints)
+    _store_fp_cache(cache_path, new_cache)
+    flags = flags_from_fingerprints(fingerprints)
+    if incomplete and previous_flags:
+        return _merge_flags(previous_flags, flags, set(new_cache))
+    return flags
+
+
+def _load_fp_cache(path: Path | None) -> dict:
+    if path is None or not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _store_fp_cache(path: Path | None, cache: dict) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(cache, indent=2, allow_nan=False), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _merge_flags(previous: list[dict], fresh: list[dict], present: set[str]) -> list[dict]:
+    """Keep previous flags for sessions we did not re-fingerprint, plus new ones."""
+    out = []
+    seen = set()
+
+    def key(flag: dict) -> tuple:
+        return (flag.get("kind"), tuple(flag.get("sessions") or []))
+
+    for flag in previous:
+        sessions = [name for name in (flag.get("sessions") or []) if name in present]
+        if len(sessions) != len(flag.get("sessions") or []):
+            continue
+        item = dict(flag)
+        item["sessions"] = sessions
+        out.append(item)
+        seen.add(key(item))
+    for flag in fresh:
+        k = key(flag)
+        if k in seen:
+            continue
+        out.append(flag)
+        seen.add(k)
+    return out
 
 
 def flags_from_fingerprints(fingerprints: list[dict]) -> list[dict]:

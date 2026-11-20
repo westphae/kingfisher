@@ -370,6 +370,28 @@ def _csv_overlap(path: Path) -> None:
 
 
 class IncrementalTests(unittest.TestCase):
+    def test_flag_sessions_cache_does_not_reopen(self):
+        from analysis.jpi.duplicates import flag_sessions
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            flights = root / "flights"
+            cache = root / "cache"
+            flights.mkdir()
+            cache.mkdir()
+            _db(flights / "20260712T210041Z.db", gs=51.25, rows=80)
+            _db(flights / "20260718T165100Z.db", gs=51.25, rows=80)
+            # Make DBs older than the summary so the first incremental
+            # pass bootstraps without opening them.
+            past = time.time() - 120
+            for path in flights.glob("*.db"):
+                os.utime(path, (past, past))
+            prev = [{"kind": "suspected_duplicate", "sessions": ["20260712T210041Z.db", "20260718T165100Z.db"]}]
+            (cache / "summary.json").write_text(json.dumps({"flags": prev}), encoding="utf-8")
+            with mock.patch("analysis.jpi.duplicates._fingerprint") as fp:
+                flags = flag_sessions(flights, cache_dir=cache, previous_flags=prev)
+            fp.assert_not_called()
+            self.assertEqual(flags[0]["kind"], "suspected_duplicate")
+
     def test_noop_does_not_parse_hash_or_open(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

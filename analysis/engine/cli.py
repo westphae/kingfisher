@@ -102,18 +102,25 @@ def cmd_engine(args: argparse.Namespace) -> int:
         f"{stats['n_reused']} reused, force={int(force)}",
         file=sys.stderr,
     )
-    if stats["n_reviewed"] == 0 and cache is not None and (cache / "summary.json").is_file():
+    previous = {}
+    if cache is not None and (cache / "summary.json").is_file():
         try:
             previous = json.loads((cache / "summary.json").read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             previous = {}
-        flags = previous.get("flags") or []
-        # Rebuild so counts stay consistent with the reused reviews.
-        summary = summarize(reviews, flags) if reviews else previous
-        if not reviews and previous:
-            summary = previous
+    if flights_dir.is_dir():
+        flags = flag_sessions(
+            flights_dir,
+            cache_dir=cache,
+            force=force,
+            previous_flags=previous.get("flags") or [],
+        )
     else:
-        flags = flag_sessions(flights_dir) if flights_dir.is_dir() else []
+        flags = previous.get("flags") or []
+    if not reviews and previous:
+        summary = dict(previous)
+        summary["flags"] = flags
+    else:
         summary = summarize(reviews, flags)
     if cache is not None:
         cache.mkdir(parents=True, exist_ok=True)
